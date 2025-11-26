@@ -1,0 +1,358 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index fd20af211f..a8e2ea34b2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -64,7 +64,13 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON )
+ 
+ # Path to KiCad's CMake modules.
+ set( KICAD_CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" )
+-set( CMAKE_MODULE_PATH       "${KICAD_CMAKE_MODULE_PATH}" )
++
++# Preserve any user-provided CMAKE_MODULE_PATH (e.g. for kicad-wasm overrides)
++if(CMAKE_MODULE_PATH)
++    set( CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${KICAD_CMAKE_MODULE_PATH}" )
++else()
++    set( CMAKE_MODULE_PATH "${KICAD_CMAKE_MODULE_PATH}" )
++endif()
+ 
+ include( ConfigurePlatform )
+ 
+diff --git a/common/CMakeLists.txt b/common/CMakeLists.txt
+index 56e516acad..f29ae853ef 100644
+--- a/common/CMakeLists.txt
++++ b/common/CMakeLists.txt
+@@ -71,29 +71,6 @@ set( KICOMMON_SRCS
+     gal/color4d.cpp
+     gal/opengl/gl_context_mgr.cpp
+ 
+-    # Git
+-    git/git_add_to_index_handler.cpp
+-    git/git_branch_handler.cpp
+-    git/git_clone_handler.cpp
+-    git/git_commit_handler.cpp
+-    git/git_config_handler.cpp
+-    git/git_compare_handler.cpp
+-    git/git_init_handler.cpp
+-    git/project_git_utils.cpp
+-    git/git_pull_handler.cpp
+-    git/git_push_handler.cpp
+-    git/git_remove_from_index_handler.cpp
+-    git/git_remove_vcs_handler.cpp
+-    git/git_resolve_conflict_handler.cpp
+-    git/git_revert_handler.cpp
+-    git/git_status_handler.cpp
+-    git/git_switch_branch_handler.cpp
+-    git/git_sync_handler.cpp
+-    git/kicad_git_common.cpp
+-    git/kicad_git_errors.cpp
+-    git/git_backend.cpp
+-    git/libgit_backend.cpp
+-
+     # Jobs
+     jobs/job.cpp
+     jobs/job_dispatcher.cpp
+@@ -134,12 +111,6 @@ set( KICOMMON_SRCS
+     jobs/job_pcb_upgrade.cpp
+     jobs/job_sch_upgrade.cpp
+ 
+-    local_history.cpp
+-    history_lock.cpp
+-
+-    kicad_curl/kicad_curl.cpp
+-    kicad_curl/kicad_curl_easy.cpp
+-
+     libraries/library_manager.cpp
+     libraries/library_table.cpp
+     libraries/library_table_parser.cpp
+@@ -280,6 +251,54 @@ if( UNIX AND NOT APPLE )
+     )
+ endif()
+ 
++# Git files - only include when git support is enabled
++if( KICAD_USE_GIT )
++    list( APPEND KICOMMON_SRCS
++        local_history.cpp
++        history_lock.cpp
++        git/git_add_to_index_handler.cpp
++        git/git_branch_handler.cpp
++        git/git_clone_handler.cpp
++        git/git_commit_handler.cpp
++        git/git_config_handler.cpp
++        git/git_compare_handler.cpp
++        git/git_init_handler.cpp
++        git/project_git_utils.cpp
++        git/git_pull_handler.cpp
++        git/git_push_handler.cpp
++        git/git_remove_from_index_handler.cpp
++        git/git_remove_vcs_handler.cpp
++        git/git_resolve_conflict_handler.cpp
++        git/git_revert_handler.cpp
++        git/git_status_handler.cpp
++        git/git_switch_branch_handler.cpp
++        git/git_sync_handler.cpp
++        git/kicad_git_common.cpp
++        git/kicad_git_errors.cpp
++        git/git_backend.cpp
++        git/libgit_backend.cpp
++    )
++endif()
++
++# CURL files - only include when curl support is enabled
++if( KICAD_USE_CURL )
++    list( APPEND KICOMMON_SRCS
++        kicad_curl/kicad_curl.cpp
++        kicad_curl/kicad_curl_easy.cpp
++    )
++endif()
++
++# Stub implementations for disabled features
++if( NOT KICAD_USE_GIT OR NOT KICAD_USE_CURL )
++    # Use absolute path to stub implementations
++    set( STUBS_SRC_DIR "${CMAKE_SOURCE_DIR}/../stubs/src" )
++    if( EXISTS "${STUBS_SRC_DIR}/disabled_features_stubs.cpp" )
++        list( APPEND KICOMMON_SRCS
++            "${STUBS_SRC_DIR}/disabled_features_stubs.cpp"
++        )
++    endif()
++endif()
++
+ if( KICAD_IPC_API )
+     set( KICOMMON_SRCS
+         ${KICOMMON_SRCS}
+@@ -322,12 +341,10 @@ target_link_libraries( kicommon
+     nlohmann_json_schema_validator
+     FastFloat::fast_float
+     fmt::fmt
+-    CURL::libcurl
+     picosha2
+     rapidcsv
+     ${ZSTD_LIBRARY}
+     ${wxWidgets_LIBRARIES}
+-    ${LIBGIT2_LIBRARIES}
+     ${SPNAV_LIBRARIES}
+ 
+     # needed by kiid to allow linking for Boost for the UUID against bcrypt (msys2 only)
+@@ -342,6 +359,15 @@ target_link_libraries( kicommon
+     ${PYTHON_LIBRARIES}
+     )
+ 
++# Conditional library links for optional features
++if( KICAD_USE_CURL )
++    target_link_libraries( kicommon CURL::libcurl )
++endif()
++
++if( KICAD_USE_GIT )
++    target_link_libraries( kicommon ${LIBGIT2_LIBRARIES} )
++endif()
++
+ 
+ if( KICAD_USE_SENTRY )
+     target_link_libraries( kicommon
+@@ -417,16 +443,30 @@ set( COMMON_ABOUT_DLG_SRCS
+     dialog_about/dialog_about_base.cpp
+     )
+ 
++# Git dialog sources - only include when git support is enabled
++# panel_git_repos_base.cpp has no git dependencies, so it's always compiled
+ set( COMMON_GIT_DLG_SRCS
+-    dialogs/git/dialog_git_commit.cpp
+-    dialogs/git/dialog_git_switch.cpp
+-    dialogs/git/dialog_git_auth.cpp
+-    dialogs/git/dialog_git_repository.cpp
+-    dialogs/git/dialog_git_repository_base.cpp
+-    dialogs/git/panel_git_repos.cpp
+     dialogs/git/panel_git_repos_base.cpp
++)
+ 
++if( KICAD_USE_GIT )
++    list( APPEND COMMON_GIT_DLG_SRCS
++        dialogs/git/dialog_git_commit.cpp
++        dialogs/git/dialog_git_switch.cpp
++        dialogs/git/dialog_git_auth.cpp
++        dialogs/git/dialog_git_repository.cpp
++        dialogs/git/dialog_git_repository_base.cpp
++        dialogs/git/panel_git_repos.cpp
+     )
++else()
++    # Add stub implementation for PANEL_GIT_REPOS when git is disabled
++    set( STUBS_SRC_DIR "${CMAKE_SOURCE_DIR}/../stubs/src" )
++    if( EXISTS "${STUBS_SRC_DIR}/panel_git_repos_stub.cpp" )
++        list( APPEND COMMON_GIT_DLG_SRCS
++            "${STUBS_SRC_DIR}/panel_git_repos_stub.cpp"
++        )
++    endif()
++endif()
+ 
+ set( COMMON_DLG_SRCS
+     ${COMMON_GIT_DLG_SRCS}
+diff --git a/eeschema/CMakeLists.txt b/eeschema/CMakeLists.txt
+index 1be2c291d1..bca563201a 100644
+--- a/eeschema/CMakeLists.txt
++++ b/eeschema/CMakeLists.txt
+@@ -697,15 +697,17 @@ if( APPLE )
+         set( OSX_BUNDLE_BUILD_KIFACE_DIR \"${OSX_BUNDLE_BUILD_KIFACE_DIR}\" )
+     " )
+ 
+-    # bundle libngspice and codemodels
+-    get_filename_component( ABS_LIBNGSPICE ${NGSPICE_LIBRARY} ABSOLUTE )
+-    get_filename_component( LIBNGSPICE_PATH ${ABS_LIBNGSPICE} DIRECTORY )
+-
+-    install( DIRECTORY "${LIBNGSPICE_PATH}/"
+-            DESTINATION "${OSX_BUNDLE_INSTALL_PLUGIN_DIR}/sim"
+-            FILES_MATCHING PATTERN "*.dylib")
+-    install( DIRECTORY "${LIBNGSPICE_PATH}/ngspice"
+-             DESTINATION "${OSX_BUNDLE_INSTALL_PLUGIN_DIR}/sim" )
++    # bundle libngspice and codemodels (only when ngspice is enabled)
++    if( KICAD_USE_NGSPICE AND NGSPICE_LIBRARY )
++        get_filename_component( ABS_LIBNGSPICE ${NGSPICE_LIBRARY} ABSOLUTE )
++        get_filename_component( LIBNGSPICE_PATH ${ABS_LIBNGSPICE} DIRECTORY )
++
++        install( DIRECTORY "${LIBNGSPICE_PATH}/"
++                DESTINATION "${OSX_BUNDLE_INSTALL_PLUGIN_DIR}/sim"
++                FILES_MATCHING PATTERN "*.dylib")
++        install( DIRECTORY "${LIBNGSPICE_PATH}/ngspice"
++                 DESTINATION "${OSX_BUNDLE_INSTALL_PLUGIN_DIR}/sim" )
++    endif()
+ 
+     install( CODE [[
+         include( ${KICAD_CMAKE_MODULE_PATH}/InstallSteps/InstallMacOS.cmake )
+diff --git a/kicad/CMakeLists.txt b/kicad/CMakeLists.txt
+index b7e78725d0..c615c9022c 100644
+--- a/kicad/CMakeLists.txt
++++ b/kicad/CMakeLists.txt
+@@ -37,7 +37,6 @@ set( KICAD_SRCS
+     import_proj.cpp
+     import_project.cpp
+     kicad_manager_frame.cpp
+-    local_history_pane.cpp
+     menubar.cpp
+     project_template.cpp
+     project_tree_pane.cpp
+@@ -50,6 +49,21 @@ set( KICAD_SRCS
+     tools/kicad_manager_control.cpp
+     )
+ 
++# Local history pane requires git support
++if( KICAD_USE_GIT )
++    list( APPEND KICAD_SRCS
++        local_history_pane.cpp
++    )
++else()
++    # Add comprehensive git stubs when git is disabled
++    set( STUBS_SRC_DIR "${CMAKE_SOURCE_DIR}/../stubs/src" )
++    if( EXISTS "${STUBS_SRC_DIR}/kicad_git_all_stubs.cpp" )
++        list( APPEND KICAD_SRCS
++            "${STUBS_SRC_DIR}/kicad_git_all_stubs.cpp"
++        )
++    endif()
++endif()
++
+ set( KICAD_CLI_SRCS
+     cli/command.cpp
+     cli/command_jobset_run.cpp
+diff --git a/pcbnew/CMakeLists.txt b/pcbnew/CMakeLists.txt
+index 7ea9bdcda5..ba0be19156 100644
+--- a/pcbnew/CMakeLists.txt
++++ b/pcbnew/CMakeLists.txt
+@@ -248,15 +248,6 @@ set( PCBNEW_EXPORTERS
+     exporters/export_gencad.cpp
+     exporters/export_gencad_writer.cpp
+     exporters/export_idf.cpp
+-    exporters/step/exporter_step.cpp
+-    exporters/step/kicad3d_info.cpp
+-    exporters/step/step_pcb_model.cpp
+-    exporters/step/KI_XCAFDoc_AssemblyGraph.cxx
+-    exporters/u3d/bit_stream_writer.cpp
+-    exporters/u3d/constants.cpp
+-    exporters/u3d/context_manager.cpp
+-    exporters/u3d/data_block.cpp
+-    exporters/u3d/writer.cpp
+     exporters/exporter_vrml.cpp
+     exporters/place_file_exporter.cpp
+     exporters/gen_drill_report_files.cpp
+@@ -267,6 +258,24 @@ set( PCBNEW_EXPORTERS
+     exporters/gerber_placefile_writer.cpp
+     )
+ 
++# STEP and U3D exporter files - require OpenCASCADE
++if( KICAD_USE_OCC )
++    list( APPEND PCBNEW_SRCS
++        exporters/step/exporter_step.cpp
++        exporters/step/kicad3d_info.cpp
++        exporters/step/step_pcb_model.cpp
++        exporters/step/KI_XCAFDoc_AssemblyGraph.cxx
++        exporters/u3d/bit_stream_writer.cpp
++        exporters/u3d/constants.cpp
++        exporters/u3d/context_manager.cpp
++        exporters/u3d/data_block.cpp
++        exporters/u3d/writer.cpp
++    )
++else()
++    # OCC is disabled - stubs will be added to PCBNEW_SRCS after it is defined (around line 491)
++    message(STATUS "PCBNEW: KICAD_USE_OCC is OFF")
++endif()
++
+ set( PCBNEW_MICROWAVE_SRCS
+     microwave/microwave_footprint.cpp
+     microwave/microwave_inductor.cpp
+@@ -459,9 +468,14 @@ set( PCBNEW_CLASS_SRCS
+ 
+     )
+ 
+-set( PCBNEW_GIT_SRCS
+-    git/kigit_pcb_merge.cpp
++# Git sources - only include when git support is enabled
++if( KICAD_USE_GIT )
++    set( PCBNEW_GIT_SRCS
++        git/kigit_pcb_merge.cpp
+     )
++else()
++    set( PCBNEW_GIT_SRCS "" )
++endif()
+ 
+ set( PCBNEW_SRCS
+     ${PCBNEW_MICROWAVE_SRCS}
+@@ -480,10 +494,27 @@ set( PCBNEW_SCRIPTING_PYTHON_HELPERS
+     python/scripting/pcbnew_footprint_wizards.cpp
+     python/scripting/pcbnew_scripting_helpers.cpp
+     python/scripting/pcbnew_scripting.cpp
+-    python/scripting/pcbnew_utils_3d.cpp
+     python/scripting/pcb_scripting_tool.cpp
+     )
+ 
++# 3D utils require OpenCASCADE
++if( KICAD_USE_OCC )
++    list( APPEND PCBNEW_SCRIPTING_PYTHON_HELPERS
++        python/scripting/pcbnew_utils_3d.cpp
++    )
++else()
++    # Add OCC stub implementations when OCC is disabled
++    set( STUBS_SRC_DIR "${CMAKE_SOURCE_DIR}/../stubs/src" )
++    if( EXISTS "${STUBS_SRC_DIR}/occ_stubs.cpp" )
++        message(STATUS "PCBNEW: Adding occ_stubs.cpp to PCBNEW_SRCS")
++        list( APPEND PCBNEW_SRCS
++            "${STUBS_SRC_DIR}/occ_stubs.cpp"
++        )
++    else()
++        message(WARNING "PCBNEW: occ_stubs.cpp NOT FOUND at ${STUBS_SRC_DIR}/occ_stubs.cpp")
++    endif()
++endif()
++
+ if( KICAD_IPC_API )
+     set( PCBNEW_SRCS ${PCBNEW_SRCS}
+         api/api_handler_pcb.cpp
+diff --git a/plugins/3d/CMakeLists.txt b/plugins/3d/CMakeLists.txt
+index 9c5e4095ae..ceda7f3aae 100644
+--- a/plugins/3d/CMakeLists.txt
++++ b/plugins/3d/CMakeLists.txt
+@@ -1,3 +1,7 @@
+ add_subdirectory( idf )
+ add_subdirectory( vrml )
+-add_subdirectory( oce )
+\ No newline at end of file
++
++# OCC plugin requires OpenCASCADE
++if( KICAD_USE_OCC )
++    add_subdirectory( oce )
++endif()
+\ No newline at end of file
