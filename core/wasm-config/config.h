@@ -10,7 +10,7 @@
 // Platform detection for timing functions
 #if defined(_WIN32)
     // Windows uses GetSystemTimeAsFileTime
-#elif defined(__APPLE__) || defined(__linux__) || defined(__unix__)
+#elif defined(__EMSCRIPTEN__) || defined(__APPLE__) || defined(__linux__) || defined(__unix__)
     #define HAVE_CLOCK_GETTIME 1
 #else
     #define HAVE_GETTIMEOFDAY_FUNC 1

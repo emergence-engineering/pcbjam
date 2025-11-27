@@ -15,6 +15,32 @@ endif()
 message(STATUS "Using KiCad source at: ${KICAD_SOURCE}")
 
 # =============================================================================
+# wxWidgets Base (pre-built for WASM)
+# =============================================================================
+set(WXWIDGETS_SOURCE "${CMAKE_SOURCE_DIR}/../wxwidgets" CACHE PATH "Path to wxWidgets source")
+set(WXWIDGETS_BUILD "${CMAKE_SOURCE_DIR}/../build-wasm/wxwidgets" CACHE PATH "Path to wxWidgets WASM build")
+
+# Verify wxWidgets build exists
+if(NOT EXISTS "${WXWIDGETS_BUILD}/lib/libwx_baseu-3.2-Emscripten.a")
+    message(FATAL_ERROR "wxBase WASM build not found. Run scripts/build-wxbase-wasm.sh first")
+endif()
+
+# Create imported wxBase library
+add_library(wxbase STATIC IMPORTED)
+set_target_properties(wxbase PROPERTIES
+    IMPORTED_LOCATION "${WXWIDGETS_BUILD}/lib/libwx_baseu-3.2-Emscripten.a"
+)
+
+# wxWidgets include directories
+set(WX_INCLUDE_DIRS
+    "${WXWIDGETS_BUILD}/lib/wx/include/base-unicode-static-3.2"  # Platform setup.h
+    "${WXWIDGETS_SOURCE}/include"                                  # Main wx headers
+)
+
+message(STATUS "Using wxWidgets source at: ${WXWIDGETS_SOURCE}")
+message(STATUS "Using wxWidgets build at: ${WXWIDGETS_BUILD}")
+
+# =============================================================================
 # Options
 # =============================================================================
 option(KICAD_CORE_VERBOSE "Enable verbose logging in core library" OFF)
@@ -45,19 +71,23 @@ target_include_directories(rtree INTERFACE
 )
 
 # =============================================================================
-# Core utilities library (minimal version without wx_stl_compat)
+# Core utilities library (with wxBase support)
 # =============================================================================
 add_library(kicad_core_utils STATIC
     ${KICAD_SOURCE}/libs/core/base64.cpp
     ${KICAD_SOURCE}/libs/core/observable.cpp
     ${KICAD_SOURCE}/libs/core/profile.cpp
-    # Skip utf8.cpp and wx_stl_compat.cpp - they have heavy wx dependencies
+    ${KICAD_SOURCE}/libs/core/utf8.cpp
+    ${KICAD_SOURCE}/libs/core/wx_stl_compat.cpp
 )
 
 target_include_directories(kicad_core_utils PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/wasm-config    # config.h for WASM build
+    ${WX_INCLUDE_DIRS}
     ${KICAD_SOURCE}/libs/core/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/include  # For wx_shim.h
 )
+
+target_link_libraries(kicad_core_utils PUBLIC wxbase)
 
 # =============================================================================
 # S-expression library (parser for .kicad_pcb files)
@@ -68,9 +98,11 @@ add_library(sexpr STATIC
 )
 
 target_include_directories(sexpr PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include    # wx_shim.h - FIRST!
+    ${CMAKE_CURRENT_SOURCE_DIR}/wasm-config    # config.h for WASM build
+    ${WX_INCLUDE_DIRS}
     ${KICAD_SOURCE}/libs/sexpr/include
     ${KICAD_SOURCE}/libs/core/include
+    ${KICAD_SOURCE}/include                    # string_utils.h, etc.
 )
 
 target_link_libraries(sexpr PUBLIC kicad_core_utils)
@@ -121,7 +153,7 @@ set(KIMATH_SRCS
 add_library(kimath STATIC ${KIMATH_SRCS})
 
 target_include_directories(kimath PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include    # wx_shim.h and wx/ stubs - FIRST!
+    ${WX_INCLUDE_DIRS}
     ${KICAD_SOURCE}/libs/kimath/include
     ${KICAD_SOURCE}/libs/core/include
     ${KICAD_SOURCE}/include                # Main KiCad includes (units, etc.)
