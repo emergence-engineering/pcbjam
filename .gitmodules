@@ -3,4 +3,7 @@
 	url = git@github.com:VV-EE/kicad-source-mirror.git
 [submodule "wxwidgets"]
 	path = wxwidgets
-	url = https://github.com/wxWidgets/wxWidgets.git
+	url = git@github.com:VV-EE/wxWidgets.git
+[submodule "wxWidgets-wasm-reference"]
+	path = wxWidgets-wasm-reference
+	url = git@github.com:ahilss/wxWidgets-wasm.git
