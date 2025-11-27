@@ -31,6 +31,12 @@ set_target_properties(wxbase PROPERTIES
     IMPORTED_LOCATION "${WXWIDGETS_BUILD}/lib/libwx_baseu-3.2-Emscripten.a"
 )
 
+# Create imported wxRegex library (for wxRegEx support)
+add_library(wxregex STATIC IMPORTED)
+set_target_properties(wxregex PROPERTIES
+    IMPORTED_LOCATION "${WXWIDGETS_BUILD}/lib/libwxregexu-3.2.a"
+)
+
 # wxWidgets include directories
 set(WX_INCLUDE_DIRS
     "${WXWIDGETS_BUILD}/lib/wx/include/base-unicode-static-3.2"  # Platform setup.h
@@ -44,6 +50,17 @@ message(STATUS "Using wxWidgets build at: ${WXWIDGETS_BUILD}")
 # Options
 # =============================================================================
 option(KICAD_CORE_VERBOSE "Enable verbose logging in core library" OFF)
+
+# =============================================================================
+# Thirdparty include directories
+# =============================================================================
+set(THIRDPARTY_INCLUDE_DIRS
+    "${KICAD_SOURCE}/thirdparty/fmt/include"
+    "${KICAD_SOURCE}/thirdparty/nlohmann_json"
+    "${KICAD_SOURCE}/thirdparty/magic_enum/magic_enum"   # magic_enum.hpp is here
+    "${KICAD_SOURCE}/thirdparty/dynamic_bitset"
+    "${KICAD_SOURCE}/thirdparty/pybind11/include"
+)
 
 # =============================================================================
 # Clipper2 library (for polygon boolean operations)
@@ -87,7 +104,7 @@ target_include_directories(kicad_core_utils PUBLIC
     ${KICAD_SOURCE}/libs/core/include
 )
 
-target_link_libraries(kicad_core_utils PUBLIC wxbase)
+target_link_libraries(kicad_core_utils PUBLIC wxbase wxregex)
 
 # =============================================================================
 # S-expression library (parser for .kicad_pcb files)
@@ -175,10 +192,77 @@ if(KICAD_CORE_VERBOSE)
 endif()
 
 # =============================================================================
+# Board data model library
+# =============================================================================
+
+# Common infrastructure sources
+set(COMMON_SRCS
+    ${KICAD_SOURCE}/common/eda_item.cpp
+    ${KICAD_SOURCE}/common/eda_shape.cpp
+    ${KICAD_SOURCE}/common/eda_text.cpp
+    ${KICAD_SOURCE}/common/lset.cpp
+    ${KICAD_SOURCE}/common/layer_id.cpp
+    ${KICAD_SOURCE}/common/title_block.cpp
+    ${KICAD_SOURCE}/common/page_info.cpp
+    ${KICAD_SOURCE}/common/common.cpp
+    ${KICAD_SOURCE}/common/eda_units.cpp
+    ${KICAD_SOURCE}/common/kiid.cpp
+    ${KICAD_SOURCE}/common/marker_base.cpp
+)
+
+# PCB board model sources
+set(BOARD_MODEL_SRCS
+    ${KICAD_SOURCE}/pcbnew/board.cpp
+    ${KICAD_SOURCE}/pcbnew/board_item.cpp
+    ${KICAD_SOURCE}/pcbnew/board_connected_item.cpp
+    ${KICAD_SOURCE}/pcbnew/footprint.cpp
+    ${KICAD_SOURCE}/pcbnew/pad.cpp
+    ${KICAD_SOURCE}/pcbnew/pcb_track.cpp
+    ${KICAD_SOURCE}/pcbnew/zone.cpp
+    ${KICAD_SOURCE}/pcbnew/pcb_shape.cpp
+    ${KICAD_SOURCE}/pcbnew/pcb_text.cpp
+    ${KICAD_SOURCE}/pcbnew/pcb_field.cpp
+    ${KICAD_SOURCE}/pcbnew/pcb_group.cpp
+    ${KICAD_SOURCE}/pcbnew/netinfo_item.cpp
+    ${KICAD_SOURCE}/pcbnew/netinfo_list.cpp
+    ${KICAD_SOURCE}/pcbnew/padstack.cpp
+    ${KICAD_SOURCE}/pcbnew/zone_settings.cpp
+    ${KICAD_SOURCE}/pcbnew/board_design_settings.cpp
+)
+
+add_library(board_model STATIC
+    ${COMMON_SRCS}
+    ${BOARD_MODEL_SRCS}
+)
+
+target_include_directories(board_model PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/wasm-config
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${WX_INCLUDE_DIRS}
+    ${THIRDPARTY_INCLUDE_DIRS}
+    ${KICAD_SOURCE}/include
+    ${KICAD_SOURCE}/pcbnew
+    ${KICAD_SOURCE}/libs/kimath/include
+    ${KICAD_SOURCE}/libs/core/include
+)
+
+target_link_libraries(board_model PUBLIC
+    kimath
+    sexpr
+    kicad_core_utils
+)
+
+target_compile_definitions(board_model PRIVATE
+    KICAD_CORE_ONLY=1
+    PCBNEW=1
+)
+
+# =============================================================================
 # Combined kicad_core library
 # =============================================================================
 add_library(kicad_core INTERFACE)
 target_link_libraries(kicad_core INTERFACE
+    board_model
     kimath
     sexpr
     kicad_core_utils

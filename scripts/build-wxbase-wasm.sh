@@ -42,7 +42,7 @@ emcmake cmake "$WX_SOURCE" \
     -DwxBUILD_TESTS=OFF \
     -DwxBUILD_DEMOS=OFF \
     -DwxBUILD_BENCHMARKS=OFF \
-    -DwxUSE_REGEX=OFF \
+    -DwxUSE_REGEX=builtin \
     -DwxUSE_ZLIB=OFF \
     -DwxUSE_EXPAT=OFF \
     -DwxUSE_LIBJPEG=OFF \
