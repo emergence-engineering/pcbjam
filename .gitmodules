@@ -1,3 +1,6 @@
 [submodule "kicad"]
 	path = kicad
 	url = git@github.com:VV-EE/kicad-source-mirror.git
+[submodule "wxwidgets"]
+	path = wxwidgets
+	url = https://github.com/wxWidgets/wxWidgets.git
