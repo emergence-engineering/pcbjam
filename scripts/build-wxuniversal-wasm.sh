@@ -1,6 +1,19 @@
 #!/bin/bash
 # Build wxWidgets with wxUniversal for WebAssembly
 # This builds the GUI-enabled wxWidgets needed for KiCad
+#
+# Prerequisites:
+# - Emscripten SDK installed and activated
+# - autoconf (for regenerating configure from configure.in)
+#
+# To regenerate Makefile.in from bakefiles (after modifying files.bkl):
+#   cd wxwidgets/build/bakefiles
+#   docker run --rm -v "$(pwd)/../..":"$(pwd)/../.." -w "$(pwd)" \
+#     ghcr.io/vslavik/bakefile:0.2 bakefile_gen
+#
+# Usage:
+#   ./build-wxuniversal-wasm.sh           # Build (incremental)
+#   ./build-wxuniversal-wasm.sh --clean   # Clean build
 
 set -e
 
@@ -15,10 +28,16 @@ echo "Build dir: $BUILD_DIR"
 echo "wxWidgets source: $WX_SOURCE"
 
 # Verify we're in the right place
-if [ ! -f "$WX_SOURCE/configure" ]; then
+if [ ! -f "$WX_SOURCE/configure.in" ]; then
     echo "ERROR: wxWidgets source not found at $WX_SOURCE"
     echo "Make sure the wxwidgets submodule is initialized"
     exit 1
+fi
+
+# Regenerate configure if configure.in is newer
+if [ "$WX_SOURCE/configure.in" -nt "$WX_SOURCE/configure" ]; then
+    echo "configure.in is newer than configure, regenerating..."
+    (cd "$WX_SOURCE" && autoconf)
 fi
 
 # Clean if requested
@@ -64,9 +83,15 @@ emconfigure "$WX_SOURCE/configure" \
     --with-cxx=17 \
     --enable-utf8
 
-# Build
+# Build PCRE first to avoid race condition with parallel builds
+# PCRE headers (pcre2.h) must be generated before regex.cpp compiles
 echo ""
-echo "=== Building ==="
+echo "=== Building PCRE first (dependency) ==="
+emmake make -C 3rdparty/pcre
+
+# Build wxWidgets
+echo ""
+echo "=== Building wxWidgets ==="
 emmake make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
 echo ""
