@@ -352,13 +352,16 @@ void GLTestCanvas::Render()
 }
 
 // Test 1: Immediate Mode Drawing (glBegin/glEnd) - KiCad uses this heavily
+// Using STANDARD OpenGL patterns (color once, multiple vertices)
+// This tests the GL shim that handles Emscripten's color-per-vertex requirement
 void GLTestCanvas::TestImmediateMode()
 {
     wxPrintf("[GL TEST] Testing immediate mode (glBegin/glEnd)...\n");
+    wxPrintf("[GL TEST] Using STANDARD OpenGL patterns (color set once per primitive)\n");
     fflush(stdout);
 
     // Test GL_TRIANGLES with glVertex3f and glColor3f
-    // RGB triangle - each vertex has a different color
+    // RGB triangle - each vertex has a different color (smooth shading)
     glBegin(GL_TRIANGLES);
         glColor3f(1.0f, 0.0f, 0.0f);  // Red
         glVertex3f(-1.0f, -0.5f, 0.0f);
@@ -369,50 +372,39 @@ void GLTestCanvas::TestImmediateMode()
     glEnd();
 
     // Test GL_QUADS with glVertex2f and glColor4f
-    // NOTE: Emscripten's immediate mode requires color per vertex, not OpenGL's "current color" semantic
+    // STANDARD OPENGL: Set color ONCE, then multiple vertices
+    // The GL shim should inject color before each vertex automatically
+    glColor4f(1.0f, 1.0f, 0.0f, 0.8f);  // Yellow, semi-transparent - SET ONCE
     glBegin(GL_QUADS);
-        glColor4f(1.0f, 1.0f, 0.0f, 0.8f);  // Yellow, semi-transparent
-        glVertex2f(-1.8f, -1.8f);
-        glColor4f(1.0f, 1.0f, 0.0f, 0.8f);
+        glVertex2f(-1.8f, -1.8f);  // All 4 vertices use the same yellow color
         glVertex2f(-1.2f, -1.8f);
-        glColor4f(1.0f, 1.0f, 0.0f, 0.8f);
         glVertex2f(-1.2f, -1.2f);
-        glColor4f(1.0f, 1.0f, 0.0f, 0.8f);
         glVertex2f(-1.8f, -1.2f);
     glEnd();
 
-    // Test GL_LINES with glVertex3f (glVertex2d not supported in Emscripten)
-    // NOTE: color per vertex required
+    // Test GL_LINES with standard pattern
+    // STANDARD OPENGL: Set color ONCE, then multiple vertices
+    glColor3f(1.0f, 1.0f, 1.0f);  // White - SET ONCE
     glBegin(GL_LINES);
-        glColor3f(1.0f, 1.0f, 1.0f);  // White
         glVertex3f(-1.5f, 1.5f, 0.0f);
-        glColor3f(1.0f, 1.0f, 1.0f);
         glVertex3f(1.5f, 1.5f, 0.0f);
     glEnd();
 
-    // Test GL_LINE_STRIP
-    // NOTE: color per vertex required
+    // Test GL_LINE_STRIP with standard pattern
+    glColor3f(0.0f, 1.0f, 1.0f);  // Cyan - SET ONCE
     glBegin(GL_LINE_STRIP);
-        glColor3f(0.0f, 1.0f, 1.0f);  // Cyan
         glVertex3f(1.2f, -1.8f, 0.0f);
-        glColor3f(0.0f, 1.0f, 1.0f);
         glVertex3f(1.4f, -1.4f, 0.0f);
-        glColor3f(0.0f, 1.0f, 1.0f);
         glVertex3f(1.6f, -1.6f, 0.0f);
-        glColor3f(0.0f, 1.0f, 1.0f);
         glVertex3f(1.8f, -1.2f, 0.0f);
     glEnd();
 
-    // Test GL_LINE_LOOP
-    // NOTE: color per vertex required
+    // Test GL_LINE_LOOP with standard pattern
+    glColor3f(1.0f, 0.0f, 1.0f);  // Magenta - SET ONCE
     glBegin(GL_LINE_LOOP);
-        glColor3f(1.0f, 0.0f, 1.0f);  // Magenta
         glVertex3f(1.2f, 1.2f, 0.0f);
-        glColor3f(1.0f, 0.0f, 1.0f);
         glVertex3f(1.8f, 1.2f, 0.0f);
-        glColor3f(1.0f, 0.0f, 1.0f);
         glVertex3f(1.8f, 1.8f, 0.0f);
-        glColor3f(1.0f, 0.0f, 1.0f);
         glVertex3f(1.2f, 1.8f, 0.0f);
     glEnd();
 
@@ -421,26 +413,24 @@ void GLTestCanvas::TestImmediateMode()
 }
 
 // Test 2: Matrix Operations - KiCad uses glPushMatrix/glPopMatrix extensively
+// Using STANDARD OpenGL patterns (color once, multiple vertices)
 void GLTestCanvas::TestMatrixOperations()
 {
     wxPrintf("[GL TEST] Testing matrix operations...\n");
     fflush(stdout);
 
-    // Draw centered triangle
-    // NOTE: Emscripten requires color per vertex
+    // Draw centered triangle with standard GL pattern
     glPushMatrix();
         glTranslatef(0.0f, 0.0f, 0.0f);
+        glColor3f(0.5f, 0.5f, 0.5f);  // Gray - SET ONCE
         glBegin(GL_TRIANGLES);
-            glColor3f(0.5f, 0.5f, 0.5f);
             glVertex3f(-0.3f, -0.3f, 0.0f);
-            glColor3f(0.5f, 0.5f, 0.5f);
             glVertex3f(0.3f, -0.3f, 0.0f);
-            glColor3f(0.5f, 0.5f, 0.5f);
             glVertex3f(0.0f, 0.3f, 0.0f);
         glEnd();
     glPopMatrix();
 
-    // Draw 4 rotated/translated copies
+    // Draw 4 rotated/translated copies with standard GL pattern
     for (int i = 0; i < 4; i++) {
         glPushMatrix();
             float angle = i * 90.0f;
@@ -451,20 +441,16 @@ void GLTestCanvas::TestMatrixOperations()
             glRotatef(angle, 0.0f, 0.0f, 1.0f);
             glScalef(0.5f, 0.5f, 1.0f);
 
-            // Draw colored square
-            // NOTE: Emscripten requires color per vertex
+            // Draw colored square with standard GL pattern
             float r = (i == 0 || i == 3) ? 1.0f : 0.3f;
             float g = (i == 1 || i == 3) ? 1.0f : 0.3f;
             float b = (i == 2 || i == 3) ? 1.0f : 0.3f;
 
+            glColor3f(r, g, b);  // SET ONCE before glBegin
             glBegin(GL_QUADS);
-                glColor3f(r, g, b);
                 glVertex3f(-0.5f, -0.5f, 0.0f);
-                glColor3f(r, g, b);
                 glVertex3f(0.5f, -0.5f, 0.0f);
-                glColor3f(r, g, b);
                 glVertex3f(0.5f, 0.5f, 0.0f);
-                glColor3f(r, g, b);
                 glVertex3f(-0.5f, 0.5f, 0.0f);
             glEnd();
         glPopMatrix();
@@ -530,6 +516,7 @@ void GLTestCanvas::TestVertexArrays()
 }
 
 // Test 4: State Management - glEnable/glDisable, blending
+// Using STANDARD OpenGL patterns with separate glBegin/glEnd for each color
 void GLTestCanvas::TestStateManagement()
 {
     wxPrintf("[GL TEST] Testing state management...\n");
@@ -539,24 +526,30 @@ void GLTestCanvas::TestStateManagement()
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Draw overlapping semi-transparent squares
+    // Draw overlapping semi-transparent squares using standard GL pattern
+    // Each quad has its own color set before glBegin
+
+    // Red square
+    glColor4f(1.0f, 0.0f, 0.0f, 0.5f);  // SET ONCE
     glBegin(GL_QUADS);
-        // Red square
-        glColor4f(1.0f, 0.0f, 0.0f, 0.5f);
         glVertex2f(-1.0f, -1.0f);
         glVertex2f(0.5f, -1.0f);
         glVertex2f(0.5f, 0.5f);
         glVertex2f(-1.0f, 0.5f);
+    glEnd();
 
-        // Green square
-        glColor4f(0.0f, 1.0f, 0.0f, 0.5f);
+    // Green square
+    glColor4f(0.0f, 1.0f, 0.0f, 0.5f);  // SET ONCE
+    glBegin(GL_QUADS);
         glVertex2f(-0.5f, -0.5f);
         glVertex2f(1.0f, -0.5f);
         glVertex2f(1.0f, 1.0f);
         glVertex2f(-0.5f, 1.0f);
+    glEnd();
 
-        // Blue square
-        glColor4f(0.0f, 0.0f, 1.0f, 0.5f);
+    // Blue square
+    glColor4f(0.0f, 0.0f, 1.0f, 0.5f);  // SET ONCE
+    glBegin(GL_QUADS);
         glVertex2f(0.0f, 0.0f);
         glVertex2f(1.5f, 0.0f);
         glVertex2f(1.5f, 1.5f);
@@ -570,13 +563,14 @@ void GLTestCanvas::TestStateManagement()
 }
 
 // Test 5: Texture coordinates (no actual texture, just testing the calls)
+// Note: glTexCoord is per-vertex anyway, and color is set once before glBegin
 void GLTestCanvas::TestTexCoords()
 {
     wxPrintf("[GL TEST] Testing texture coordinates...\n");
     fflush(stdout);
 
+    glColor3f(0.8f, 0.8f, 0.8f);  // SET ONCE
     glBegin(GL_QUADS);
-        glColor3f(0.8f, 0.8f, 0.8f);
         glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, -1.0f);
         glTexCoord2f(1.0f, 0.0f); glVertex2f(1.0f, -1.0f);
         glTexCoord2f(1.0f, 1.0f); glVertex2f(1.0f, 1.0f);
@@ -588,13 +582,14 @@ void GLTestCanvas::TestTexCoords()
 }
 
 // Test 6: Normal vectors (for lighting, which we're not testing but calls should work)
+// Note: glNormal is per-vertex, and color is set once before glBegin
 void GLTestCanvas::TestNormals()
 {
     wxPrintf("[GL TEST] Testing normal vectors...\n");
     fflush(stdout);
 
+    glColor3f(0.7f, 0.7f, 0.9f);  // SET ONCE
     glBegin(GL_TRIANGLES);
-        glColor3f(0.7f, 0.7f, 0.9f);
         glNormal3f(0.0f, 0.0f, 1.0f);
         glVertex3f(-1.0f, -1.0f, 0.0f);
         glNormal3f(0.0f, 0.0f, 1.0f);

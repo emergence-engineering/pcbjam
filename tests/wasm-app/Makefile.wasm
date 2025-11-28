@@ -20,9 +20,13 @@ CXXFLAGS = -O2 $(WX_CXXFLAGS)
 # Note: Cannot combine LEGACY_GL_EMULATION with FULL_ES2 - they are mutually exclusive
 EM_GL_FLAGS = -sLEGACY_GL_EMULATION -sMAX_WEBGL_VERSION=2
 
+# GL immediate mode shim - fixes Emscripten's color-per-vertex requirement
+# and provides missing glVertex2d/glColor4d implementations
+GL_SHIM = ../../lib/gl_immediate_shim.js
+
 LDFLAGS = -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
           -s "EXPORTED_RUNTIME_METHODS=['HEAPU8','HEAP8','HEAP32']" \
-          $(EM_GL_FLAGS) $(WX_LDFLAGS)
+          $(EM_GL_FLAGS) --js-library=$(GL_SHIM) $(WX_LDFLAGS)
 
 JS = $(TOOLS_ROOT)/wx.js
 HTML = $(TOOLS_ROOT)/template.html
