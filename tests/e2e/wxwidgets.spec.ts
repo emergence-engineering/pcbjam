@@ -194,6 +194,58 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
 
     await page.screenshot({ path: 'test-results/10-lists-clicked.png', fullPage: true });
 
+    // Test wxChoice dropdown - the Choice control is to the right of the ListBox
+    console.log('--- Testing wxChoice Dropdown ---');
+
+    // Debug: Check all window divs in the DOM before clicking
+    const windowsBefore = await page.evaluate(() => {
+      const windows = document.querySelectorAll('[id^="window-"]');
+      return Array.from(windows).map(w => ({
+        id: w.id,
+        display: (w as HTMLElement).style.display,
+        rect: w.getBoundingClientRect()
+      }));
+    });
+    console.log('Windows before click:', JSON.stringify(windowsBefore));
+
+    // Click on the wxChoice dropdown button (approximately right side of the panel)
+    // The Choice section is in a separate box to the right, starts around x=640
+    // The wxChoice dropdown button (arrow) is at approximately x=800
+    await page.mouse.click(box.x + 800, box.y + 100);
+    await page.waitForTimeout(500);
+
+    // Debug: Check all window divs in the DOM after clicking
+    const windowsAfter = await page.evaluate(() => {
+      const windows = document.querySelectorAll('[id^="window-"]');
+      return Array.from(windows).map(w => ({
+        id: w.id,
+        display: (w as HTMLElement).style.display,
+        width: (w as HTMLElement).style.width,
+        height: (w as HTMLElement).style.height,
+        rect: w.getBoundingClientRect()
+      }));
+    });
+    console.log('Windows after click:', JSON.stringify(windowsAfter));
+
+    await page.screenshot({ path: 'test-results/10a-choice-dropdown-open.png', fullPage: true });
+
+    // Click on the second option in the dropdown (should be "Green")
+    // Dropdown appears below the wxChoice, options are around x=700-800
+    await page.mouse.click(box.x + 700, box.y + 140);
+    await page.waitForTimeout(300);
+
+    await page.screenshot({ path: 'test-results/10b-choice-selected.png', fullPage: true });
+
+    // Try opening the dropdown again to verify it works
+    await page.mouse.click(box.x + 800, box.y + 100);
+    await page.waitForTimeout(500);
+
+    await page.screenshot({ path: 'test-results/10c-choice-dropdown-reopen.png', fullPage: true });
+
+    // Click elsewhere to close
+    await page.mouse.click(box.x + 200, box.y + 300);
+    await page.waitForTimeout(300);
+
     // === TAB 5: OpenGL ===
     console.log('--- Testing OpenGL Tab ---');
 

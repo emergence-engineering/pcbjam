@@ -39,3 +39,4 @@ wxwidgets-clean/
 /tests/wasm-app/*.js
 /tests/wasm-app/minimal_test.wasm
 /temp/
+*.log

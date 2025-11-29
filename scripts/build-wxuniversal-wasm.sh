@@ -12,8 +12,8 @@
 #     ghcr.io/vslavik/bakefile:0.2 bakefile_gen
 #
 # Usage:
-#   ./build-wxuniversal-wasm.sh           # Build (incremental)
-#   ./build-wxuniversal-wasm.sh --clean   # Clean build
+#   ./build-wxuniversal-wasm.sh              # Clean build (default)
+#   ./build-wxuniversal-wasm.sh --no-clean   # Incremental build
 
 set -e
 
@@ -40,9 +40,9 @@ if [ "$WX_SOURCE/configure.in" -nt "$WX_SOURCE/configure" ]; then
     (cd "$WX_SOURCE" && autoconf)
 fi
 
-# Clean if requested
-if [ "$1" = "--clean" ]; then
-    echo "Cleaning build directory..."
+# Clean by default, unless --no-clean is passed
+if [ "$1" != "--no-clean" ]; then
+    echo "Cleaning build directory (use --no-clean to skip)..."
     rm -rf "$BUILD_DIR"
 fi
 
