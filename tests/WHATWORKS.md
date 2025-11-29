@@ -227,6 +227,80 @@ cd tests/wasm-app && ./build-test-apps.sh
 
 ---
 
+## Baseline Screenshots
+
+The test suite captures screenshots during test runs for visual regression testing. These screenshots are compared against a baseline to detect unexpected visual changes.
+
+### Directory Structure
+
+```
+tests/
+├── baseline-screenshots/     # Known-good reference screenshots (121 files)
+├── test-results/            # Screenshots from latest test run
+└── wasm-app/
+    └── e2e/                 # Playwright test specs
+```
+
+### Comparing Screenshots
+
+Use the comparison script to check for visual regressions:
+
+```bash
+./scripts/compare-screenshots.sh
+```
+
+This will:
+- Compare all baseline screenshots with current test results
+- Report identical, different, and missing screenshots
+- Show file size differences (useful for detecting changes)
+
+Example output:
+```
+=== Screenshot Comparison ===
+Baseline:     /path/to/tests/baseline-screenshots
+Test Results: /path/to/tests/test-results
+
+=== Comparing Baseline Screenshots ===
+DIFFERENT: dialogs-msgbox-info-open.png (baseline: 47468B, current: 47478B, diff: 10B / .02%)
+
+=== Summary ===
+Total baseline screenshots: 121
+Identical:                  54
+Different:                  67
+Missing from test results:  0
+```
+
+### Understanding Differences
+
+Small byte differences (<2%) are typically caused by:
+- **Timestamps** in event logs (e.g., `[19:45:35]` vs `[18:49:35]`)
+- **PNG compression** variations between runs
+- **Anti-aliasing** differences
+
+These are **not** visual regressions. Visually inspect screenshots if you see larger differences.
+
+### Updating Baseline Screenshots
+
+After verifying changes are intentional, update the baseline:
+
+```bash
+# Copy current screenshots to baseline
+cp tests/test-results/*.png tests/baseline-screenshots/
+
+# Or selectively update specific screenshots
+cp tests/test-results/dialog-*.png tests/baseline-screenshots/
+```
+
+### Running Tests with Screenshots
+
+```bash
+cd tests/wasm-app
+npm test                    # Run all tests (saves screenshots to test-results/)
+npx playwright test --ui    # Interactive mode with screenshot preview
+```
+
+---
+
 ## Screenshots Reference
 
 | Screenshot | Shows |
