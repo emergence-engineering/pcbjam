@@ -4,7 +4,7 @@ Last updated: 2025-11-29
 
 ## Test Summary
 
-**79 Playwright tests pass, 12 failing (button position issues in new tests)**
+**83 Playwright tests pass, 8 failing (timer/tree coordinate issues)**
 
 | Category | Status | Notes |
 |----------|--------|-------|
@@ -12,8 +12,8 @@ Last updated: 2025-11-29
 | Standalone Apps | WORKS | 10 standalone test apps |
 | wxGrid | BROKEN | Crashes with "memory access out of bounds" |
 | wxTreeCtrl | BROKEN | Crashes on startup |
-| wxTimer | WORKS | Timer test app works |
-| wxDialog | PARTIAL | App works, dialogs don't render |
+| wxTimer | PARTIAL | Timer test app works, some tests have coordinate issues |
+| wxDialog | WORKS | Modal dialogs render correctly with Asyncify |
 
 ---
 
@@ -101,11 +101,12 @@ This section maps KiCad's wxWidgets usage to our test coverage.
 - **Evidence**: tree-01-loaded.png shows red error "Exception thrown, see JavaScript console"
 - **Note**: Similar crash pattern to wxGrid - both may have same underlying issue
 
-### wxMessageBox/wxDialog - NO VISUAL POPUP
-- **Status**: Events fire but no dialog appears
+### wxMessageBox/wxDialog - WORKING ✓
+- **Status**: Modal dialogs render correctly with Asyncify
 - **KiCad Impact**: MEDIUM - Alert messages, confirmations
-- **Evidence**: dialogs-msgbox-info-open.png shows buttons but no popup
-- **Behavior**: "Showing Info message box" logged, then immediately "closed"
+- **Evidence**: dialog-02-info-clicked.png shows Info dialog with icon, title, message, OK button
+- **Fix**: Enabled Asyncify in build flags (`-sASYNCIFY=1 -sASYNCIFY_IMPORTS=['startModal']`)
+- **Details**: ShowModal() now properly blocks until user closes dialog
 
 ### wxClipboard - LIMITED
 - **Status**: App loads but "Could not open clipboard" errors
@@ -128,8 +129,8 @@ Organized in `wasm-app/standalone/` folders:
 | clipboard/clipboard_test | WORKS* | 6/6 | Copy/paste (*limited) |
 | filedialog/filedialog_test | WORKS | 5/5 | Open/save dialogs |
 | grid/grid_test | BROKEN | 0/1 | Property grids |
-| dialog/dialog_test | WORKS | 1/5 | Alerts/confirmations |
-| timer/timer_test | WORKS | 1/4 | Auto-save, animations |
+| dialog/dialog_test | WORKS | 5/5 | Alerts/confirmations |
+| timer/timer_test | PARTIAL | 1/4 | Auto-save, animations |
 | tree/tree_test | BROKEN | 0/7 | Hierarchy browsers |
 
 ---
@@ -177,10 +178,10 @@ Organized in `wasm-app/standalone/` folders:
 - wxGrid: NOT WORKING (crashes in standalone, note shown in main app)
 
 ### Dialogs Tab
-- wxMessageBox buttons visible
-- wxDialog button visible
+- wxMessageBox: Info, Yes/No, Error dialogs render with icons and buttons
+- wxDialog: Custom dialogs render with title bar, content, OK/Cancel buttons
 - wxTimer: Start/Stop buttons, counter display
-- **Issue**: No visual popup dialogs appear
+- **Working**: Modal dialogs block and wait for user input via Asyncify
 
 ---
 
@@ -195,11 +196,11 @@ Organized in `wasm-app/standalone/` folders:
 6. List controls (wxListBox, wxChoice, wxComboBox)
 7. OpenGL rendering (immediate mode, vertex arrays, matrix ops)
 8. Drawing/painting (wxDC, mouse events)
+9. **wxMessageBox/wxDialog** - Modal dialogs with Asyncify
 
 ### Needs Work for KiCad
 1. **wxGrid** - Critical for property editors, DRC, BOM tables
-2. **wxMessageBox/wxDialog** - Alerts and confirmations
-3. **wxClipboard** - Copy/paste (browser limitations)
+2. **wxClipboard** - Copy/paste (browser limitations)
 
 ### Untested for KiCad
 1. wxTreeCtrl (hierarchy browser)
@@ -242,4 +243,6 @@ cd tests/wasm-app && ./build-test-apps.sh
 | layout-01-loaded.png | Splitter window |
 | spinctrl-01-visible.png | SpinCtrl and SearchCtrl |
 | wxgrid-dedicated-page.png | Grid crash error |
-| dialogs-msgbox-info-open.png | Dialog buttons (no popup) |
+| dialog-02-info-clicked.png | Info dialog with icon, message, OK button |
+| dialog-03-yesno-clicked.png | Yes/No/Cancel confirmation dialog |
+| dialogs-custom-open.png | Custom wxDialog modal |
