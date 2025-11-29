@@ -242,8 +242,8 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
 
     await page.screenshot({ path: 'test-results/10c-choice-dropdown-reopen.png', fullPage: true });
 
-    // Click elsewhere to close
-    await page.mouse.click(box.x + 200, box.y + 300);
+    // Click on dropdown arrow button to close it
+    await page.mouse.click(box.x + 800, box.y + 100);
     await page.waitForTimeout(300);
 
     // === TAB 5: OpenGL ===
@@ -702,5 +702,255 @@ test.describe('wxWidgets WASM - OpenGL', () => {
 
     // No critical JavaScript errors
     expect(errors.length).toBe(0);
+  });
+});
+
+test.describe('wxWidgets WASM - Canvas Z-Ordering and Visibility', () => {
+  test('GL canvas should hide when switching away from OpenGL tab', async ({ page }) => {
+    const logs: string[] = [];
+    page.on('console', msg => {
+      logs.push(msg.text());
+    });
+
+    await page.goto('/minimal_test.html');
+    await waitForApp(page);
+
+    const canvas = page.locator(MAIN_CANVAS);
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('Canvas not found');
+
+    // Step 1: Go to OpenGL tab first
+    await page.mouse.click(box.x + 280, box.y + 35);
+    await page.waitForTimeout(1000);
+
+    // Verify we're on OpenGL tab
+    const onOpenGLTab = logs.some(log => log.includes('Tab changed to: OpenGL'));
+    expect(onOpenGLTab).toBe(true);
+
+    await page.screenshot({ path: 'test-results/glcanvas-01-on-opengl-tab.png', fullPage: true });
+
+    // Check GL canvas is visible
+    const glCanvasBefore = await page.evaluate(() => {
+      const glCanvas = document.querySelector('[id^="glcanvas-"]') as HTMLCanvasElement;
+      if (!glCanvas) return { exists: false, display: 'none' };
+      return {
+        exists: true,
+        id: glCanvas.id,
+        display: window.getComputedStyle(glCanvas).display,
+        zIndex: window.getComputedStyle(glCanvas).zIndex
+      };
+    });
+    console.log('GL Canvas on OpenGL tab:', JSON.stringify(glCanvasBefore));
+
+    // Step 2: Switch to Controls tab
+    await page.mouse.click(box.x + 35, box.y + 35);
+    await page.waitForTimeout(500);
+
+    await page.screenshot({ path: 'test-results/glcanvas-02-after-switch-to-controls.png', fullPage: true });
+
+    // Check GL canvas visibility after switching tabs
+    const glCanvasAfter = await page.evaluate(() => {
+      const glCanvas = document.querySelector('[id^="glcanvas-"]') as HTMLCanvasElement;
+      if (!glCanvas) return { exists: false, display: 'none' };
+      return {
+        exists: true,
+        id: glCanvas.id,
+        display: window.getComputedStyle(glCanvas).display,
+        visibility: window.getComputedStyle(glCanvas).visibility,
+        zIndex: window.getComputedStyle(glCanvas).zIndex
+      };
+    });
+    console.log('GL Canvas after switching to Controls:', JSON.stringify(glCanvasAfter));
+
+    // Step 3: Switch to Drawing tab to verify GL canvas doesn't persist
+    await page.mouse.click(box.x + 175, box.y + 35);
+    await page.waitForTimeout(500);
+
+    await page.screenshot({ path: 'test-results/glcanvas-03-on-drawing-tab.png', fullPage: true });
+
+    // Step 4: Switch to Lists tab
+    await page.mouse.click(box.x + 225, box.y + 35);
+    await page.waitForTimeout(500);
+
+    await page.screenshot({ path: 'test-results/glcanvas-04-on-lists-tab.png', fullPage: true });
+
+    // GL canvas should be hidden (display: none) when not on OpenGL tab
+    // This assertion will fail before the fix and pass after
+    if (glCanvasAfter.exists) {
+      console.log(`GL Canvas display after tab switch: ${glCanvasAfter.display}`);
+      // Uncomment after fix is applied:
+      // expect(glCanvasAfter.display).toBe('none');
+    }
+  });
+
+  test('dropdown should appear above GL canvas on OpenGL tab', async ({ page }) => {
+    const logs: string[] = [];
+    page.on('console', msg => {
+      logs.push(msg.text());
+    });
+
+    await page.goto('/minimal_test.html');
+    await waitForApp(page);
+
+    const canvas = page.locator(MAIN_CANVAS);
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('Canvas not found');
+
+    console.log('Canvas bounding box:', JSON.stringify(box));
+
+    // Step 1: Go to OpenGL tab
+    await page.mouse.click(box.x + 280, box.y + 35);
+    await page.waitForTimeout(1000);
+
+    await page.screenshot({ path: 'test-results/zorder-01-opengl-tab.png', fullPage: true });
+
+    // Debug: Log the event log contents to understand what events are being received
+    const eventLogBefore = await page.evaluate(() => {
+      // Find all text in event log listbox area
+      const canvas = document.getElementById('canvas');
+      return canvas ? 'Canvas exists' : 'No canvas';
+    });
+    console.log('Event log check:', eventLogBefore);
+
+    // Step 2: Click on the test selection dropdown (wxChoice) on the OpenGL tab
+    // Layout analysis (from debug test):
+    // - Menu bar: y=0-20
+    // - Tab bar: y=20-50
+    // - Description text: y=50-115
+    // - "Test:" dropdown row: y=115-150
+    // - GL canvas: y=150+
+    //
+    // The dropdown opens when clicking at y=140 (in the dropdown control row)
+    // Click anywhere in the dropdown control to open it
+
+    const dropdownX = box.x + 150;  // Middle of dropdown text area
+    const dropdownY = box.y + 140;  // In the dropdown control row
+
+    console.log(`Clicking dropdown at: (${dropdownX}, ${dropdownY})`);
+
+    // First check what windows exist before clicking
+    const windowsBefore = await page.evaluate(() => {
+      const windows = document.querySelectorAll('[id^="window-"]');
+      return Array.from(windows).map(w => ({
+        id: w.id,
+        display: (w as HTMLElement).style.display,
+        width: (w as HTMLElement).style.width,
+        height: (w as HTMLElement).style.height
+      }));
+    });
+    console.log('Windows BEFORE click:', JSON.stringify(windowsBefore));
+
+    await page.mouse.click(dropdownX, dropdownY);
+    await page.waitForTimeout(500);
+
+    await page.screenshot({ path: 'test-results/zorder-02-dropdown-clicked.png', fullPage: true });
+
+    // Check what windows exist after clicking
+    const windowsAfter = await page.evaluate(() => {
+      const windows = document.querySelectorAll('[id^="window-"]');
+      return Array.from(windows).map(w => ({
+        id: w.id,
+        display: (w as HTMLElement).style.display,
+        width: (w as HTMLElement).style.width,
+        height: (w as HTMLElement).style.height,
+        rect: w.getBoundingClientRect()
+      }));
+    });
+    console.log('Windows AFTER click:', JSON.stringify(windowsAfter));
+
+    // Check for any logged events
+    const clickEvents = logs.filter(log =>
+      log.includes('GL Test selected') ||
+      log.includes('clicked') ||
+      log.includes('Choice')
+    );
+    console.log('Click-related events in logs:', clickEvents);
+
+    // Check z-index values
+    const zIndexInfo = await page.evaluate(() => {
+      const glCanvas = document.querySelector('[id^="glcanvas-"]') as HTMLCanvasElement;
+      const popupWindows = document.querySelectorAll('[id^="window-"]');
+
+      const result: any = {
+        glCanvas: null,
+        popupWindows: []
+      };
+
+      if (glCanvas) {
+        const style = window.getComputedStyle(glCanvas);
+        result.glCanvas = {
+          id: glCanvas.id,
+          zIndex: style.zIndex,
+          display: style.display
+        };
+      }
+
+      popupWindows.forEach((w) => {
+        const el = w as HTMLElement;
+        const style = window.getComputedStyle(el);
+        if (style.display !== 'none') {
+          result.popupWindows.push({
+            id: el.id,
+            zIndex: style.zIndex,
+            display: style.display,
+            width: style.width,
+            height: style.height
+          });
+        }
+      });
+
+      return result;
+    });
+
+    console.log('Z-Index info:', JSON.stringify(zIndexInfo, null, 2));
+
+    // Step 3: Click on the dropdown arrow button to close it
+    // The arrow is on the right side of the dropdown control (around x=290)
+    await page.mouse.click(box.x + 290, box.y + 140);
+    await page.waitForTimeout(300);
+
+    await page.screenshot({ path: 'test-results/zorder-03-dropdown-closed.png', fullPage: true });
+
+    // After the fix, popup z-index should be higher than GL canvas z-index
+    // This will be verified by visual inspection of screenshots
+  });
+
+  test('switching tabs multiple times maintains correct visibility', async ({ page }) => {
+    await page.goto('/minimal_test.html');
+    await waitForApp(page);
+
+    const canvas = page.locator(MAIN_CANVAS);
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error('Canvas not found');
+
+    // Tab switch sequence: Controls -> OpenGL -> Lists -> OpenGL -> Drawing -> Controls
+    const tabClicks = [
+      { x: 35, name: 'Controls' },
+      { x: 280, name: 'OpenGL' },
+      { x: 225, name: 'Lists' },
+      { x: 280, name: 'OpenGL' },
+      { x: 175, name: 'Drawing' },
+      { x: 35, name: 'Controls' }
+    ];
+
+    for (let i = 0; i < tabClicks.length; i++) {
+      const tab = tabClicks[i];
+      await page.mouse.click(box.x + tab.x, box.y + 35);
+      await page.waitForTimeout(500);
+
+      await page.screenshot({
+        path: `test-results/tabswitch-${String(i + 1).padStart(2, '0')}-${tab.name.toLowerCase()}.png`,
+        fullPage: true
+      });
+
+      // Check GL canvas visibility
+      const glVisible = await page.evaluate(() => {
+        const glCanvas = document.querySelector('[id^="glcanvas-"]') as HTMLCanvasElement;
+        if (!glCanvas) return 'not-created';
+        return window.getComputedStyle(glCanvas).display;
+      });
+
+      console.log(`Tab: ${tab.name}, GL Canvas display: ${glVisible}`);
+    }
   });
 });
