@@ -487,7 +487,9 @@ void GLTestCanvas::TestVertexArrays()
         0.5f, 0.0f, 1.0f   // Purple
     };
 
-    static GLubyte indices[] = {
+    // KiCad uses GL_UNSIGNED_SHORT or GL_UNSIGNED_INT for indices, never GL_UNSIGNED_BYTE
+    // Emscripten's legacy GL emulation only supports GL_UNSIGNED_SHORT for client-side arrays
+    static GLushort indices[] = {
         0, 1, 2,
         0, 2, 3,
         0, 3, 4,
@@ -504,8 +506,8 @@ void GLTestCanvas::TestVertexArrays()
     glVertexPointer(3, GL_FLOAT, 0, vertices);
     glColorPointer(3, GL_FLOAT, 0, colors);
 
-    // Draw using vertex arrays
-    glDrawElements(GL_TRIANGLES, 18, GL_UNSIGNED_BYTE, indices);
+    // Draw using vertex arrays (GL_UNSIGNED_SHORT matches KiCad's usage)
+    glDrawElements(GL_TRIANGLES, 18, GL_UNSIGNED_SHORT, indices);
 
     // Disable client state
     glDisableClientState(GL_COLOR_ARRAY);
