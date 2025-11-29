@@ -170,17 +170,18 @@ void TreeTestFrame::PopulateTree()
 
 void TreeTestFrame::LogEvent(const wxString& msg)
 {
+#ifdef __EMSCRIPTEN__
+    // Always log to console, even during early initialization
+    EM_ASM({
+        console.log('[TREE_EVENT] ' + UTF8ToString($0));
+    }, msg.c_str().AsChar());
+#endif
+
     // Guard against events firing before m_log is initialized
     if (!m_log)
         return;
     m_log->AppendText(msg + "\n");
     SetStatusText(msg);
-
-#ifdef __EMSCRIPTEN__
-    EM_ASM({
-        console.log('[TREE_EVENT] ' + UTF8ToString($0));
-    }, msg.c_str().AsChar());
-#endif
 }
 
 void TreeTestFrame::OnSelChanged(wxTreeEvent& evt)
