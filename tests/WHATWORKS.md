@@ -9,7 +9,7 @@ Last updated: 2025-12-03
 | Category | Status | Notes |
 |----------|--------|-------|
 | Main App Load | WORKS | minimal_test.html loads and renders correctly |
-| Standalone Apps | WORKS | 20 standalone test apps (159 total tests passing) |
+| Standalone Apps | WORKS | 25 standalone test apps (184 total tests passing) |
 | wxGrid | WORKS | Grid renders with cells, labels, and event handling |
 | wxTreeCtrl | WORKS | Tree renders with expand/collapse, selection, add/delete items |
 | wxTimer | PARTIAL | Timer test app works, some tests have coordinate issues |
@@ -25,6 +25,11 @@ Last updated: 2025-12-03
 | wxCollapsiblePane | WORKS | Expandable/collapsible property sections |
 | wxListCtrl (virtual) | WORKS | Virtual mode for 10000+ item lists |
 | wxInfoBar | WORKS | Notification bar for messages and warnings |
+| wxDataViewCtrl (virtual) | WORKS | Virtual mode for 10,000+ items in Zone Manager/Net Inspector |
+| wxAuiNotebook | WORKS | Closeable, reorderable tabbed panels |
+| wxWizard | WORKS | Step-by-step dialog for Footprint Wizard |
+| wxGrid cell editing | WORKS | Full editing support with text, number, choice, checkbox |
+| wxCalendarCtrl | WORKS | Date selection with navigation |
 
 ---
 
@@ -273,18 +278,25 @@ Organized in `wasm-app/standalone/` folders:
 22. **wxCollapsiblePane** - Expandable/collapsible property sections
 23. **wxListCtrl (virtual)** - Virtual mode for 10000+ item lists
 24. **wxInfoBar** - Notification bar for DRC messages, warnings
+25. **wxDataViewCtrl (virtual)** - Virtual mode for 10,000+ items (Zone Manager, Net Inspector)
+26. **wxAuiNotebook** - Closeable, reorderable tabbed panels
+27. **wxWizard** - Step-by-step Footprint Wizard dialog
+28. **wxGrid cell editing** - Full editing with text, number, choice, checkbox editors
+29. **wxCalendarCtrl** - Date picker with month/year navigation
 
-### Untested for KiCad - Remaining Gaps
+### All KiCad-Critical Features Tested
+
+All previously untested features have now been implemented and tested:
 
 | Feature | KiCad Usage | Priority | Status |
 |---------|-------------|----------|--------|
-| wxDataViewCtrl virtual mode | Zone Manager, Net Inspector (large data) | HIGH | NOT TESTED |
-| wxAuiNotebook | Tab panels (variant) | MEDIUM | NOT TESTED |
-| wxWizard | Footprint wizard | MEDIUM | NOT TESTED |
-| wxGrid cell editing | Property editing | MEDIUM | PARTIAL |
-| wxCalendarCtrl | Date selection | LOW | NOT TESTED |
+| wxDataViewCtrl virtual mode | Zone Manager, Net Inspector (large data) | HIGH | ✓ TESTED |
+| wxAuiNotebook | Tab panels (variant) | MEDIUM | ✓ TESTED |
+| wxWizard | Footprint wizard | MEDIUM | ✓ TESTED |
+| wxGrid cell editing | Property editing | MEDIUM | ✓ TESTED |
+| wxCalendarCtrl | Date selection | LOW | ✓ TESTED |
 
-**Current Coverage**: ~90% of KiCad-critical features tested (159 tests across 20 apps)
+**Current Coverage**: ~95% of KiCad-critical features tested (184 tests across 25 apps)
 
 ### Not Needed for KiCad
 1. wxRichTextCtrl - Disabled in WASM build, KiCad doesn't use it

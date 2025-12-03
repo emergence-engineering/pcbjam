@@ -26,6 +26,12 @@ WX_LDFLAGS_STC := $(shell $(WXCONFIG) --libs base,core,stc)
 # Libraries for PropGrid apps (propgrid_test needs propgrid)
 WX_LDFLAGS_PROPGRID := $(shell $(WXCONFIG) --libs base,core,propgrid)
 
+# Libraries for AUI apps (auinotebook needs aui)
+WX_LDFLAGS_AUI := $(shell $(WXCONFIG) --libs base,core,aui)
+
+# Libraries for ADV apps (wizard, calendar need adv)
+WX_LDFLAGS_ADV := $(shell $(WXCONFIG) --libs base,core,adv)
+
 # Debug or Release build
 ifdef DEBUG
     # Debug: DWARF info, source maps, minimal optimization
@@ -67,6 +73,12 @@ LDFLAGS_STC = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(WX_LDFLAGS_STC)
 # LDFLAGS for PropGrid apps (propgrid_test)
 LDFLAGS_PROPGRID = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(WX_LDFLAGS_PROPGRID)
 
+# LDFLAGS for AUI apps (auinotebook)
+LDFLAGS_AUI = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(WX_LDFLAGS_AUI)
+
+# LDFLAGS for ADV apps (wizard, calendar)
+LDFLAGS_ADV = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(WX_LDFLAGS_ADV)
+
 JS = $(TOOLS_ROOT)/wx.js
 HTML = $(TOOLS_ROOT)/template.html
 
@@ -93,7 +105,12 @@ all: minimal_test.html \
      $(S)/pickers/pickers_test.html \
      $(S)/collapsible/collapsible_test.html \
      $(S)/listctrl/listctrl_test.html \
-     $(S)/infobar/infobar_test.html
+     $(S)/infobar/infobar_test.html \
+     $(S)/dataviewvirtual/dataviewvirtual_test.html \
+     $(S)/auinotebook/auinotebook_test.html \
+     $(S)/wizard/wizard_test.html \
+     $(S)/gridedit/gridedit_test.html \
+     $(S)/calendar/calendar_test.html
 
 # Main test app (uses GL)
 minimal_test.o: minimal_test.cpp
@@ -242,6 +259,41 @@ $(S)/infobar/infobar_test.o: $(S)/infobar/infobar_test.cpp
 $(S)/infobar/infobar_test.html: $(S)/infobar/infobar_test.o
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
+# DataViewCtrl Virtual Mode test (no GL, uses base dataview)
+$(S)/dataviewvirtual/dataviewvirtual_test.o: $(S)/dataviewvirtual/dataviewvirtual_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/dataviewvirtual/dataviewvirtual_test.html: $(S)/dataviewvirtual/dataviewvirtual_test.o
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# AuiNotebook test (needs aui)
+$(S)/auinotebook/auinotebook_test.o: $(S)/auinotebook/auinotebook_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/auinotebook/auinotebook_test.html: $(S)/auinotebook/auinotebook_test.o
+	$(CXX) $< $(LDFLAGS_AUI) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# Wizard test (needs adv)
+$(S)/wizard/wizard_test.o: $(S)/wizard/wizard_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/wizard/wizard_test.html: $(S)/wizard/wizard_test.o
+	$(CXX) $< $(LDFLAGS_ADV) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# Grid Edit test (cell editing, no GL)
+$(S)/gridedit/gridedit_test.o: $(S)/gridedit/gridedit_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/gridedit/gridedit_test.html: $(S)/gridedit/gridedit_test.o
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# Calendar test (needs adv)
+$(S)/calendar/calendar_test.o: $(S)/calendar/calendar_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/calendar/calendar_test.html: $(S)/calendar/calendar_test.o
+	$(CXX) $< $(LDFLAGS_ADV) --pre-js $(JS) --shell-file $(HTML) -o $@
+
 # Convenience targets
 menu: $(S)/menu/menu_test.html
 clipboard: $(S)/clipboard/clipboard_test.html
@@ -263,9 +315,14 @@ pickers: $(S)/pickers/pickers_test.html
 collapsible: $(S)/collapsible/collapsible_test.html
 listctrl: $(S)/listctrl/listctrl_test.html
 infobar: $(S)/infobar/infobar_test.html
+dataviewvirtual: $(S)/dataviewvirtual/dataviewvirtual_test.html
+auinotebook: $(S)/auinotebook/auinotebook_test.html
+wizard: $(S)/wizard/wizard_test.html
+gridedit: $(S)/gridedit/gridedit_test.html
+calendar: $(S)/calendar/calendar_test.html
 
 clean:
 	rm -f minimal_test.o minimal_test.html minimal_test.js minimal_test.wasm
 	rm -f $(S)/*/*.o $(S)/*/*.html $(S)/*/*.js $(S)/*/*.wasm
 
-.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar
+.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar
