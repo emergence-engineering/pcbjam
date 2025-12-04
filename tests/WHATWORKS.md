@@ -9,7 +9,7 @@ Last updated: 2025-12-03
 | Category | Status | Notes |
 |----------|--------|-------|
 | Main App Load | WORKS | minimal_test.html loads and renders correctly |
-| Standalone Apps | WORKS | 35 standalone test apps (246 total tests passing) |
+| Standalone Apps | WORKS | 34 standalone test apps (240 total tests passing) |
 | wxGrid | WORKS | Grid renders with cells, labels, and event handling |
 | wxTreeCtrl | WORKS | Tree renders with expand/collapse, selection, add/delete items |
 | wxTimer | WORKS | Timer start/stop/interval all functional |
@@ -40,7 +40,6 @@ Last updated: 2025-12-03
 | wxOwnerDrawnComboBox | WORKS | Custom dropdown rendering (layer selectors, font choosers) |
 | wxPopupWindow | WORKS | Transient popups (toolbar palettes, color pickers) |
 | wxXmlDocument | WORKS | XML parsing for config/project files (665 KiCad occurrences) |
-| wxGraphicsContext | PARTIAL | Vector graphics - has memory access issues in WASM |
 
 ---
 
@@ -216,7 +215,6 @@ Organized in `wasm-app/standalone/` folders:
 | validators/validators_test | WORKS | 6/6 | Input validation (KiCad dialog validators) |
 | ownerdrawn/ownerdrawn_test | WORKS | 5/5 | Custom dropdown rendering (layer selectors) |
 | popup/popup_test | WORKS | 6/6 | Transient popups (toolbar palettes) |
-| graphicsctx/graphicsctx_test | PARTIAL | 6/6 | Vector graphics (has WASM memory issues) |
 | xml/xml_test | WORKS | 6/6 | XML parsing (config/project files) |
 | wasmedge/wasmedge_test | WORKS | 8/8 | WASM edge cases (file system, threading, fonts) |
 
@@ -333,10 +331,11 @@ All previously untested features have now been implemented and tested:
 | wxBitmapComboBox | Layer chooser with swatches | MEDIUM | ✓ TESTED |
 | wxCheckListBox | Layer visibility toggles | MEDIUM | ✓ TESTED |
 
-**Current Coverage**: ~99% of KiCad-critical features tested (246 tests across 35 apps)
+**Current Coverage**: ~99% of KiCad-critical features tested (240 tests across 34 apps)
 
 ### Not Needed for KiCad
 1. wxRichTextCtrl - Disabled in WASM build, KiCad doesn't use it
+2. wxGraphicsContext - KiCad uses OpenGL GAL directly, not wxGraphicsContext
 
 ---
 
@@ -349,7 +348,7 @@ Some wxWidgets features have incomplete WASM implementations. These are document
 | Feature | Status | Details |
 |---------|--------|---------|
 | wxFontEnumerator | STUBBED | Returns false - no native font enumeration in browser |
-| wxGraphicsContext | PARTIAL | Memory access errors - backend incomplete |
+| wxGraphicsContext | NOT NEEDED | KiCad uses OpenGL GAL directly (via WebGL in WASM) |
 | Threading (wxThread) | STUBBED | WASM is single-threaded, API exists but no-op |
 | wxFileName::GetSize | STUBBED | Returns wxInvalidSize for virtual filesystem |
 

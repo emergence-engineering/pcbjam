@@ -124,7 +124,6 @@ all: minimal_test.html \
      $(S)/validators/validators_test.html \
      $(S)/ownerdrawn/ownerdrawn_test.html \
      $(S)/popup/popup_test.html \
-     $(S)/graphicsctx/graphicsctx_test.html \
      $(S)/xml/xml_test.html \
      $(S)/wasmedge/wasmedge_test.html
 
@@ -359,13 +358,6 @@ $(S)/popup/popup_test.o: $(S)/popup/popup_test.cpp
 $(S)/popup/popup_test.html: $(S)/popup/popup_test.o
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
-# Graphics Context test (no GL)
-$(S)/graphicsctx/graphicsctx_test.o: $(S)/graphicsctx/graphicsctx_test.cpp
-	$(CXX) -c $(CXXFLAGS) $< -o $@
-
-$(S)/graphicsctx/graphicsctx_test.html: $(S)/graphicsctx/graphicsctx_test.o
-	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
-
 # XML Document test (needs xml library)
 $(S)/xml/xml_test.o: $(S)/xml/xml_test.cpp
 	$(CXX) -c $(CXXFLAGS) $< -o $@
@@ -413,7 +405,6 @@ specialized: $(S)/specialized/specialized_test.html
 validators: $(S)/validators/validators_test.html
 ownerdrawn: $(S)/ownerdrawn/ownerdrawn_test.html
 popup: $(S)/popup/popup_test.html
-graphicsctx: $(S)/graphicsctx/graphicsctx_test.html
 xml: $(S)/xml/xml_test.html
 wasmedge: $(S)/wasmedge/wasmedge_test.html
 
@@ -421,4 +412,4 @@ clean:
 	rm -f minimal_test.o minimal_test.html minimal_test.js minimal_test.wasm
 	rm -f $(S)/*/*.o $(S)/*/*.html $(S)/*/*.js $(S)/*/*.wasm
 
-.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup graphicsctx xml wasmedge
+.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge
