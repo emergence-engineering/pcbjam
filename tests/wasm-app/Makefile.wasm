@@ -51,11 +51,12 @@ endif
 # ASYNCIFY_IMPORTS tells Emscripten which imported JS functions can unwind the stack
 # - startModal: for modal dialogs
 # - js_writeTextToClipboard, js_readTextFromClipboard, js_clipboardHasText, js_clearClipboard: for clipboard
+# - js_enumerateFonts: for font enumeration via Local Font Access API
 BASE_LDFLAGS = -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
                -s "EXPORTED_RUNTIME_METHODS=['HEAPU8','HEAP8','HEAP32','ccall']" \
                -sASYNCIFY=1 \
                -sASYNCIFY_STACK_SIZE=8192 \
-               -sASYNCIFY_IMPORTS=['startModal','js_writeTextToClipboard','js_readTextFromClipboard','js_clipboardHasText','js_clearClipboard']
+               -sASYNCIFY_IMPORTS=['startModal','js_writeTextToClipboard','js_readTextFromClipboard','js_clipboardHasText','js_clearClipboard','js_enumerateFonts']
 
 # GL-specific flags
 EM_GL_FLAGS = -sLEGACY_GL_EMULATION -sMAX_WEBGL_VERSION=2
@@ -125,7 +126,11 @@ all: minimal_test.html \
      $(S)/ownerdrawn/ownerdrawn_test.html \
      $(S)/popup/popup_test.html \
      $(S)/xml/xml_test.html \
-     $(S)/wasmedge/wasmedge_test.html
+     $(S)/wasmedge/wasmedge_test.html \
+     $(S)/fontenum/fontenum_test.html \
+     $(S)/textdecor/textdecor_test.html \
+     $(S)/bitmask/bitmask_test.html \
+     $(S)/regions/regions_test.html
 
 # Main test app (uses GL)
 minimal_test.o: minimal_test.cpp
@@ -372,6 +377,34 @@ $(S)/wasmedge/wasmedge_test.o: $(S)/wasmedge/wasmedge_test.cpp
 $(S)/wasmedge/wasmedge_test.html: $(S)/wasmedge/wasmedge_test.o
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
+# Font Enumeration test (no GL)
+$(S)/fontenum/fontenum_test.o: $(S)/fontenum/fontenum_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/fontenum/fontenum_test.html: $(S)/fontenum/fontenum_test.o
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# Text Decorations test (no GL)
+$(S)/textdecor/textdecor_test.o: $(S)/textdecor/textdecor_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/textdecor/textdecor_test.html: $(S)/textdecor/textdecor_test.o
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# Bitmask test (no GL)
+$(S)/bitmask/bitmask_test.o: $(S)/bitmask/bitmask_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/bitmask/bitmask_test.html: $(S)/bitmask/bitmask_test.o
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# Regions test (no GL)
+$(S)/regions/regions_test.o: $(S)/regions/regions_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/regions/regions_test.html: $(S)/regions/regions_test.o
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
 # Convenience targets
 menu: $(S)/menu/menu_test.html
 clipboard: $(S)/clipboard/clipboard_test.html
@@ -407,9 +440,13 @@ ownerdrawn: $(S)/ownerdrawn/ownerdrawn_test.html
 popup: $(S)/popup/popup_test.html
 xml: $(S)/xml/xml_test.html
 wasmedge: $(S)/wasmedge/wasmedge_test.html
+fontenum: $(S)/fontenum/fontenum_test.html
+textdecor: $(S)/textdecor/textdecor_test.html
+bitmask: $(S)/bitmask/bitmask_test.html
+regions: $(S)/regions/regions_test.html
 
 clean:
 	rm -f minimal_test.o minimal_test.html minimal_test.js minimal_test.wasm
 	rm -f $(S)/*/*.o $(S)/*/*.html $(S)/*/*.js $(S)/*/*.wasm
 
-.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge
+.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions

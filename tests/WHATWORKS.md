@@ -1,6 +1,6 @@
 # wxWidgets WASM Test Status
 
-Last updated: 2025-12-03
+Last updated: 2025-12-04
 
 ## Test Summary
 
@@ -9,7 +9,7 @@ Last updated: 2025-12-03
 | Category | Status | Notes |
 |----------|--------|-------|
 | Main App Load | WORKS | minimal_test.html loads and renders correctly |
-| Standalone Apps | WORKS | 34 standalone test apps (240 total tests passing) |
+| Standalone Apps | WORKS | 38 standalone test apps (244 total tests passing) |
 | wxGrid | WORKS | Grid renders with cells, labels, and event handling |
 | wxTreeCtrl | WORKS | Tree renders with expand/collapse, selection, add/delete items |
 | wxTimer | WORKS | Timer start/stop/interval all functional |
@@ -217,6 +217,10 @@ Organized in `wasm-app/standalone/` folders:
 | popup/popup_test | WORKS | 6/6 | Transient popups (toolbar palettes) |
 | xml/xml_test | WORKS | 6/6 | XML parsing (config/project files) |
 | wasmedge/wasmedge_test | WORKS | 8/8 | WASM edge cases (file system, threading, fonts) |
+| fontenum/fontenum_test | WORKS | 1/1 | Font enumeration via Local Font Access API |
+| textdecor/textdecor_test | WORKS | 1/1 | Text underline/strikethrough decorations |
+| bitmask/bitmask_test | WORKS | 1/1 | Bitmap masking with wxMask transparency |
+| regions/regions_test | WORKS | 1/1 | Non-rectangular region clipping |
 
 ---
 
@@ -312,6 +316,10 @@ Organized in `wasm-app/standalone/` folders:
 37. **wxOwnerDrawnComboBox** - Custom dropdown rendering (layer selectors, font choosers)
 38. **wxPopupWindow** - Transient popups (toolbar palettes, color pickers)
 39. **wxXmlDocument** - XML parsing for config and project files
+40. **wxFontEnumerator** - Font enumeration via Local Font Access API (Chrome 103+)
+41. **wxMask (bitmap masking)** - Color-keyed transparency for toolbar icons
+42. **Text decorations** - Underline/strikethrough in wxDC text rendering
+43. **wxRegion clipping** - Non-rectangular clipping for complex shapes
 
 ### All KiCad-Critical Features Tested
 
@@ -331,7 +339,7 @@ All previously untested features have now been implemented and tested:
 | wxBitmapComboBox | Layer chooser with swatches | MEDIUM | ✓ TESTED |
 | wxCheckListBox | Layer visibility toggles | MEDIUM | ✓ TESTED |
 
-**Current Coverage**: ~99% of KiCad-critical features tested (240 tests across 34 apps)
+**Current Coverage**: ~100% of KiCad-critical features tested (244 tests across 38 apps)
 
 ### Not Needed for KiCad
 1. wxRichTextCtrl - Disabled in WASM build, KiCad doesn't use it
@@ -347,21 +355,20 @@ Some wxWidgets features have incomplete WASM implementations. These are document
 
 | Feature | Status | Details |
 |---------|--------|---------|
-| wxFontEnumerator | STUBBED | Returns false - no native font enumeration in browser |
 | wxGraphicsContext | NOT NEEDED | KiCad uses OpenGL GAL directly (via WebGL in WASM) |
 | Threading (wxThread) | STUBBED | WASM is single-threaded, API exists but no-op |
 | wxFileName::GetSize | STUBBED | Returns wxInvalidSize for virtual filesystem |
 
-### Future WASM Layer Implementations (TODO)
+### Recently Implemented WASM Features
 
-These features could be implemented to improve KiCad compatibility:
+These features were implemented to improve KiCad compatibility:
 
-| Feature | Priority | Implementation Notes |
-|---------|----------|----------------------|
-| Font enumeration | LOW | Could query CSS font-face declarations or use hardcoded list |
-| Bitmap masking | MEDIUM | Need to implement wxDC::DrawBitmap with mask support |
-| Text decorations | LOW | Underline/strikethrough in wxDC text rendering |
-| Non-rectangular regions | LOW | wxRegion clipping for complex shapes |
+| Feature | Status | Implementation Notes |
+|---------|--------|----------------------|
+| wxFontEnumerator | WORKS | Uses Local Font Access API (Chrome 103+) with Asyncify |
+| Bitmap masking | WORKS | wxMask with color-keyed transparency via Canvas composite ops |
+| Text decorations | WORKS | Underline/strikethrough via Canvas textDecoration property |
+| Non-rectangular regions | WORKS | wxRegion clipping via Canvas path-based clip() with multiple rects |
 
 ### WASM Edge Cases Tested
 
@@ -369,7 +376,7 @@ The `wasmedge_test` app verifies WASM-specific behaviors:
 
 - **File System**: `/tmp/` virtual filesystem read/write works
 - **Threading**: wxUSE_THREADS defined but stubbed (expected)
-- **Font Enumeration**: Returns false (expected, documented)
+- **Font Enumeration**: Works via Local Font Access API (Chrome 103+)
 - **Clipboard**: Works via Asyncify browser integration
 - **Memory Growth**: WASM memory growth works (10MB+ allocations)
 - **OS Info**: wxGetOsVersion returns stubbed values (expected)
@@ -492,3 +499,7 @@ npx playwright test --ui    # Interactive mode with screenshot preview
 | htmlwin-04-about.png | KiCad-style About dialog |
 | stc-01-loaded.png | wxStyledTextCtrl with Python syntax highlighting |
 | stc-03-drc-mode.png | DRC rules syntax highlighting |
+| fontenum.png | Font enumeration via Local Font Access API |
+| textdecor.png | Text decorations (underline, strikethrough, combined) |
+| bitmask.png | Bitmap masking with wxMask color-keyed transparency |
+| regions.png | Non-rectangular region clipping (union, subtract, complex shapes) |

@@ -15,8 +15,8 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:8080',
     trace: 'on-first-retry',
-    // Grant clipboard permissions for clipboard tests
-    permissions: ['clipboard-read', 'clipboard-write'],
+    // Grant clipboard and font permissions for tests
+    permissions: ['clipboard-read', 'clipboard-write', 'local-fonts'],
   },
 
   projects: [
