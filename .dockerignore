@@ -1,0 +1,26 @@
+# Build artifacts (cached in named volume instead)
+build-wasm/
+
+# Git internals (large, not needed for build)
+.git/modules/
+
+# Compiled files
+*.wasm
+*.o
+*.a
+*.o.tmp
+
+# Node modules (for tests)
+node_modules/
+
+# Output directory
+output/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store

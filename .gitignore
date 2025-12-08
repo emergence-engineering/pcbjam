@@ -37,6 +37,7 @@ wxwidgets-clean/
 /tests/node_modules/
 /tests/playwright-report/
 /tests/test-results/
+/tests/.test-port
 /test-results/
 /tests/wasm-app/*.js
 /tests/wasm-app/*.html

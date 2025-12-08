@@ -1,0 +1,28 @@
+services:
+  kicad-wasm-builder:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: kicad-wasm-builder
+
+    # Resource limits (M4 Max: 10 cores, 16GB)
+    deploy:
+      resources:
+        limits:
+          cpus: '10'
+          memory: 16G
+
+    volumes:
+      # Source code (read-write for git operations)
+      - ..:/workspace:cached
+      # Named volume for build cache (faster than bind mount on macOS)
+      - kicad-build-cache:/workspace/build-wasm
+      # Output directory for easy access to final WASM files
+      - ../output:/workspace/output
+
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
+
+volumes:
+  kicad-build-cache:
