@@ -1,0 +1,15 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1107,7 +1107,9 @@ if( wxWidgets_FIND_STYLE STREQUAL "win32" )
+         add_compile_definitions( __WXGTK__ )
+     endif()
+ elseif( _wx_selected_config )
+-    string(REGEX MATCH "(msw|qt|gtk|osx)" KICAD_WX_PORT "${_wx_selected_config}")
++    string(REGEX MATCH "(msw|qt|gtk|osx|wasm)" KICAD_WX_PORT "${_wx_selected_config}")
+ endif()
+
+-if( KICAD_WX_PORT )
++if( KICAD_WX_PORT STREQUAL "wasm" )
++    message( STATUS "Detected wxWidgets port: wasm (WebAssembly)")
++elseif( KICAD_WX_PORT )
+     message( STATUS "Detected wxWidgets port: ${KICAD_WX_PORT}")

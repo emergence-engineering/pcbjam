@@ -58,15 +58,18 @@ export CFLAGS="-pthread"
 export CXXFLAGS="-pthread"
 export LDFLAGS="-pthread"
 
-# Configure ngspice as a shared library for KiCad integration
+# Configure ngspice as a static library for WASM
+# Note: --with-ngshared requires shared libs which WASM doesn't support
+# We build static lib instead
 emconfigure "${NGSPICE_DIR}/configure" \
     --prefix="${SYSROOT}" \
     --host=wasm32-unknown-emscripten \
     --build=$(uname -m)-linux-gnu \
-    --enable-shared \
-    --with-ngshared \
+    --disable-shared \
+    --enable-static \
     --disable-debug \
     --disable-dependency-tracking \
+    --disable-openmp \
     --enable-cider \
     --enable-xspice \
     --without-x \

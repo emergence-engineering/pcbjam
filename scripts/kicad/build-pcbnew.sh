@@ -85,6 +85,38 @@ fi
 mkdir -p "${KICAD_BUILD}"
 cd "${KICAD_BUILD}"
 
+# Step 6.1: Build stub libraries for missing symbols
+STUBS_DIR="${PROJECT_ROOT}/wasm/stubs"
+STUBS_BUILD="${BUILD_ROOT}/stubs"
+mkdir -p "${STUBS_BUILD}"
+
+log_info "Building stub libraries..."
+# Compile libgit2 stub
+emcc -c "${STUBS_DIR}/libgit2_stub.c" -o "${STUBS_BUILD}/libgit2_stub.o"
+emar rcs "${STUBS_BUILD}/libgit2_stub.a" "${STUBS_BUILD}/libgit2_stub.o"
+
+# Compile curl stub
+emcc -c "${STUBS_DIR}/curl_stub.c" -o "${STUBS_BUILD}/curl_stub.o"
+emar rcs "${STUBS_BUILD}/libcurl_stub.a" "${STUBS_BUILD}/curl_stub.o"
+
+log_info "Stub libraries built"
+
+# Step 6.5: Verify WASM support is in KiCad fork
+# The kicad submodule should already have WASM port detection and kiplatform support
+KICAD_CMAKE="${KICAD_DIR}/CMakeLists.txt"
+if ! grep -q "msw|qt|gtk|osx|wasm" "${KICAD_CMAKE}"; then
+    log_error "KiCad fork is missing WASM port detection support."
+    log_error "Please ensure the kicad submodule has WASM modifications."
+    exit 1
+fi
+KIPLATFORM_CMAKE="${KICAD_DIR}/libs/kiplatform/CMakeLists.txt"
+if ! grep -q "KICAD_WX_PORT STREQUAL wasm" "${KIPLATFORM_CMAKE}"; then
+    log_error "KiCad fork is missing kiplatform WASM support."
+    log_error "Please ensure the kicad submodule has WASM modifications."
+    exit 1
+fi
+log_info "KiCad WASM support verified"
+
 # Step 7: Configure KiCad with CMake
 # We use CMAKE_MODULE_PATH to inject our compatibility layer
 log_info "Configuring KiCad with CMake..."
@@ -92,19 +124,16 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
     -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \
+    -DSYSROOT="${SYSROOT}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include" \
-    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -I${SYSROOT}/include" \
-    -DCMAKE_EXE_LINKER_FLAGS="-pthread -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -L${SYSROOT}/lib" \
+    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include" \
+    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include" \
+    -DCMAKE_EXE_LINKER_FLAGS="-pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \
     -DKICAD_BUILD_QA_TESTS=OFF \
-    -DKICAD_SCRIPTING=OFF \
-    -DKICAD_SCRIPTING_PYTHON3=OFF \
-    -DKICAD_SCRIPTING_WXPYTHON=OFF \
     -DKICAD_SPICE=OFF \
-    -DKICAD_USE_OCC=OFF \
     -DKICAD_USE_EGL=OFF \
     -DKICAD_USE_BUNDLED_GLEW=ON \
     \
@@ -112,6 +141,26 @@ emcmake cmake "${KICAD_DIR}" \
     -DZSTD_INCLUDE_DIR="${SYSROOT}/include" \
     -DZSTD_LIBRARY="${SYSROOT}/lib/libzstd.a" \
     -DGLM_INCLUDE_DIR="${SYSROOT}/include" \
+    -DBOOST_ROOT="${SYSROOT}" \
+    -DBoost_INCLUDE_DIR="${SYSROOT}/include" \
+    -DBoost_LIBRARY_DIR="${SYSROOT}/lib" \
+    -DBoost_NO_SYSTEM_PATHS=ON \
+    -DBoost_NO_BOOST_CMAKE=ON \
+    -DFREETYPE_INCLUDE_DIR_ft2build="${SYSROOT}/include/freetype2" \
+    -DFREETYPE_INCLUDE_DIR_freetype2="${SYSROOT}/include/freetype2" \
+    -DFREETYPE_LIBRARY="${SYSROOT}/lib/libfreetype.a" \
+    -DHarfBuzz_INCLUDE_DIR="${SYSROOT}/include/harfbuzz" \
+    -DHarfBuzz_LIBRARY="${SYSROOT}/lib/libharfbuzz.a" \
+    -DOCC_INCLUDE_DIR="${SYSROOT}/include/opencascade" \
+    -DOCC_LIBRARY_DIR="${SYSROOT}/lib" \
+    -DProtobuf_INCLUDE_DIR="${SYSROOT}/include" \
+    -DProtobuf_LIBRARY="${SYSROOT}/lib/libprotobuf.a" \
+    -DProtobuf_LITE_LIBRARY="${SYSROOT}/lib/libprotobuf-lite.a" \
+    -DODBC_CONFIG:STRING="stub-for-wasm" \
+    -DODBCLIB:STRING="" \
+    -DODBC_CFLAGS:STRING="" \
+    -DODBC_LINK_FLAGS:STRING="" \
+    -DODBC_LIBRARIES:STRING="" \
     \
     -DBUILD_GITHUB_PLUGIN=OFF \
     -DKICAD_PCM=OFF

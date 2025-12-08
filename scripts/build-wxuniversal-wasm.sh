@@ -95,6 +95,27 @@ echo ""
 echo "=== Building wxWidgets ==="
 emmake make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
+# Create library symlinks (remove -emscripten suffix for CMake compatibility)
+echo ""
+echo "=== Creating library symlinks ==="
+cd "$BUILD_DIR/lib"
+for lib in *-emscripten.a; do
+    if [ -f "$lib" ]; then
+        newname="${lib/-emscripten/}"
+        ln -sf "$lib" "$newname"
+    fi
+done
+
+# Create stub libraries for components wx-config reports but we didn't build
+# KiCad doesn't use these directly
+echo "Creating stub libraries..."
+for stub in richtext webview; do
+    emar rcs "libwx_wasmunivu_${stub}-3.2.a"
+    ln -sf "libwx_wasmunivu_${stub}-3.2.a" "libwx_wasmunivu_${stub}-3.2-emscripten.a"
+done
+
+cd "$BUILD_DIR"
+
 echo ""
 echo "=== Build complete ==="
 ls -lh "$BUILD_DIR"/lib/*.a 2>/dev/null || echo "Libraries built in $BUILD_DIR/lib"

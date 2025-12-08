@@ -57,10 +57,10 @@ log_info "Building Boost ${BOOST_VERSION} for WASM..."
 
 cd "${BOOST_DIR}"
 
-# Bootstrap b2 if needed
+# Bootstrap b2 if needed (use gcc for native build of b2)
 if [ ! -f "b2" ]; then
     log_info "Bootstrapping b2..."
-    ./bootstrap.sh --with-toolset=clang
+    ./bootstrap.sh --with-toolset=gcc
 fi
 
 # Create user-config.jam for Emscripten

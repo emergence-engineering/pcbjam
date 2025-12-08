@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     git \
     python3 \
+    python3-dev \
+    protobuf-compiler \
+    swig \
+    unixodbc-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

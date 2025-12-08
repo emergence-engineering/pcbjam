@@ -78,6 +78,9 @@ sys_root = '${SYSROOT}'
 pkg_config_libdir = '${SYSROOT}/lib/pkgconfig'
 
 [built-in options]
+default_library = 'static'
+b_staticpic = false
+b_pie = false
 c_args = ['-pthread', '-I${SYSROOT}/include', '-I${SYSROOT}/include/freetype2', '-I${SYSROOT}/include/pixman-1']
 c_link_args = ['-pthread', '-L${SYSROOT}/lib']
 pkg_config_path = '${SYSROOT}/lib/pkgconfig'
@@ -101,7 +104,9 @@ meson setup "${CAIRO_DIR}" \
     -Dzlib=enabled \
     -Dtests=disabled \
     -Dspectre=disabled \
-    -Dsymbol-lookup=disabled
+    -Dsymbol-lookup=disabled \
+    -Dfreetype2:default_library=static \
+    -Dlibpng:default_library=static
 
 JOBS=${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
 ninja -j${JOBS}
