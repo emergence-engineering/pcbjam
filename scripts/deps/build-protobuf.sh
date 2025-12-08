@@ -41,7 +41,9 @@ if [ ! -d "${PROTOBUF_DIR}" ]; then
     mkdir -p "${DEPS_ROOT}"
     cd "${DEPS_ROOT}"
 
-    PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protobuf-cpp-${PROTOBUF_VERSION}.tar.gz"
+    # Protobuf 3.21.x uses tag format v21.12 (major version 3 is implicit)
+    PROTOBUF_TAG_VERSION="${PROTOBUF_VERSION#3.}"  # Strip leading "3." -> "21.12"
+    PROTOBUF_URL="https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_TAG_VERSION}/protobuf-cpp-${PROTOBUF_VERSION}.tar.gz"
     download_file "${PROTOBUF_URL}" "protobuf-${PROTOBUF_VERSION}.tar.gz"
     tar -xzf "protobuf-${PROTOBUF_VERSION}.tar.gz"
     rm "protobuf-${PROTOBUF_VERSION}.tar.gz"

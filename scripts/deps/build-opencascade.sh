@@ -45,7 +45,8 @@ if [ ! -d "${OCC_DIR}" ]; then
     OCC_URL="https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V${OCC_VERSION//./_}.tar.gz"
     download_file "${OCC_URL}" "opencascade-${OCC_VERSION}.tar.gz"
     tar -xzf "opencascade-${OCC_VERSION}.tar.gz"
-    mv "OCCT-V${OCC_VERSION//./_}" "opencascade-${OCC_VERSION}"
+    # Directory name in tarball is OCCT-7_8_0 (without V prefix)
+    mv "OCCT-${OCC_VERSION//./_}" "opencascade-${OCC_VERSION}"
     rm "opencascade-${OCC_VERSION}.tar.gz"
 fi
 
@@ -59,6 +60,7 @@ cd "${OCC_BUILD}"
 # Disable GUI, visualization that needs X11/OpenGL native
 # Enable core geometry and data exchange modules only
 emcmake cmake "${OCC_DIR}" \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
     -DCMAKE_CXX_FLAGS="-pthread -O2" \
