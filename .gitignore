@@ -45,5 +45,9 @@ wxwidgets-clean/
 /tests/wasm-app/standalone/*/*.js
 /tests/wasm-app/standalone/*/*.html
 /tests/wasm-app/standalone/*/*.wasm
+/tests/wasm-app/kicad/*.js
+/tests/wasm-app/kicad/*.wasm
+!tests/wasm-app/kicad/pcbnew.html
 /temp/
 *.log
+*.tmp

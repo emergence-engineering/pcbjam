@@ -1,13 +1,16 @@
 {
   "name": "kicad-wasm-tests",
   "version": "1.0.0",
-  "description": "Playwright tests for wxWidgets WASM port",
+  "description": "Playwright tests for wxWidgets WASM and KiCad",
   "scripts": {
     "test": "playwright test",
     "test:ui": "playwright test --ui",
     "test:headed": "playwright test --headed",
     "build-wasm": "cd wasm-app && make -f Makefile.wasm",
-    "serve": "npx serve wasm-app -p 8080"
+    "serve": "npx serve wasm-app -p 8080 -c ../serve.json",
+    "setup:kicad": "./scripts/setup-kicad-wasm.sh",
+    "test:kicad": "playwright test kicad/",
+    "test:kicad:headed": "playwright test kicad/ --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",
