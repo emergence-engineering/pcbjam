@@ -5,12 +5,12 @@ services:
       dockerfile: docker/Dockerfile
     container_name: kicad-wasm-builder
 
-    # Resource limits (M4 Max: 10 cores, 16GB)
+    # Resource limits (adjust based on your machine)
     deploy:
       resources:
         limits:
           cpus: '10'
-          memory: 16G
+          memory: 32G
 
     volumes:
       # Source code (read-write for git operations)

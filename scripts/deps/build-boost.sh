@@ -63,29 +63,38 @@ if [ ! -f "b2" ]; then
     ./bootstrap.sh --with-toolset=gcc
 fi
 
+# Determine boost variant based on DEBUG_BUILD
+if [ "${DEBUG_BUILD:-1}" = "1" ]; then
+    BOOST_VARIANT="debug"
+    BOOST_DEBUG_FLAGS="-g -O0"
+else
+    BOOST_VARIANT="release"
+    BOOST_DEBUG_FLAGS="-O2"
+fi
+
 # Create user-config.jam for Emscripten
-cat > user-config.jam << 'EOF'
+cat > user-config.jam << EOF
 using clang : emscripten
     : em++
-    : <cxxflags>"-pthread"
+    : <cxxflags>"${BOOST_DEBUG_FLAGS} -pthread"
       <linkflags>"-pthread"
     ;
 EOF
 
 # Build only the locale library (and its dependencies)
 # Most of Boost is header-only, we just need locale built
-log_info "Building Boost.Locale..."
-JOBS=${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
+log_info "Building Boost.Locale (${BOOST_VARIANT})..."
+# JOBS is set in env.sh (default: 1 for sequential builds, use -j N to override)
 ./b2 -j${JOBS} \
     --user-config=user-config.jam \
     --prefix="${SYSROOT}" \
     --with-locale \
     toolset=clang-emscripten \
-    variant=release \
+    variant=${BOOST_VARIANT} \
     link=static \
     threading=multi \
     runtime-link=static \
-    cxxflags="-pthread" \
+    cxxflags="${BOOST_DEBUG_FLAGS} -pthread" \
     install
 
 create_stamp "${BOOST_STAMP}"

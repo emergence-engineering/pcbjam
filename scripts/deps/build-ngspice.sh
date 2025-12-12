@@ -53,9 +53,16 @@ mkdir -p "${NGSPICE_BUILD}"
 cd "${NGSPICE_BUILD}"
 
 # ngspice uses autoconf
-# First we need to configure for shared library mode (libngspice)
-export CFLAGS="-pthread"
-export CXXFLAGS="-pthread"
+# Set compiler flags based on debug mode
+if [ "${DEBUG_BUILD:-1}" = "1" ]; then
+    export CFLAGS="-g -O0 -pthread"
+    export CXXFLAGS="-g -O0 -pthread"
+    NGSPICE_DEBUG_FLAG="--enable-debug"
+else
+    export CFLAGS="-O2 -pthread"
+    export CXXFLAGS="-O2 -pthread"
+    NGSPICE_DEBUG_FLAG="--disable-debug"
+fi
 export LDFLAGS="-pthread"
 
 # Configure ngspice as a static library for WASM
@@ -67,7 +74,7 @@ emconfigure "${NGSPICE_DIR}/configure" \
     --build=$(uname -m)-linux-gnu \
     --disable-shared \
     --enable-static \
-    --disable-debug \
+    ${NGSPICE_DEBUG_FLAG} \
     --disable-dependency-tracking \
     --disable-openmp \
     --enable-cider \

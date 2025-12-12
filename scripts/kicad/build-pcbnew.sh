@@ -6,9 +6,12 @@
 #   ./scripts/kicad/build-pcbnew.sh [options]
 #
 # Options:
-#   --no-clean    Skip cleaning the build directory (default: clean before build)
+#   --clean       Full clean rebuild (dependencies + KiCad)
+#   --no-clean    Skip cleaning the build directory (default: clean KiCad only)
 #   --skip-deps   Skip building dependencies
-#   --debug       Build with debug symbols
+#   --debug       Build with debug symbols (default)
+#   --release     Build optimized without debug symbols
+#   -j N          Parallel compilation jobs (default: 1)
 
 set -e
 
@@ -23,26 +26,60 @@ KICAD_STAMP="${BUILD_ROOT}/stamps/kicad-pcbnew.stamp"
 WASM_LAYER="${PROJECT_ROOT}/wasm"
 WX_BUILD="${BUILD_ROOT}/wxwidgets-universal"
 
-# Parse arguments - clean by default
+# Parse arguments - clean KiCad by default
 NO_CLEAN=0
+FULL_CLEAN=0
 SKIP_DEPS=0
 DEBUG=0
-for arg in "$@"; do
-    case $arg in
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --clean)
+            FULL_CLEAN=1
+            shift
+            ;;
         --no-clean)
             NO_CLEAN=1
+            shift
             ;;
         --skip-deps)
             SKIP_DEPS=1
+            shift
             ;;
         --debug)
             DEBUG=1
+            shift
+            ;;
+        --release)
+            DEBUG_BUILD=0
+            export DEBUG_BUILD
+            shift
+            ;;
+        -j)
+            export JOBS="$2"
+            shift 2
+            ;;
+        -j*)
+            export JOBS="${1#-j}"
+            shift
+            ;;
+        *)
+            shift
             ;;
     esac
 done
 
-# Step 1: Clean build directory (default behavior)
-if [ $NO_CLEAN -eq 0 ]; then
+log_info "Using ${JOBS} parallel jobs"
+
+# Step 1: Clean build directories
+if [ $FULL_CLEAN -eq 1 ]; then
+    log_info "Full clean: removing all stamps and build directories..."
+    rm -rf "${STAMPS_DIR}"/*
+    rm -rf "${BUILD_ROOT}/deps"/*
+    rm -rf "${BUILD_ROOT}/wxwidgets-universal"
+    rm -rf "${BUILD_ROOT}/stubs"
+    rm -rf "${KICAD_BUILD}"
+    rm -rf "${SYSROOT}"/*
+elif [ $NO_CLEAN -eq 0 ]; then
     log_info "Cleaning KiCad PCBnew build directory..."
     rm -rf "${KICAD_BUILD}" "${KICAD_STAMP}"
 else
@@ -73,12 +110,17 @@ fi
 log_info "Building KiCad PCBnew ${KICAD_VERSION} for WASM..."
 
 # Step 5: Set build type
-if [ $DEBUG -eq 1 ]; then
+# Use environment DEBUG_BUILD if set, otherwise check local --debug flag
+if [ "${DEBUG_BUILD:-0}" = "1" ] || [ $DEBUG -eq 1 ]; then
     BUILD_TYPE="Debug"
     EXTRA_FLAGS="-g -O0"
+    LINKER_DEBUG_FLAGS="-g -gsource-map"
+    log_info "Building KiCad in DEBUG mode (with source maps)"
 else
     BUILD_TYPE="Release"
     EXTRA_FLAGS="-O2"
+    LINKER_DEBUG_FLAGS=""
+    log_info "Building KiCad in RELEASE mode"
 fi
 
 # Step 6: Create build directory
@@ -128,7 +170,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include" \
     -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include" \
-    -DCMAKE_EXE_LINKER_FLAGS="-pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \
@@ -167,7 +209,7 @@ emcmake cmake "${KICAD_DIR}" \
 
 # Step 8: Build pcbnew target
 log_info "Building pcbnew..."
-JOBS=${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
+# JOBS is set in env.sh (default: 1 for sequential builds, use -j N to override)
 emmake make -j${JOBS} pcbnew
 
 # Step 9: Create stamp file

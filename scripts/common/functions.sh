@@ -226,7 +226,7 @@ get_nproc() {
 # Parse common command line arguments
 parse_common_args() {
     CLEAN_BUILD=0
-    DEBUG_BUILD=0
+    DEBUG_BUILD="${DEBUG_BUILD:-1}"  # Default ON (use --release to disable)
     PARALLEL_JOBS=$(get_nproc)
 
     while [[ $# -gt 0 ]]; do
@@ -237,6 +237,10 @@ parse_common_args() {
                 ;;
             --debug)
                 DEBUG_BUILD=1
+                shift
+                ;;
+            --release)
+                DEBUG_BUILD=0
                 shift
                 ;;
             -j)

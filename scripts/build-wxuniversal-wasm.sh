@@ -22,6 +22,9 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
 WX_SOURCE="$PROJECT_ROOT/wxwidgets"
 
+# Use JOBS from env.sh if set, otherwise default to 1 for sequential builds
+JOBS="${JOBS:-1}"
+
 echo "=== Building wxWidgets wxUniversal for WASM ==="
 echo "Project root: $PROJECT_ROOT"
 echo "Build dir: $BUILD_DIR"
@@ -68,8 +71,20 @@ echo "=== Configuring ==="
 # Z_HAVE_UNISTD_H ensures zlib includes <unistd.h> for read/write/lseek
 # Include pcre2 headers from the build directory (generated during configure)
 PCRE2_INCLUDE="$BUILD_DIR/3rdparty/pcre/src"
-export CFLAGS="-DZ_HAVE_UNISTD_H=1"
-export CXXFLAGS="-DZ_HAVE_UNISTD_H=1 -I$PCRE2_INCLUDE"
+
+# Configure debug/release flags based on DEBUG_BUILD environment variable
+if [ "${DEBUG_BUILD:-1}" = "1" ]; then
+    WX_DEBUG_FLAGS="-g -O0"
+    WX_CONFIGURE_DEBUG="--enable-debug"
+    echo "Building wxWidgets in DEBUG mode"
+else
+    WX_DEBUG_FLAGS="-O2"
+    WX_CONFIGURE_DEBUG=""
+    echo "Building wxWidgets in RELEASE mode"
+fi
+
+export CFLAGS="-DZ_HAVE_UNISTD_H=1 ${WX_DEBUG_FLAGS}"
+export CXXFLAGS="-DZ_HAVE_UNISTD_H=1 -I$PCRE2_INCLUDE ${WX_DEBUG_FLAGS}"
 
 emconfigure "$WX_SOURCE/configure" \
     --host=emscripten \
@@ -82,7 +97,8 @@ emconfigure "$WX_SOURCE/configure" \
     --without-libtiff \
     --disable-xlocale \
     --with-cxx=17 \
-    --enable-utf8
+    --enable-utf8 \
+    ${WX_CONFIGURE_DEBUG}
 
 # Build PCRE first to avoid race condition with parallel builds
 # PCRE headers (pcre2.h) must be generated before regex.cpp compiles
@@ -92,8 +108,8 @@ emmake make -C 3rdparty/pcre
 
 # Build wxWidgets
 echo ""
-echo "=== Building wxWidgets ==="
-emmake make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+echo "=== Building wxWidgets (using ${JOBS} parallel jobs) ==="
+emmake make -j${JOBS}
 
 # Create library symlinks (remove -emscripten suffix for CMake compatibility)
 echo ""

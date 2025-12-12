@@ -9,7 +9,8 @@
 #   --with-occ      Enable OpenCASCADE (3D/STEP support)
 #   --with-ngspice  Enable ngspice (simulation)
 #   --with-pthread  Enable pthreads (multi-threading)
-#   --debug         Debug build with symbols
+#   --release       Release build (optimized, no debug symbols)
+#   --debug         Debug build with symbols (default)
 #   -j N            Parallel jobs (default: nproc)
 #   --help          Show this help
 
@@ -66,6 +67,10 @@ while [[ $# -gt 0 ]]; do
             DEBUG_BUILD=1
             shift
             ;;
+        --release)
+            DEBUG_BUILD=0
+            shift
+            ;;
         -j)
             PARALLEL_JOBS="$2"
             shift 2
@@ -83,7 +88,7 @@ done
 
 # Set defaults if not set
 CLEAN_BUILD=${CLEAN_BUILD:-0}
-DEBUG_BUILD=${DEBUG_BUILD:-0}
+DEBUG_BUILD=${DEBUG_BUILD:-1}  # Debug mode by default (use --release for optimized builds)
 PARALLEL_JOBS=${PARALLEL_JOBS:-$(get_nproc)}
 
 # Export for sub-scripts

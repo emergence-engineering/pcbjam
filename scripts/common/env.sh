@@ -34,6 +34,32 @@ export EMSDK_QUIET=1
 export EMCC_CFLAGS="-fPIC -DEMSCRIPTEN"
 export EMCC_CXXFLAGS="-fPIC -DEMSCRIPTEN -std=c++17"
 
+# Debug mode (default: ON, use --release to disable)
+# This can be overridden by setting DEBUG_BUILD=0 before sourcing this file
+DEBUG_BUILD="${DEBUG_BUILD:-1}"
+
+if [ "$DEBUG_BUILD" = "1" ]; then
+    export BUILD_TYPE="Debug"
+    export DEBUG_CFLAGS="-g -O0"
+    export DEBUG_LDFLAGS="-g -gsource-map"
+else
+    export BUILD_TYPE="Release"
+    export DEBUG_CFLAGS="-O2"
+    export DEBUG_LDFLAGS=""
+fi
+
+export DEBUG_BUILD BUILD_TYPE DEBUG_CFLAGS DEBUG_LDFLAGS
+
+# Parallel jobs (default to 1 for memory-constrained environments like Docker)
+# Can be overridden with -j N flag or by setting JOBS/PARALLEL_JOBS env vars
+if [ -n "$PARALLEL_JOBS" ]; then
+    export JOBS="$PARALLEL_JOBS"
+elif [ -z "$JOBS" ]; then
+    # Default to 1 for sequential builds (safer for memory)
+    # Use -j N to override for faster builds on machines with more RAM
+    export JOBS=1
+fi
+
 # Common linker flags for WASM
 export WASM_LDFLAGS="\
 -sALLOW_MEMORY_GROWTH=1 \

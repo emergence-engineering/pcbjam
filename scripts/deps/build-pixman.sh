@@ -52,6 +52,15 @@ log_info "Building Pixman ${PIXMAN_VERSION} for WASM..."
 mkdir -p "${PIXMAN_BUILD}"
 cd "${PIXMAN_BUILD}"
 
+# Determine meson build type based on DEBUG_BUILD
+if [ "${DEBUG_BUILD:-1}" = "1" ]; then
+    MESON_BUILD_TYPE="debug"
+    MESON_DEBUG_FLAGS="'-g', '-O0'"
+else
+    MESON_BUILD_TYPE="release"
+    MESON_DEBUG_FLAGS="'-O2'"
+fi
+
 # Pixman uses meson
 cat > cross-file.txt << EOF
 [binaries]
@@ -68,7 +77,7 @@ cpu = 'wasm32'
 endian = 'little'
 
 [built-in options]
-c_args = ['-pthread']
+c_args = [${MESON_DEBUG_FLAGS}, '-pthread']
 c_link_args = ['-pthread']
 EOF
 
@@ -76,11 +85,12 @@ meson setup "${PIXMAN_DIR}" \
     --cross-file cross-file.txt \
     --prefix="${SYSROOT}" \
     --default-library=static \
+    --buildtype=${MESON_BUILD_TYPE} \
     -Dgtk=disabled \
     -Dlibpng=disabled \
     -Dtests=disabled
 
-JOBS=${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
+# JOBS is set in env.sh (default: 1 for sequential builds, use -j N to override)
 ninja -j${JOBS}
 ninja install
 

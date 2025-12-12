@@ -55,9 +55,10 @@ mkdir -p "${PROTOBUF_BUILD}"
 cd "${PROTOBUF_BUILD}"
 
 emcmake cmake "${PROTOBUF_DIR}" \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Debug} \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
-    -DCMAKE_CXX_FLAGS="-pthread" \
+    -DCMAKE_C_FLAGS="${DEBUG_CFLAGS:--g -O0} -pthread" \
+    -DCMAKE_CXX_FLAGS="${DEBUG_CFLAGS:--g -O0} -pthread" \
     -Dprotobuf_BUILD_TESTS=OFF \
     -Dprotobuf_BUILD_EXAMPLES=OFF \
     -Dprotobuf_BUILD_PROTOC_BINARIES=OFF \

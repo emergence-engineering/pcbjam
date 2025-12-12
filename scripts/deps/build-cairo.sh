@@ -56,6 +56,15 @@ log_info "Building Cairo ${CAIRO_VERSION} for WASM..."
 mkdir -p "${CAIRO_BUILD}"
 cd "${CAIRO_BUILD}"
 
+# Determine meson build type based on DEBUG_BUILD
+if [ "${DEBUG_BUILD:-1}" = "1" ]; then
+    MESON_BUILD_TYPE="debug"
+    MESON_DEBUG_FLAGS="'-g', '-O0'"
+else
+    MESON_BUILD_TYPE="release"
+    MESON_DEBUG_FLAGS="'-O2'"
+fi
+
 # Cairo uses meson
 cat > cross-file.txt << EOF
 [binaries]
@@ -81,7 +90,7 @@ pkg_config_libdir = '${SYSROOT}/lib/pkgconfig'
 default_library = 'static'
 b_staticpic = false
 b_pie = false
-c_args = ['-pthread', '-I${SYSROOT}/include', '-I${SYSROOT}/include/freetype2', '-I${SYSROOT}/include/pixman-1']
+c_args = [${MESON_DEBUG_FLAGS}, '-pthread', '-I${SYSROOT}/include', '-I${SYSROOT}/include/freetype2', '-I${SYSROOT}/include/pixman-1']
 c_link_args = ['-pthread', '-L${SYSROOT}/lib']
 pkg_config_path = '${SYSROOT}/lib/pkgconfig'
 EOF
@@ -95,6 +104,7 @@ meson setup "${CAIRO_DIR}" \
     --cross-file cross-file.txt \
     --prefix="${SYSROOT}" \
     --default-library=static \
+    --buildtype=${MESON_BUILD_TYPE} \
     -Dfontconfig=disabled \
     -Dfreetype=enabled \
     -Dglib=disabled \
@@ -108,7 +118,7 @@ meson setup "${CAIRO_DIR}" \
     -Dfreetype2:default_library=static \
     -Dlibpng:default_library=static
 
-JOBS=${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}
+# JOBS is set in env.sh (default: 1 for sequential builds, use -j N to override)
 ninja -j${JOBS}
 ninja install
 

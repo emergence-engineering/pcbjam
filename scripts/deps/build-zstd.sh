@@ -54,7 +54,7 @@ cd "${ZSTD_BUILD}"
 
 # Zstd uses CMake in build/cmake directory
 emcmake cmake "${ZSTD_DIR}/build/cmake" \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Debug} \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DZSTD_BUILD_PROGRAMS=OFF \
@@ -62,8 +62,8 @@ emcmake cmake "${ZSTD_DIR}/build/cmake" \
     -DZSTD_BUILD_SHARED=OFF \
     -DZSTD_BUILD_STATIC=ON \
     -DZSTD_MULTITHREAD_SUPPORT=ON \
-    -DCMAKE_C_FLAGS="-pthread" \
-    -DCMAKE_CXX_FLAGS="-pthread"
+    -DCMAKE_C_FLAGS="${DEBUG_CFLAGS:--g -O0} -pthread" \
+    -DCMAKE_CXX_FLAGS="${DEBUG_CFLAGS:--g -O0} -pthread"
 
 emmake make -j${JOBS}
 emmake make install

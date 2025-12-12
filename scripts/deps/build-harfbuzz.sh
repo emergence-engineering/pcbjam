@@ -57,9 +57,11 @@ cd "${HARFBUZZ_BUILD}"
 
 # HarfBuzz uses meson, but also has CMake support
 emcmake cmake "${HARFBUZZ_DIR}" \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Debug} \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+    -DCMAKE_C_FLAGS="${DEBUG_CFLAGS:--g -O0}" \
+    -DCMAKE_CXX_FLAGS="${DEBUG_CFLAGS:--g -O0}" \
     -DHB_HAVE_FREETYPE=ON \
     -DHB_HAVE_GLIB=OFF \
     -DHB_HAVE_ICU=OFF \
