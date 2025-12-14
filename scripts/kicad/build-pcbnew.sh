@@ -12,6 +12,11 @@
 #   --debug       Build with debug symbols (default)
 #   --release     Build optimized without debug symbols
 #   -j N          Parallel compilation jobs (default: 1)
+#
+# Stamp System:
+#   Dependencies use source-hash stamps to detect when rebuilds are needed.
+#   wxWidgets rebuilds automatically when source files (*.cpp, *.h, *.c) change.
+#   To force a rebuild, delete the stamp: rm -f build-wasm/stamps/wxwidgets.stamp
 
 set -e
 
@@ -101,16 +106,13 @@ if [ $NO_CLEAN -eq 1 ] && check_stamp "${KICAD_STAMP}"; then
     exit 0
 fi
 
-# Step 4: Build wxWidgets if not present
-WXWIDGETS_STAMP="${BUILD_ROOT}/stamps/wxwidgets.stamp"
-if [ ! -f "${WX_BUILD}/lib/libwx_baseu-3.2.a" ]; then
+# Step 4: Build wxWidgets if source changed or not present
+WX_SOURCE="${PROJECT_ROOT}/wxwidgets/src"
+if [ ! -f "${WX_BUILD}/lib/libwx_baseu-3.2.a" ] || \
+   ! check_source_stamp "wxwidgets" "$WX_SOURCE" "*.cpp" "*.h" "*.c"; then
     log_info "Building wxWidgets..."
     "${SCRIPT_DIR}/../build-wxuniversal-wasm.sh" --no-clean
-    # Create stamp after successful build
-    touch "${WXWIDGETS_STAMP}"
-elif [ ! -f "${WXWIDGETS_STAMP}" ]; then
-    # Library exists but no stamp - create one
-    touch "${WXWIDGETS_STAMP}"
+    create_source_stamp "wxwidgets" "$WX_SOURCE" "*.cpp" "*.h" "*.c"
 fi
 
 log_info "Building KiCad PCBnew ${KICAD_VERSION} for WASM..."

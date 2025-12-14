@@ -130,7 +130,8 @@ all: minimal_test.html \
      $(S)/fontenum/fontenum_test.html \
      $(S)/textdecor/textdecor_test.html \
      $(S)/bitmask/bitmask_test.html \
-     $(S)/regions/regions_test.html
+     $(S)/regions/regions_test.html \
+     $(S)/maximize/maximize_test.html
 
 # Main test app (uses GL)
 minimal_test.o: minimal_test.cpp
@@ -405,6 +406,13 @@ $(S)/regions/regions_test.o: $(S)/regions/regions_test.cpp
 $(S)/regions/regions_test.html: $(S)/regions/regions_test.o
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
+# Maximize test (no GL) - reproduces KiCad startup maximize issue
+$(S)/maximize/maximize_test.o: $(S)/maximize/maximize_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/maximize/maximize_test.html: $(S)/maximize/maximize_test.o
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
 # Convenience targets
 menu: $(S)/menu/menu_test.html
 clipboard: $(S)/clipboard/clipboard_test.html
@@ -444,9 +452,10 @@ fontenum: $(S)/fontenum/fontenum_test.html
 textdecor: $(S)/textdecor/textdecor_test.html
 bitmask: $(S)/bitmask/bitmask_test.html
 regions: $(S)/regions/regions_test.html
+maximize: $(S)/maximize/maximize_test.html
 
 clean:
 	rm -f minimal_test.o minimal_test.html minimal_test.js minimal_test.wasm
 	rm -f $(S)/*/*.o $(S)/*/*.html $(S)/*/*.js $(S)/*/*.wasm
 
-.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions
+.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize

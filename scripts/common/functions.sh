@@ -193,6 +193,81 @@ remove_stamp() {
     rm -f "$stamp_file"
 }
 
+# Compute hash of source files in a directory
+# Usage: compute_source_hash /path/to/source "*.cpp" "*.h"
+compute_source_hash() {
+    local source_dir="$1"
+    shift
+    local patterns=("$@")
+
+    # Build find command for all patterns
+    local find_args=()
+    for pattern in "${patterns[@]}"; do
+        if [ ${#find_args[@]} -gt 0 ]; then
+            find_args+=("-o")
+        fi
+        find_args+=("-name" "$pattern")
+    done
+
+    # Hash all matching files (sorted for consistency)
+    # Use md5 on macOS, md5sum on Linux (Docker)
+    if command -v md5 &>/dev/null; then
+        find "$source_dir" -type f \( "${find_args[@]}" \) 2>/dev/null | \
+            sort | \
+            xargs cat 2>/dev/null | \
+            md5
+    else
+        find "$source_dir" -type f \( "${find_args[@]}" \) 2>/dev/null | \
+            sort | \
+            xargs cat 2>/dev/null | \
+            md5sum | \
+            cut -d' ' -f1
+    fi
+}
+
+# Create stamp with source hash
+# Usage: create_source_stamp "wxwidgets" /path/to/source "*.cpp" "*.h"
+create_source_stamp() {
+    local name="$1"
+    local source_dir="$2"
+    shift 2
+    local patterns=("$@")
+
+    local stamp_dir="${BUILD_ROOT:-$PROJECT_ROOT/build-wasm}/stamps"
+    mkdir -p "$stamp_dir"
+    local stamp_file="$stamp_dir/$name.stamp"
+
+    local hash=$(compute_source_hash "$source_dir" "${patterns[@]}")
+    echo "$hash" > "$stamp_file"
+    log_info "Created stamp: $name (hash: ${hash:0:8}...)"
+}
+
+# Check if source stamp is still valid
+# Usage: check_source_stamp "wxwidgets" /path/to/source "*.cpp" "*.h"
+# Returns: 0 if valid (no rebuild needed), 1 if invalid (rebuild needed)
+check_source_stamp() {
+    local name="$1"
+    local source_dir="$2"
+    shift 2
+    local patterns=("$@")
+
+    local stamp_file="${BUILD_ROOT:-$PROJECT_ROOT/build-wasm}/stamps/$name.stamp"
+
+    if [ ! -f "$stamp_file" ]; then
+        return 1  # No stamp, need build
+    fi
+
+    local stored_hash=$(cat "$stamp_file")
+    local current_hash=$(compute_source_hash "$source_dir" "${patterns[@]}")
+
+    if [ "$stored_hash" = "$current_hash" ]; then
+        return 0  # Up to date
+    else
+        log_info "Source changed for $name (${stored_hash:0:8}... -> ${current_hash:0:8}...)"
+        return 1  # Changed, need rebuild
+    fi
+}
+
 # Build if stamp doesn't exist
 build_if_needed() {
     local name="$1"

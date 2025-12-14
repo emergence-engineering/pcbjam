@@ -46,6 +46,7 @@ function findFreePort(): number {
 const port = getOrFindPort();
 
 export default defineConfig({
+  globalSetup: './global-setup.ts',
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
