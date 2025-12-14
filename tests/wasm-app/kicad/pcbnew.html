@@ -106,6 +106,7 @@
     };
 
     var Module = {
+      thisProgram: '/usr/bin/pcbnew',  // Fake absolute path for argv[0] (KiCad DEBUG check)
       preRun: [createCanvas],
       postRun: [],
 
