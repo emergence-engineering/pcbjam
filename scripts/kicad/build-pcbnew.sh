@@ -157,6 +157,19 @@ emar rcs "${STUBS_BUILD}/libcurl_stub.a" "${STUBS_BUILD}/curl_stub.o"
 
 log_info "Stub libraries built"
 
+# Step 6.2: Replace Emscripten's wasm-opt with stub to bypass asyncify transformation
+# This allows Emscripten to generate JS with Asyncify runtime, but we run the real
+# wasm-opt --asyncify on the host where more RAM is available (needs 50GB+ for KiCad)
+EMSDK_WASM_OPT="/emsdk/upstream/bin/wasm-opt"
+if [ -f "${EMSDK_WASM_OPT}" ] && [ ! -f "${EMSDK_WASM_OPT}.real" ]; then
+    log_info "Backing up real wasm-opt..."
+    mv "${EMSDK_WASM_OPT}" "${EMSDK_WASM_OPT}.real"
+fi
+# Always copy the latest stub (in case it was updated)
+cp "${STUBS_DIR}/wasm-opt-stub.sh" "${EMSDK_WASM_OPT}"
+chmod +x "${EMSDK_WASM_OPT}"
+log_info "wasm-opt stub installed (asyncify will run on host)"
+
 # Step 6.5: Verify WASM support is in KiCad fork
 # The kicad submodule should already have WASM port detection and kiplatform support
 KICAD_CMAKE="${KICAD_DIR}/CMakeLists.txt"
@@ -184,7 +197,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include" \
     -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include" \
-    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE=4 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8'] -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \

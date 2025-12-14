@@ -98,6 +98,7 @@ emconfigure "$WX_SOURCE/configure" \
     --disable-xlocale \
     --with-cxx=17 \
     --enable-utf8 \
+    --with-zlib=sys \
     ${WX_CONFIGURE_DEBUG}
 
 # Build PCRE first to avoid race condition with parallel builds
