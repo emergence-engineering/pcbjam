@@ -22,8 +22,8 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
 WX_SOURCE="$PROJECT_ROOT/wxwidgets"
 
-# Use JOBS from env.sh if set, otherwise default to 1 for sequential builds
-JOBS="${JOBS:-1}"
+# Use JOBS from env.sh if set, otherwise use all available cores
+JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
 echo "=== Building wxWidgets wxUniversal for WASM ==="
 echo "Project root: $PROJECT_ROOT"
