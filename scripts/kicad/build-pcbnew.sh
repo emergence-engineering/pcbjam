@@ -128,8 +128,10 @@ if [ "${DEBUG_BUILD:-0}" = "1" ] || [ $DEBUG -eq 1 ]; then
     BUILD_TYPE="Debug"
     EXTRA_FLAGS="-g -O1 -fexceptions -matomics -mbulk-memory"
     # -O0 at link time skips wasm-opt (which can OOM on large WASM with debug symbols)
-    LINKER_DEBUG_FLAGS="-O0 -g -gsource-map -fexceptions"
-    log_info "Building KiCad in DEBUG mode (with source maps, -O1 for WASM compatibility)"
+    # NOTE: -gsource-map removed because wasm-emscripten-finalize OOMs on large WASM
+    # with source maps enabled. Keep -g for debug symbols in the WASM.
+    LINKER_DEBUG_FLAGS="-O0 -g -fexceptions"
+    log_info "Building KiCad in DEBUG mode (debug symbols, no source maps due to memory)"
 else
     BUILD_TYPE="Release"
     EXTRA_FLAGS="-O2 -fexceptions -matomics -mbulk-memory"
@@ -156,6 +158,19 @@ emar rcs "${STUBS_BUILD}/libgit2_stub.a" "${STUBS_BUILD}/libgit2_stub.o"
 # Compile curl stub
 emcc -c "${STUBS_DIR}/curl_stub.c" -o "${STUBS_BUILD}/curl_stub.o"
 emar rcs "${STUBS_BUILD}/libcurl_stub.a" "${STUBS_BUILD}/curl_stub.o"
+
+# Compile GLU stub (for 3D viewer)
+emcc -c "${STUBS_DIR}/glu_stub.c" -o "${STUBS_BUILD}/glu_stub.o"
+emar rcs "${STUBS_BUILD}/libglu_stub.a" "${STUBS_BUILD}/glu_stub.o"
+
+# Compile PCBnew scripting stub (requires wxWidgets headers)
+WX_CXXFLAGS=$("${WX_BUILD}/wx-config" --cxxflags 2>/dev/null || echo "-I${WX_BUILD}/lib/wx/include/emscripten-unicode-static-3.2 -I${PROJECT_ROOT}/wxwidgets/include")
+em++ -c ${WX_CXXFLAGS} "${STUBS_DIR}/pcbnew_scripting_stub.cpp" -o "${STUBS_BUILD}/pcbnew_scripting_stub.o"
+emar rcs "${STUBS_BUILD}/libpcbnew_scripting_stub.a" "${STUBS_BUILD}/pcbnew_scripting_stub.o"
+
+# Compile NNG stub (IPC API requires NNG but sockets don't work in WASM)
+emcc -c -I"${STUBS_DIR}" "${STUBS_DIR}/nng_stub.c" -o "${STUBS_BUILD}/nng_stub.o"
+emar rcs "${STUBS_BUILD}/libnng_stub.a" "${STUBS_BUILD}/nng_stub.o"
 
 log_info "Stub libraries built"
 
@@ -197,9 +212,9 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \
     -DSYSROOT="${SYSROOT}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include" \
-    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include" \
-    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8'] -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a" \
+    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
+    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8'] -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a ${STUBS_BUILD}/libglu_stub.a ${STUBS_BUILD}/libpcbnew_scripting_stub.a ${STUBS_BUILD}/libnng_stub.a" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \
@@ -207,6 +222,8 @@ emcmake cmake "${KICAD_DIR}" \
     -DKICAD_SPICE=OFF \
     -DKICAD_USE_EGL=OFF \
     -DKICAD_USE_BUNDLED_GLEW=ON \
+    -DKICAD_BUILD_3D_VIEWER_WASM=ON \
+    -DKICAD_IPC_API=ON \
     \
     -DZSTD_ROOT="${SYSROOT}" \
     -DZSTD_INCLUDE_DIR="${SYSROOT}/include" \
@@ -227,6 +244,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DProtobuf_INCLUDE_DIR="${SYSROOT}/include" \
     -DProtobuf_LIBRARY="${SYSROOT}/lib/libprotobuf.a" \
     -DProtobuf_LITE_LIBRARY="${SYSROOT}/lib/libprotobuf-lite.a" \
+    -DProtobuf_PROTOC_EXECUTABLE="${SYSROOT}/bin/protoc" \
     -DODBC_CONFIG:STRING="stub-for-wasm" \
     -DODBCLIB:STRING="" \
     -DODBC_CFLAGS:STRING="" \
@@ -238,7 +256,6 @@ emcmake cmake "${KICAD_DIR}" \
 
 # Step 8: Build pcbnew target
 log_info "Building pcbnew..."
-# JOBS is set in env.sh (default: 1 for sequential builds, use -j N to override)
 emmake make -j${JOBS} pcbnew
 
 # Step 9: Create stamp file
