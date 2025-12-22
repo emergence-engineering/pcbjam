@@ -25,9 +25,18 @@ docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
     /workspace/scripts/kicad/build-pcbnew.sh "${ARGS[@]}"
 
 # Copy output to host-accessible directory
+# Note: pcbnew.wasm.debug.wasm contains DWARF debug info (generated with -gseparate-dwarf)
 echo "Copying build output to ./output/..."
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
-    bash -c "mkdir -p /workspace/output && cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm} /workspace/output/"
+    bash -c "mkdir -p /workspace/output && cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm} /workspace/output/"
+
+# Inject dynCall shims into pcbnew.js
+# This fixes "dynCall_* is not defined" errors in Emscripten 4.x
+./scripts/common/inject-dyncall-shims.sh output/pcbnew.js
+
+# Apply wasm-emscripten-finalize on host (skipped in Docker due to memory limits)
+# This is done on the host because finalize with DWARF needs significant RAM
+./scripts/common/apply-finalize.sh output/pcbnew.wasm output/pcbnew.wasm
 
 # Apply asyncify transformation on host
 # This is done on the host because wasm-opt --asyncify needs significant RAM

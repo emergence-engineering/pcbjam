@@ -83,7 +83,7 @@ PCRE2_INCLUDE="$BUILD_DIR/3rdparty/pcre/src"
 
 # Configure debug/release flags based on DEBUG_BUILD environment variable
 if [ "${DEBUG_BUILD:-1}" = "1" ]; then
-    WX_DEBUG_FLAGS="-g -O0"
+    WX_DEBUG_FLAGS="-g -O1"
     WX_CONFIGURE_DEBUG="--enable-debug"
     echo "Building wxWidgets in DEBUG mode"
 else

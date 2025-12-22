@@ -40,7 +40,7 @@ DEBUG_BUILD="${DEBUG_BUILD:-1}"
 
 if [ "$DEBUG_BUILD" = "1" ]; then
     export BUILD_TYPE="Debug"
-    export DEBUG_CFLAGS="-g -O0"
+    export DEBUG_CFLAGS="-g -O1"
     export DEBUG_LDFLAGS="-g -gsource-map"
 else
     export BUILD_TYPE="Release"

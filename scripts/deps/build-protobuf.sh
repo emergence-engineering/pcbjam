@@ -49,8 +49,37 @@ if [ ! -d "${PROTOBUF_DIR}" ]; then
     rm "protobuf-${PROTOBUF_VERSION}.tar.gz"
 fi
 
-log_info "Building Protobuf ${PROTOBUF_VERSION} for WASM..."
+log_info "Building Protobuf ${PROTOBUF_VERSION}..."
 
+# Step 1: Build native protoc for the host (needed for code generation)
+# This is required because the system protoc may be a different version
+PROTOBUF_HOST_BUILD="${BUILD_ROOT}/deps/protobuf-host"
+PROTOC_NATIVE="${PROTOBUF_HOST_BUILD}/protoc"
+
+if [ ! -f "${PROTOC_NATIVE}" ]; then
+    log_info "Building native protoc for host..."
+    mkdir -p "${PROTOBUF_HOST_BUILD}"
+    cd "${PROTOBUF_HOST_BUILD}"
+
+    # Build native (not cross-compiled) protoc
+    cmake "${PROTOBUF_DIR}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -Dprotobuf_BUILD_TESTS=OFF \
+        -Dprotobuf_BUILD_EXAMPLES=OFF \
+        -Dprotobuf_BUILD_SHARED_LIBS=OFF \
+        -Dprotobuf_WITH_ZLIB=OFF
+
+    make -j${JOBS} protoc
+    log_info "Native protoc built: ${PROTOC_NATIVE}"
+fi
+
+# Install native protoc to sysroot/bin for CMake to find
+mkdir -p "${SYSROOT}/bin"
+cp "${PROTOC_NATIVE}" "${SYSROOT}/bin/protoc"
+log_info "Native protoc installed to ${SYSROOT}/bin/protoc"
+
+# Step 2: Build WASM library
+log_info "Building Protobuf library for WASM..."
 mkdir -p "${PROTOBUF_BUILD}"
 cd "${PROTOBUF_BUILD}"
 

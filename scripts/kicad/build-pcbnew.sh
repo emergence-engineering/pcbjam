@@ -127,11 +127,11 @@ log_info "Building KiCad PCBnew ${KICAD_VERSION} for WASM..."
 if [ "${DEBUG_BUILD:-0}" = "1" ] || [ $DEBUG -eq 1 ]; then
     BUILD_TYPE="Debug"
     EXTRA_FLAGS="-g -O1 -fexceptions -matomics -mbulk-memory"
-    # -O0 at link time skips wasm-opt (which can OOM on large WASM with debug symbols)
-    # NOTE: -gsource-map removed because wasm-emscripten-finalize OOMs on large WASM
-    # with source maps enabled. Keep -g for debug symbols in the WASM.
-    LINKER_DEBUG_FLAGS="-O0 -g -fexceptions"
-    log_info "Building KiCad in DEBUG mode (debug symbols, no source maps due to memory)"
+    # -gseparate-dwarf puts debug info in a separate .debug.wasm file
+    # This keeps the main WASM small (~200MB) while preserving full debug info
+    # DevTools loads the debug file on-demand when debugging
+    LINKER_DEBUG_FLAGS="-O1 -g -gseparate-dwarf -fexceptions"
+    log_info "Building KiCad in DEBUG mode (separate DWARF for smaller main binary)"
 else
     BUILD_TYPE="Release"
     EXTRA_FLAGS="-O2 -fexceptions -matomics -mbulk-memory"
@@ -187,6 +187,18 @@ cp "${STUBS_DIR}/wasm-opt-stub.sh" "${EMSDK_WASM_OPT}"
 chmod +x "${EMSDK_WASM_OPT}"
 log_info "wasm-opt stub installed (asyncify will run on host)"
 
+# Step 6.3: Replace wasm-emscripten-finalize with stub (same pattern as wasm-opt)
+# This tool also OOMs on large WASM with debug symbols, so we run it on the host
+EMSDK_FINALIZE="/emsdk/upstream/bin/wasm-emscripten-finalize"
+if [ -f "${EMSDK_FINALIZE}" ] && [ ! -f "${EMSDK_FINALIZE}.real" ]; then
+    log_info "Backing up real wasm-emscripten-finalize..."
+    mv "${EMSDK_FINALIZE}" "${EMSDK_FINALIZE}.real"
+fi
+# Always copy the latest stub (in case it was updated)
+cp "${STUBS_DIR}/wasm-emscripten-finalize-stub.sh" "${EMSDK_FINALIZE}"
+chmod +x "${EMSDK_FINALIZE}"
+log_info "wasm-emscripten-finalize stub installed (finalize will run on host)"
+
 # Step 6.5: Verify WASM support is in KiCad fork
 # The kicad submodule should already have WASM port detection and kiplatform support
 KICAD_CMAKE="${KICAD_DIR}/CMakeLists.txt"
@@ -214,7 +226,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
     -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
-    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8'] -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a ${STUBS_BUILD}/libglu_stub.a ${STUBS_BUILD}/libpcbnew_scripting_stub.a ${STUBS_BUILD}/libnng_stub.a" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a ${STUBS_BUILD}/libglu_stub.a ${STUBS_BUILD}/libpcbnew_scripting_stub.a ${STUBS_BUILD}/libnng_stub.a ${STUBS_BUILD}/pcbnew_embind.o" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \
@@ -252,7 +264,29 @@ emcmake cmake "${KICAD_DIR}" \
     -DODBC_LIBRARIES:STRING="" \
     \
     -DBUILD_GITHUB_PLUGIN=OFF \
-    -DKICAD_PCM=OFF
+    -DKICAD_PCM=OFF \
+    \
+    -DHAVE_STRCASECMP=1 \
+    -DHAVE_STRNCASECMP=1
+
+# Step 7.1: Compile Embind bindings (after CMake so config.h exists)
+# Exposes KiCad objects to JavaScript for future Pyodide integration
+EMBIND_SRC="${PROJECT_ROOT}/wasm/bindings/pcbnew_embind.cpp"
+if [ -f "$EMBIND_SRC" ]; then
+    log_info "Compiling Embind bindings..."
+    # Use the same includes and flags that KiCad uses
+    KICAD_INCLUDES="-I${KICAD_BUILD} -I${KICAD_DIR}/include -I${KICAD_DIR}/pcbnew -I${KICAD_DIR}/common"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/libs/core/include -I${KICAD_DIR}/libs/kimath/include -I${KICAD_DIR}/libs/kiplatform/include"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/clipper2/Clipper2Lib/include"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nlohmann_json"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/dynamic_bitset"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nanodbc"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/picosha2"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty"
+    KICAD_INCLUDES+=" -I${SYSROOT}/include"
+    # KiCad requires C++20 for concepts
+    em++ -std=c++20 -c ${EXTRA_FLAGS} ${WX_CXXFLAGS} ${KICAD_INCLUDES} "$EMBIND_SRC" -o "${STUBS_BUILD}/pcbnew_embind.o"
+fi
 
 # Step 8: Build pcbnew target
 log_info "Building pcbnew..."

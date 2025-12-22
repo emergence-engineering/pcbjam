@@ -39,6 +39,13 @@ ASYNCIFY_REMOVE=$(cat << 'REMOVELIST'
 COLOR_SETTINGS::COLOR_SETTINGS(wxString const&, bool)
 BuildBitmapInfo(std::__2::unordered_map<BITMAPS, std::__2::vector<BITMAP_INFO, std::__2::allocator<BITMAP_INFO>>, std::__2::hash<BITMAPS>, std::__2::equal_to<BITMAPS>, std::__2::allocator<std::__2::pair<BITMAPS const, std::__2::vector<BITMAP_INFO, std::__2::allocator<BITMAP_INFO>>>>>&)
 match
+DIALOG_PAD_PROPERTIES_BASE::DIALOG_PAD_PROPERTIES_BASE(wxWindow*, int, wxString const&, wxPoint const&, wxSize const&, long)
+buildKicadAboutBanner(EDA_BASE_FRAME*, ABOUT_APP_INFO&)
+IGESToBRep_CurveAndSurface::TransferGeometry(opencascade::handle<IGESData_IGESEntity> const&, Message_ProgressRange const&)
+StepAP214_Protocol::StepAP214_Protocol()
+BRepCheck_ParallelAnalyzer::operator()(int) const
+ShapeFix_Wire::FixGap3d(int, bool)
+ShapeFix_Wire::FixGap2d(int, bool)
 REMOVELIST
 )
 
