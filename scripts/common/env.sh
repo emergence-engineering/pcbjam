@@ -34,6 +34,12 @@ export EMSDK_QUIET=1
 export EMCC_CFLAGS="-fPIC -DEMSCRIPTEN"
 export EMCC_CXXFLAGS="-fPIC -DEMSCRIPTEN -std=c++17"
 
+# Use ccache if available for faster rebuilds
+if command -v ccache &> /dev/null; then
+    export CC="ccache emcc"
+    export CXX="ccache em++"
+fi
+
 # Debug mode (default: ON, use --release to disable)
 # This can be overridden by setting DEBUG_BUILD=0 before sourcing this file
 DEBUG_BUILD="${DEBUG_BUILD:-1}"

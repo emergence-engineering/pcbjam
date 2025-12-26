@@ -17,7 +17,16 @@ RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     swig \
     unixodbc-dev \
+    ccache \
     && rm -rf /var/lib/apt/lists/*
+
+# Configure ccache for Emscripten
+# CCACHE_DIR in named volume persists across containers
+ENV CCACHE_DIR=/workspace/build-wasm/.ccache
+ENV CCACHE_MAXSIZE=10G
+ENV CCACHE_COMPILERCHECK=content
+ENV CCACHE_SLOPPINESS=include_file_mtime,time_macros,pch_defines
+ENV CCACHE_BASEDIR=/workspace
 
 WORKDIR /workspace
 

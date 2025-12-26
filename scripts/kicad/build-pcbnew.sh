@@ -6,17 +6,22 @@
 #   ./scripts/kicad/build-pcbnew.sh [options]
 #
 # Options:
-#   --clean       Full clean rebuild (dependencies + KiCad)
-#   --no-clean    Skip cleaning the build directory (default: clean KiCad only)
-#   --skip-deps   Skip building dependencies
+#   --full        Full clean rebuild (dependencies + KiCad)
+#   --clean-kicad Clean only KiCad build directory (not deps)
+#   --build-deps  Build dependencies (default: skip)
 #   --debug       Build with debug symbols (default)
 #   --release     Build optimized without debug symbols
 #   -j N          Parallel compilation jobs (default: 1)
 #
-# Stamp System:
-#   Dependencies use source-hash stamps to detect when rebuilds are needed.
-#   wxWidgets rebuilds automatically when source files (*.cpp, *.h, *.c) change.
-#   To force a rebuild, delete the stamp: rm -f build-wasm/stamps/wxwidgets.stamp
+# Defaults (optimized for development):
+#   - Incremental build (no clean)
+#   - Skip dependencies
+#   - ccache enabled for faster rebuilds
+#
+# Incremental Build System:
+#   - wxWidgets: configure runs once, make handles file-level dependencies
+#   - KiCad: CMake tracks dependencies, only recompiles changed files
+#   - ccache: Caches compiled objects for faster rebuilds
 
 set -e
 
@@ -31,23 +36,25 @@ KICAD_STAMP="${BUILD_ROOT}/stamps/kicad-pcbnew.stamp"
 WASM_LAYER="${PROJECT_ROOT}/wasm"
 WX_BUILD="${BUILD_ROOT}/wxwidgets-universal"
 
-# Parse arguments - clean KiCad by default
-NO_CLEAN=0
+# Parse arguments - incremental build by default (optimized for development)
+NO_CLEAN=1
 FULL_CLEAN=0
-SKIP_DEPS=0
+SKIP_DEPS=1
 DEBUG=0
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --clean)
+        --full)
             FULL_CLEAN=1
+            NO_CLEAN=0
+            SKIP_DEPS=0
             shift
             ;;
-        --no-clean)
-            NO_CLEAN=1
+        --clean-kicad)
+            NO_CLEAN=0
             shift
             ;;
-        --skip-deps)
-            SKIP_DEPS=1
+        --build-deps)
+            SKIP_DEPS=0
             shift
             ;;
         --debug)
@@ -88,7 +95,7 @@ elif [ $NO_CLEAN -eq 0 ]; then
     log_info "Cleaning KiCad PCBnew build directory..."
     rm -rf "${KICAD_BUILD}" "${KICAD_STAMP}"
 else
-    log_info "Skipping clean (--no-clean specified)"
+    log_info "Incremental build (use --clean-kicad or --full to clean)"
 fi
 
 # Step 2: Build dependencies
@@ -97,23 +104,21 @@ if [ $SKIP_DEPS -eq 0 ]; then
     log_info "Building dependencies..."
     "${SCRIPT_DIR}/../deps/build-all-deps.sh" --with-occ
 else
-    log_info "Skipping dependencies (--skip-deps specified)"
+    log_info "Skipping dependencies (use --build-deps or --full to build)"
 fi
 
-# Step 3: Check if already built (only relevant with --no-clean)
-if [ $NO_CLEAN -eq 1 ] && check_stamp "${KICAD_STAMP}"; then
-    log_info "KiCad PCBnew already built, skipping..."
-    exit 0
-fi
+# Note: We don't check the KiCad stamp here for incremental builds.
+# CMake handles dependency tracking - it will detect changed source files
+# and only recompile what's needed. The stamp is created at the end for
+# scripts that want to know if KiCad was ever built successfully.
 
-# Step 4: Build wxWidgets if source changed or not present
-WX_SOURCE="${PROJECT_ROOT}/wxwidgets/src"
-if [ ! -f "${WX_BUILD}/lib/libwx_baseu-3.2.a" ] || \
-   ! check_source_stamp "wxwidgets" "$WX_SOURCE" "*.cpp" "*.h" "*.c"; then
-    log_info "Building wxWidgets..."
-    "${SCRIPT_DIR}/../build-wxuniversal-wasm.sh" --no-clean
-    create_source_stamp "wxwidgets" "$WX_SOURCE" "*.cpp" "*.h" "*.c"
-fi
+# Step 4: Build wxWidgets (incremental - only recompiles changed files)
+# The wxWidgets build script handles:
+# - Skipping configure if already configured
+# - make handles per-file dependency tracking
+# - ccache handles compilation caching
+log_info "Building wxWidgets..."
+"${SCRIPT_DIR}/../build-wxuniversal-wasm.sh" --no-clean
 
 log_info "Building KiCad PCBnew ${KICAD_VERSION} for WASM..."
 
@@ -218,7 +223,16 @@ log_info "KiCad WASM support verified"
 # Step 7: Configure KiCad with CMake
 # We use CMAKE_MODULE_PATH to inject our compatibility layer
 log_info "Configuring KiCad with CMake..."
+
+# Use ccache if available (CMAKE_*_COMPILER_LAUNCHER is the proper CMake way)
+CCACHE_OPTS=""
+if command -v ccache &> /dev/null; then
+    CCACHE_OPTS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+    log_info "Using ccache for compilation"
+fi
+
 emcmake cmake "${KICAD_DIR}" \
+    ${CCACHE_OPTS} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
     -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \

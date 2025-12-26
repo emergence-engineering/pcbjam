@@ -124,27 +124,48 @@ Import patterns used:
 
 | Flag | Description |
 |------|-------------|
-| `--clean` | Full clean rebuild (all deps + wxWidgets + KiCad) |
-| `--no-clean` | Incremental build (don't clean anything) |
-| `--skip-deps` | Skip dependency rebuild |
+| `--full` | Full clean rebuild (all deps + wxWidgets + KiCad) |
+| `--clean-kicad` | Clean only KiCad build directory |
+| `--build-deps` | Build dependencies (skipped by default) |
 | `--release` | Disable debug symbols, enable optimizations |
 | `--debug` | Enable debug symbols (default) |
-| `-j N` | Parallel jobs (default: 1 for sequential builds) |
+| `-j N` | Parallel jobs (default: all cores) |
 
-### Clean Modes
+### Build Modes
 
-| Mode | Command | What gets cleaned |
-|------|---------|-------------------|
-| **Full clean** | `./docker/build.sh --clean` | All stamps, deps, wxWidgets, sysroot, KiCad |
-| **Default** | `./docker/build.sh` | KiCad build only (reuses deps) |
-| **Incremental** | `./docker/build.sh --no-clean` | Nothing (fastest for iteration) |
+| Mode | Command | Description |
+|------|---------|-------------|
+| **Incremental (default)** | `./docker/build.sh` | Fastest for development (~1.5 min) |
+| **Full rebuild** | `./docker/build.sh --full` | Clean everything and rebuild |
+| **Rebuild KiCad** | `./docker/build.sh --clean-kicad` | Clean and rebuild KiCad only |
+| **With dependencies** | `./docker/build.sh --build-deps` | Also rebuild dependencies |
 
-**Full clean removes:**
+**Full rebuild removes:**
 - `build-wasm/stamps/*` - All build stamps
 - `build-wasm/deps/*` - All dependency builds
 - `build-wasm/wxwidgets-universal` - wxWidgets build
 - `build-wasm/sysroot/*` - Installed headers/libraries
 - `build-wasm/kicad-pcbnew` - KiCad build
+
+## Incremental Build System
+
+The build system is optimized for fast development iteration:
+
+### How It Works
+- **ccache**: Caches compiled objects by hashing preprocessed source
+- **wxWidgets**: `configure` runs once, `make` handles file-level dependencies
+- **KiCad**: CMake tracks dependencies, only recompiles changed files
+- **Asyncify**: Post-processing runs every build (~1 min, irreducible minimum)
+
+### Performance
+
+| Scenario | Time |
+|----------|------|
+| No changes | ~1.5 min |
+| Single file change (KiCad or wxWidgets) | ~1.5 min |
+| Full rebuild | ~10 min |
+
+Most time is spent on asyncify post-processing which runs on every build.
 
 ### Debug vs Release
 
@@ -161,7 +182,7 @@ Import patterns used:
 
 ## Stamp-based Caching
 
-Build progress is tracked with stamp files in `build-wasm/stamps/`:
+Dependency build progress is tracked with stamp files in `build-wasm/stamps/`:
 
 ```
 build-wasm/stamps/
@@ -171,14 +192,15 @@ build-wasm/stamps/
 ├── harfbuzz.stamp
 ├── pixman.stamp
 ├── cairo.stamp
-├── wxwidgets.stamp
 └── kicad-pcbnew.stamp
 ```
+
+**Note:** wxWidgets and KiCad use make/CMake for incremental builds instead of stamps.
 
 **Clear specific component:** `rm build-wasm/stamps/zstd.stamp`
 **Clear all stamps:** `rm -f build-wasm/stamps/*.stamp`
 
-After changing build flags (debug/release), clear stamps to force rebuild.
+After changing build flags (debug/release), use `--full` to force a complete rebuild.
 
 ## Build Scripts
 
@@ -216,8 +238,8 @@ OpenCASCADE is the longest dependency to build (~30 minutes).
 - Re-run build
 
 ### Incremental build not picking up changes
-- Clear KiCad stamp: `rm build-wasm/stamps/kicad-pcbnew.stamp`
-- Use `--no-clean` flag to avoid full rebuild
+- For KiCad: use `--clean-kicad` to force rebuild
+- For wxWidgets: delete `build-wasm/wxwidgets-universal/Makefile` to force reconfigure
 
 ### WASM exception with numeric error (e.g., `3788888`)
 - Build with debug symbols (default): No `--release` flag

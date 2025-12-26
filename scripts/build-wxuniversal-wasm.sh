@@ -53,70 +53,90 @@ fi
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Configure with emconfigure
-# Key flags based on wxWidgets-wasm:
-# --host=emscripten          Host system (detected via config.sub)
-# --enable-universal         Use wxUniversal (draws widgets directly)
-# --disable-shared           Build static libraries
-# --with-opengl              Enable OpenGL/WebGL support
-# --enable-exceptions        Enable C++ exceptions (needed for KiCad debug builds)
-# --disable-richtext         Not needed for KiCad, simplifies build
-# --without-libtiff          Avoid external dependencies
-# --disable-xlocale          Browser environment handles locale
-
-echo ""
-echo "=== Configuring ==="
-
-# Ensure Emscripten's zlib port is built (works in Docker and on host)
-# This populates the cache sysroot with zlib.h and libz.a
-echo "Building Emscripten zlib port..."
-embuilder build zlib
-
-# Get Emscripten cache sysroot path (portable across environments)
-EM_CACHE_SYSROOT="$(em-config CACHE)/sysroot"
-echo "Emscripten cache sysroot: $EM_CACHE_SYSROOT"
-
-# Set flags for Emscripten compatibility
-# Z_HAVE_UNISTD_H ensures zlib includes <unistd.h> for read/write/lseek
-# Include pcre2 headers from the build directory (generated during configure)
-PCRE2_INCLUDE="$BUILD_DIR/3rdparty/pcre/src"
-
-# Configure debug/release flags based on DEBUG_BUILD environment variable
-if [ "${DEBUG_BUILD:-1}" = "1" ]; then
-    WX_DEBUG_FLAGS="-g -O1"
-    WX_CONFIGURE_DEBUG="--enable-debug"
-    echo "Building wxWidgets in DEBUG mode"
+# Determine if we need to run configure
+# Skip configure if:
+# 1. Makefile exists (already configured)
+# 2. configure.in hasn't changed since last configure
+NEEDS_CONFIGURE=0
+if [ ! -f "$BUILD_DIR/Makefile" ]; then
+    echo "Not configured yet, will run configure..."
+    NEEDS_CONFIGURE=1
+elif [ "$WX_SOURCE/configure.in" -nt "$BUILD_DIR/Makefile" ]; then
+    echo "configure.in changed since last configure, will reconfigure..."
+    NEEDS_CONFIGURE=1
+elif [ "$WX_SOURCE/configure" -nt "$BUILD_DIR/Makefile" ]; then
+    echo "configure script changed, will reconfigure..."
+    NEEDS_CONFIGURE=1
 else
-    WX_DEBUG_FLAGS="-O2"
-    WX_CONFIGURE_DEBUG=""
-    echo "Building wxWidgets in RELEASE mode"
+    echo "Already configured, skipping configure (use clean build to reconfigure)"
 fi
 
-# Include emscripten cache sysroot for zlib headers
-export CFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include ${WX_DEBUG_FLAGS} -fexceptions -pthread -matomics -mbulk-memory"
-export CXXFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include -I$PCRE2_INCLUDE ${WX_DEBUG_FLAGS} -fexceptions -pthread -matomics -mbulk-memory"
-export LDFLAGS="-L$EM_CACHE_SYSROOT/lib/wasm32-emscripten"
+if [ $NEEDS_CONFIGURE -eq 1 ]; then
+    # Configure with emconfigure
+    # Key flags based on wxWidgets-wasm:
+    # --host=emscripten          Host system (detected via config.sub)
+    # --enable-universal         Use wxUniversal (draws widgets directly)
+    # --disable-shared           Build static libraries
+    # --with-opengl              Enable OpenGL/WebGL support
+    # --enable-exceptions        Enable C++ exceptions (needed for KiCad debug builds)
+    # --disable-richtext         Not needed for KiCad, simplifies build
+    # --without-libtiff          Avoid external dependencies
+    # --disable-xlocale          Browser environment handles locale
 
-emconfigure "$WX_SOURCE/configure" \
-    --host=emscripten \
-    --without-subdirs \
-    --enable-universal \
-    --disable-shared \
-    --with-opengl \
-    --enable-exceptions \
-    --disable-richtext \
-    --without-libtiff \
-    --disable-xlocale \
-    --with-cxx=17 \
-    --enable-utf8 \
-    --with-zlib=sys \
-    ${WX_CONFIGURE_DEBUG}
+    echo ""
+    echo "=== Configuring ==="
 
-# Build PCRE first to avoid race condition with parallel builds
-# PCRE headers (pcre2.h) must be generated before regex.cpp compiles
-echo ""
-echo "=== Building PCRE first (dependency) ==="
-emmake make -C 3rdparty/pcre
+    # Ensure Emscripten's zlib port is built (works in Docker and on host)
+    # This populates the cache sysroot with zlib.h and libz.a
+    echo "Building Emscripten zlib port..."
+    embuilder build zlib
+
+    # Get Emscripten cache sysroot path (portable across environments)
+    EM_CACHE_SYSROOT="$(em-config CACHE)/sysroot"
+    echo "Emscripten cache sysroot: $EM_CACHE_SYSROOT"
+
+    # Set flags for Emscripten compatibility
+    # Z_HAVE_UNISTD_H ensures zlib includes <unistd.h> for read/write/lseek
+    # Include pcre2 headers from the build directory (generated during configure)
+    PCRE2_INCLUDE="$BUILD_DIR/3rdparty/pcre/src"
+
+    # Configure debug/release flags based on DEBUG_BUILD environment variable
+    if [ "${DEBUG_BUILD:-1}" = "1" ]; then
+        WX_DEBUG_FLAGS="-g -O1"
+        WX_CONFIGURE_DEBUG="--enable-debug"
+        echo "Building wxWidgets in DEBUG mode"
+    else
+        WX_DEBUG_FLAGS="-O2"
+        WX_CONFIGURE_DEBUG=""
+        echo "Building wxWidgets in RELEASE mode"
+    fi
+
+    # Include emscripten cache sysroot for zlib headers
+    export CFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include ${WX_DEBUG_FLAGS} -fexceptions -pthread -matomics -mbulk-memory"
+    export CXXFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include -I$PCRE2_INCLUDE ${WX_DEBUG_FLAGS} -fexceptions -pthread -matomics -mbulk-memory"
+    export LDFLAGS="-L$EM_CACHE_SYSROOT/lib/wasm32-emscripten"
+
+    emconfigure "$WX_SOURCE/configure" \
+        --host=emscripten \
+        --without-subdirs \
+        --enable-universal \
+        --disable-shared \
+        --with-opengl \
+        --enable-exceptions \
+        --disable-richtext \
+        --without-libtiff \
+        --disable-xlocale \
+        --with-cxx=17 \
+        --enable-utf8 \
+        --with-zlib=sys \
+        ${WX_CONFIGURE_DEBUG}
+
+    # Build PCRE first to avoid race condition with parallel builds
+    # PCRE headers (pcre2.h) must be generated before regex.cpp compiles
+    echo ""
+    echo "=== Building PCRE first (dependency) ==="
+    emmake make -C 3rdparty/pcre
+fi
 
 # Build wxWidgets
 echo ""
