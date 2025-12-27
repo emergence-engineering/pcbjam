@@ -62,8 +62,11 @@ if [ ! -f "${PROTOC_NATIVE}" ]; then
     cd "${PROTOBUF_HOST_BUILD}"
 
     # Build native (not cross-compiled) protoc
+    # Explicitly use system compilers to avoid Emscripten (which is in PATH)
     cmake "${PROTOBUF_DIR}" \
         -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=/usr/bin/gcc \
+        -DCMAKE_CXX_COMPILER=/usr/bin/g++ \
         -Dprotobuf_BUILD_TESTS=OFF \
         -Dprotobuf_BUILD_EXAMPLES=OFF \
         -Dprotobuf_BUILD_SHARED_LIBS=OFF \

@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y \
     swig \
     unixodbc-dev \
     ccache \
+    rsync \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure ccache for Emscripten

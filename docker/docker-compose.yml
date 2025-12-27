@@ -13,8 +13,11 @@ services:
           memory: 32G
 
     volumes:
-      # Source code (read-only - all modifications happen in build-wasm volume)
-      - ..:/workspace:ro
+      # Host source mounted read-only at staging location
+      # (rsync'd to /workspace on container start to fix macOS timestamp issues)
+      - ..:/workspace-host:ro
+      # Synced source in Docker volume (consistent timestamps)
+      - workspace-src:/workspace
       # Named volume for build cache (faster than bind mount on macOS)
       - kicad-build-cache:/workspace/build-wasm
       # Output directory for easy access to final WASM files
@@ -26,3 +29,4 @@ services:
 
 volumes:
   kicad-build-cache:
+  workspace-src:

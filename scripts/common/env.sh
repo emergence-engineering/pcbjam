@@ -11,6 +11,12 @@ export PROJECT_ROOT="$_KICAD_WASM_PROJECT_ROOT"
 export SCRIPTS_DIR="$_KICAD_WASM_SCRIPTS_DIR"
 export COMMON_DIR="$_KICAD_WASM_COMMON_DIR"
 
+# Use our config.sub wrapper for autoconf projects (emconfigure)
+# This intercepts config.sub calls to use our version with emscripten/wasm32 support
+# CONFIG_SHELL is critical: nested configures do SHELL=${CONFIG_SHELL-/bin/sh}
+export SHELL="$SCRIPTS_DIR/config/config-sub-wrapper.sh"
+export CONFIG_SHELL="$SCRIPTS_DIR/config/config-sub-wrapper.sh"
+
 # Build output directories (inside the project)
 export BUILD_ROOT="$PROJECT_ROOT/build-wasm"
 export DEPS_ROOT="$BUILD_ROOT/deps"

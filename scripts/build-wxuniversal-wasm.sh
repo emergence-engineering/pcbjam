@@ -17,10 +17,24 @@
 
 set -e
 
+# Ensure 'python' command is available (macOS only has python3)
+# Homebrew's python libexec has the python -> python3 symlink
+if [[ -d "/opt/homebrew/opt/python/libexec/bin" ]]; then
+    export PATH="/opt/homebrew/opt/python/libexec/bin:$PATH"
+elif [[ -d "/usr/local/opt/python/libexec/bin" ]]; then
+    export PATH="/usr/local/opt/python/libexec/bin:$PATH"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
 WX_SOURCE="$PROJECT_ROOT/wxwidgets"
+
+# Use our config.sub wrapper for autoconf projects
+# CONFIG_SHELL is critical: nested configures (pcre, etc.) do SHELL=${CONFIG_SHELL-/bin/sh}
+# Without CONFIG_SHELL, nested configures would reset SHELL to /bin/sh and bypass our wrapper
+export SHELL="$SCRIPT_DIR/config/config-sub-wrapper.sh"
+export CONFIG_SHELL="$SCRIPT_DIR/config/config-sub-wrapper.sh"
 
 # Use JOBS from env.sh if set, otherwise use all available cores
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"

@@ -20,6 +20,12 @@ fi
 # Start container if not running
 docker compose -f docker/docker-compose.yml up -d
 
+# Sync source code to container volume (fixes macOS Docker timestamp issues)
+# This ensures timestamps are consistent within the container filesystem
+echo "Syncing source code to container..."
+docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+    rsync -a --delete --exclude='build-wasm' --exclude='output' /workspace-host/ /workspace/
+
 # Run build command (without asyncify - handled on host due to memory requirements)
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
     /workspace/scripts/kicad/build-pcbnew.sh "${ARGS[@]}"
