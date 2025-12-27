@@ -36,6 +36,9 @@ WX_SOURCE="$PROJECT_ROOT/wxwidgets"
 export SHELL="$SCRIPT_DIR/config/config-sub-wrapper.sh"
 export CONFIG_SHELL="$SCRIPT_DIR/config/config-sub-wrapper.sh"
 
+# Disable autom4te cache to keep submodules clean
+export AUTOM4TE="$SCRIPT_DIR/config/autom4te-wrapper.sh"
+
 # Use JOBS from env.sh if set, otherwise use all available cores
 JOBS="${JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
 
