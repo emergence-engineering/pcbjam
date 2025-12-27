@@ -6,6 +6,3 @@
 	path = wxwidgets
 	url = git@github.com:VV-EE/wxWidgets.git
 	branch = wasm-port
-[submodule "wxWidgets-wasm-reference"]
-	path = wxWidgets-wasm-reference
-	url = git@github.com:ahilss/wxWidgets-wasm.git
