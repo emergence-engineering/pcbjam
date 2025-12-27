@@ -17,7 +17,7 @@ test.describe('wxLogError Dialog Tests', () => {
 
     // Wait for app to initialize
     await page.waitForFunction(() => {
-      return document.querySelector('#canvas')?.style.display === 'block';
+      return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 30000 });
 
     // Verify canvas is visible
@@ -41,7 +41,7 @@ test.describe('wxLogError Dialog Tests', () => {
     await page.goto('/standalone/logerror/logerror_test.html');
 
     await page.waitForFunction(() => {
-      return document.querySelector('#canvas')?.style.display === 'block';
+      return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 30000 });
 
     // Wait for UI to be ready
@@ -86,7 +86,7 @@ test.describe('wxLogError Dialog Tests', () => {
     await page.goto('/standalone/logerror/logerror_test.html');
 
     await page.waitForFunction(() => {
-      return document.querySelector('#canvas')?.style.display === 'block';
+      return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 30000 });
 
     // Wait for UI to be ready
@@ -122,7 +122,7 @@ test.describe('wxLogError Dialog Tests', () => {
     await page.goto('/standalone/logerror/logerror_test.html');
 
     await page.waitForFunction(() => {
-      return document.querySelector('#canvas')?.style.display === 'block';
+      return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 30000 });
 
     await page.waitForTimeout(500);

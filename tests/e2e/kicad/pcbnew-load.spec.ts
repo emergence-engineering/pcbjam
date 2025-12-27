@@ -8,7 +8,7 @@ test.describe('KiCad PCBnew WASM', () => {
 
     // Wait for runtime initialization (longer timeout for KiCad - 15MB WASM)
     await page.waitForFunction(() => {
-      return document.querySelector('#canvas')?.style.display === 'block';
+      return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 120000 }); // 2 min timeout for large WASM
 
     // Verify canvas is visible
@@ -52,7 +52,7 @@ test.describe('KiCad PCBnew WASM', () => {
 
     // Wait for load
     await page.waitForFunction(() => {
-      return document.querySelector('#canvas')?.style.display === 'block';
+      return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 120000 });
 
     // Wait for initial render
@@ -77,7 +77,7 @@ test.describe('KiCad PCBnew WASM', () => {
     await page.goto('/kicad/pcbnew.html');
 
     await page.waitForFunction(() => {
-      return document.querySelector('#canvas')?.style.display === 'block';
+      return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 120000 });
 
     await page.waitForTimeout(2000);
