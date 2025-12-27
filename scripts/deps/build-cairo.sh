@@ -122,6 +122,13 @@ meson setup "${CAIRO_DIR}" \
     -Dfreetype2:default_library=static \
     -Dlibpng:default_library=static
 
+# Remove .git directories from meson subprojects
+# Meson clones subprojects (like freetype) as full git repos and creates
+# .meson-subproject-wrap-hash.txt which shows as untracked in those repos.
+# IDEs detect these nested git repos and show dirty status in commit sidebar.
+# We only need the source files for building, not git history.
+find "${CAIRO_DIR}/subprojects" -name ".git" -type d -exec rm -rf {} + 2>/dev/null || true
+
 # JOBS is set in env.sh (default: 1 for sequential builds, use -j N to override)
 # Build only the library targets we need - utility executables fail to link and aren't needed
 ninja -j${JOBS} src/libcairo.a
