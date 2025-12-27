@@ -103,6 +103,14 @@ if [ $NEEDS_CONFIGURE -eq 1 ]; then
     echo ""
     echo "=== Configuring ==="
 
+    # Regenerate autotools files in bundled PCRE to fix version mismatch
+    # The bundled PCRE was generated with automake 1.16.1 but build systems
+    # may have different versions. Running autoreconf ensures compatibility.
+    if command -v autoreconf &> /dev/null; then
+        echo "Regenerating autotools files for bundled PCRE..."
+        (cd "$WX_SOURCE/3rdparty/pcre" && autoreconf -fi 2>/dev/null || true)
+    fi
+
     # Ensure Emscripten's zlib port is built (works in Docker and on host)
     # This populates the cache sysroot with zlib.h and libz.a
     echo "Building Emscripten zlib port..."

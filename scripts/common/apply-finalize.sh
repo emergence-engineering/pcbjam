@@ -9,15 +9,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Get wasm-emscripten-finalize from same Binaryen install as wasm-opt
-BINARYEN_DIR="${PROJECT_ROOT}/tools/binaryen-121"
-FINALIZE="${BINARYEN_DIR}/bin/wasm-emscripten-finalize"
-
-# Ensure Binaryen is downloaded
-if [ ! -x "${FINALIZE}" ]; then
-    echo "Downloading Binaryen v121..."
-    "${SCRIPT_DIR}/get-wasm-opt.sh" > /dev/null
-fi
+# Get wasm-opt path (this downloads Binaryen if needed)
+WASM_OPT=$("${SCRIPT_DIR}/get-wasm-opt.sh")
+BINARYEN_BIN=$(dirname "${WASM_OPT}")
+FINALIZE="${BINARYEN_BIN}/wasm-emscripten-finalize"
 
 INPUT_WASM="${1:-output/pcbnew.wasm}"
 OUTPUT_WASM="${2:-${INPUT_WASM}}"
