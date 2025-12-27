@@ -105,9 +105,43 @@
       document.getElementById('status').style.display = 'none';
     };
 
+    // Pre-fetched resource data (fetched before pcbnew.js loads)
+    var resourceData = null;
+
+    // Start fetching images.tar.gz immediately (runs in parallel with WASM loading)
+    fetch('images.tar.gz')
+      .then(function(response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.arrayBuffer();
+      })
+      .then(function(buffer) {
+        resourceData = new Uint8Array(buffer);
+        console.log('[KICAD] Prefetched images.tar.gz (' + resourceData.length + ' bytes)');
+      })
+      .catch(function(err) {
+        console.warn('[KICAD] Could not prefetch images.tar.gz:', err.message);
+      });
+
+    // Write pre-fetched resources to FS (called in preRun after FS is available)
+    var writeResources = function() {
+      // Create directory structure matching KiCad's compiled-in KICAD_DATA path
+      // This path is baked in during CMake configuration
+      var resourcePath = '/workspace/build-wasm/sysroot/share/kicad/resources';
+      FS.mkdirTree(resourcePath);
+
+      // Write pre-fetched data if available
+      if (resourceData) {
+        FS.writeFile(resourcePath + '/images.tar.gz', resourceData);
+        console.log('[KICAD] Wrote images.tar.gz to ' + resourcePath);
+      } else {
+        console.warn('[KICAD] images.tar.gz not ready yet (WASM loaded faster than fetch)');
+      }
+    };
+
     var Module = {
       thisProgram: '/usr/bin/pcbnew',  // Fake absolute path for argv[0] (KiCad DEBUG check)
-      preRun: [createCanvas],
+
+      preRun: [createCanvas, writeResources],
       postRun: [],
 
       print: function(text) {

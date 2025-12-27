@@ -21,10 +21,15 @@ fi
 docker compose -f docker/docker-compose.yml up -d
 
 # Sync source code to container volume (fixes macOS Docker timestamp issues)
-# This ensures timestamps are consistent within the container filesystem
+# rsync -a preserves host timestamps, but make needs container timestamps to
+# correctly detect changes against cached object files. We touch transferred
+# files to set their mtime to container's current time.
 echo "Syncing source code to container..."
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
-    rsync -a --delete --exclude='build-wasm' --exclude='output' /workspace-host/ /workspace/
+    bash -c 'rsync -ai --delete --exclude="build-wasm" --exclude="output" /workspace-host/ /workspace/ | \
+        grep "^>f" | \
+        sed "s/^[^ ]* //" | \
+        while read f; do touch "/workspace/$f" 2>/dev/null; done'
 
 # Run build command (without asyncify - handled on host due to memory requirements)
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
@@ -34,7 +39,10 @@ docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
 # Note: pcbnew.wasm.debug.wasm contains DWARF debug info (generated with -gseparate-dwarf)
 echo "Copying build output to ./output/..."
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
-    bash -c "mkdir -p /workspace/output && cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm} /workspace/output/"
+    bash -c "mkdir -p /workspace/output && \
+        cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || \
+        cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm} /workspace/output/; \
+        cp /workspace/build-wasm/kicad-pcbnew/resources/images.tar.gz /workspace/output/ 2>/dev/null || true"
 
 # Inject dynCall shims into pcbnew.js
 # This fixes "dynCall_* is not defined" errors in Emscripten 4.x

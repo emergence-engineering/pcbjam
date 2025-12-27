@@ -22,6 +22,8 @@ if [ -f "$OUTPUT_DIR/pcbnew.js" ] && [ -f "$OUTPUT_DIR/pcbnew.wasm" ]; then
     cp "$OUTPUT_DIR/pcbnew.wasm.map" "$KICAD_TEST/" 2>/dev/null || true
     # Worker file for pthreads (optional)
     cp "$OUTPUT_DIR/pcbnew.worker.js" "$KICAD_TEST/" 2>/dev/null || true
+    # Bitmap resources for KiCad icons (optional)
+    cp "$OUTPUT_DIR/images.tar.gz" "$KICAD_TEST/" 2>/dev/null || true
 else
     echo "Output directory not found, copying from Docker build..."
     docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
@@ -34,6 +36,9 @@ else
     # Worker file for pthreads (optional)
     docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
       kicad-wasm-builder:/workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.worker.js "$KICAD_TEST/" 2>/dev/null || true
+    # Bitmap resources for KiCad icons (optional)
+    docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
+      kicad-wasm-builder:/workspace/build-wasm/kicad-pcbnew/resources/images.tar.gz "$KICAD_TEST/" 2>/dev/null || true
 fi
 
 # wxWidgets WASM JavaScript glue code (defines JS functions called from WASM)

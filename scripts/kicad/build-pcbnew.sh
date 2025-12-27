@@ -306,6 +306,11 @@ fi
 log_info "Building pcbnew..."
 emmake make -j${JOBS} pcbnew
 
+# Step 8.1: Build bitmap resources (images.tar.gz)
+# This creates the icon archive that KiCad loads at runtime
+log_info "Building bitmap resources..."
+emmake make bitmap_archive_build
+
 # Step 9: Create stamp file
 create_stamp "${KICAD_STAMP}"
 log_info "KiCad PCBnew build complete!"
