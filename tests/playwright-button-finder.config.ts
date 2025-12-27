@@ -28,7 +28,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: 'npx serve wasm-app -p 8080',
+    command: 'npx serve apps -p 8080',
     port: 8080,
     reuseExistingServer: true,
   },

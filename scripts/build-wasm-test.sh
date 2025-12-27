@@ -30,7 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
 TESTS_DIR="$PROJECT_ROOT/tests"
-WASM_APP_DIR="$TESTS_DIR/wasm-app"
+WASM_APP_DIR="$TESTS_DIR/apps"
 STANDALONE_DIR="$WASM_APP_DIR/standalone"
 
 echo "=== Building wxWidgets WASM Test Applications ==="

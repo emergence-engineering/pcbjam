@@ -73,7 +73,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npx serve wasm-app -p ${port} -c ../serve.json`,
+    command: `npx serve apps -p ${port} -c ../serve.json`,
     port: port,
     reuseExistingServer: !process.env.CI,
   },

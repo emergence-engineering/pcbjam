@@ -184,7 +184,7 @@ This section maps KiCad's wxWidgets usage to our test coverage.
 
 ## Standalone Test Apps
 
-Organized in `wasm-app/standalone/` folders:
+Organized in `apps/standalone/` folders:
 
 | App | Status | Tests | KiCad Relevance |
 |-----|--------|-------|-----------------|
@@ -395,7 +395,7 @@ The `wasmedge_test` app verifies WASM-specific behaviors:
 ### Build Command
 Always use the build script:
 ```bash
-cd tests/wasm-app && ./build-test-apps.sh
+cd tests/apps && ./build-test-apps.sh
 ```
 
 ---
@@ -410,7 +410,7 @@ The test suite captures screenshots during test runs for visual regression testi
 tests/
 ├── baseline-screenshots/     # Known-good reference screenshots (146+ files)
 ├── test-results/            # Screenshots from latest test run
-└── wasm-app/
+└── apps/
     └── e2e/                 # Playwright test specs
 ```
 
@@ -467,7 +467,7 @@ cp tests/test-results/dialog-*.png tests/baseline-screenshots/
 ### Running Tests with Screenshots
 
 ```bash
-cd tests/wasm-app
+cd tests/apps
 npm test                    # Run all tests (saves screenshots to test-results/)
 npx playwright test --ui    # Interactive mode with screenshot preview
 ```

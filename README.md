@@ -9,22 +9,25 @@ kicad-wasm/
 ├── kicad/                  # KiCad source (git submodule)
 ├── wxwidgets/              # wxWidgets source (git submodule)
 ├── wasm/                   # WASM compatibility layer
+│   ├── bindings/           # Embind bindings for JavaScript
+│   ├── cmake/              # CMake find modules
 │   ├── kiplatform/         # Platform abstraction (app, UI, printing)
 │   ├── libcontext/         # Coroutine/fiber implementation
-│   ├── stubs/              # Stub implementations (libgit2, curl)
-│   └── config/             # Build configuration headers
-├── patches/                # KiCad source patches
+│   ├── shims/              # Runtime JavaScript shims
+│   └── stubs/              # Stub implementations (libgit2, curl)
 ├── scripts/                # Build scripts
 │   ├── build-wxuniversal-wasm.sh   # Build wxWidgets for WASM
 │   ├── build-wasm-test.sh          # Build wxWidgets test apps
 │   ├── deps/               # Dependency build scripts
 │   ├── kicad/              # KiCad build scripts
-│   ├── common/             # Shared utilities and config
-│   └── config/             # Build configuration
+│   ├── common/             # Shared utilities
+│   └── config/             # Build config wrappers
 ├── docker/                 # Docker build environment
 ├── tests/                  # Playwright E2E tests
-├── output/                 # Build output (pcbnew.js, pcbnew.wasm)
-└── docs/                   # Research documentation
+│   ├── e2e/                # Test specs
+│   └── apps/               # WASM test applications
+├── tools/                  # External tools (binaryen)
+└── output/                 # Build output (pcbnew.js, pcbnew.wasm)
 ```
 
 ## Two Build Workflows
@@ -63,7 +66,7 @@ Build standalone wxWidgets test apps for feature testing:
 cd tests && npm install && npm test
 ```
 
-Output: `tests/wasm-app/standalone/`
+Output: `tests/apps/standalone/`
 
 ## Prerequisites
 
@@ -110,7 +113,6 @@ See [tests/README.md](tests/README.md) for test documentation.
 - [Build System](build.md) - Docker build details
 - [Docker README](docker/README.md) - Container setup
 - [Tests README](tests/README.md) - Test infrastructure
-- [Research Docs](docs/) - Original research notes
 
 ## License
 

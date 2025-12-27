@@ -60,7 +60,7 @@ BASE_LDFLAGS = -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
 
 # GL-specific flags
 EM_GL_FLAGS = -sLEGACY_GL_EMULATION -sMAX_WEBGL_VERSION=2
-GL_SHIM = ../../lib/gl_immediate_shim.js
+GL_SHIM = ../../wasm/shims/gl_immediate_shim.js
 
 # LDFLAGS for GL apps (minimal_test)
 LDFLAGS_GL = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(EM_GL_FLAGS) --js-library=$(GL_SHIM) $(WX_LDFLAGS_GL)

@@ -8,7 +8,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-KICAD_TEST="$PROJECT_ROOT/tests/wasm-app/kicad"
+KICAD_TEST="$PROJECT_ROOT/tests/apps/kicad"
 OUTPUT_DIR="$PROJECT_ROOT/output"
 
 mkdir -p "$KICAD_TEST"

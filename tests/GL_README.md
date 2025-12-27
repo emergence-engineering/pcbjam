@@ -107,4 +107,4 @@ All immediate mode tests pass with the color-per-vertex pattern:
 - Cyan line strip
 - Magenta line loop
 
-See `wasm-app/minimal_test.cpp` for working examples.
+See `apps/minimal_test.cpp` for working examples.

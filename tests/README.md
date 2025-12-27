@@ -13,7 +13,7 @@ Playwright tests for verifying the wxWidgets WASM port.
 ../scripts/build-wasm-test.sh
 ```
 
-This builds `wasm-app/minimal_test.{html,js,wasm}` and standalone test apps.
+This builds `apps/minimal_test.{html,js,wasm}` and standalone test apps.
 
 ## Running Tests
 
@@ -47,7 +47,7 @@ tests/
 ├── logs/                   # Test logs (auto-generated)
 ├── test-results/           # Screenshots (auto-generated)
 ├── baseline-screenshots/   # Reference screenshots for comparison
-├── wasm-app/              # Built WASM test applications
+├── apps/              # Built WASM test applications
 │   ├── minimal_test.html  # Main test app
 │   └── standalone/        # Individual component test apps
 └── playwright.config.ts   # Playwright configuration
@@ -79,10 +79,10 @@ Tests capture screenshots to `test-results/`. Compare against baselines:
 
 ## Viewing the App Directly
 
-Start a local server in the wasm-app directory:
+Start a local server in the apps directory:
 
 ```bash
-cd wasm-app
+cd apps
 npx serve .
 ```
 
@@ -91,7 +91,7 @@ Then open http://localhost:3000/minimal_test.html in your browser.
 Alternative using Python:
 
 ```bash
-cd wasm-app
+cd apps
 python3 -m http.server 8000
 ```
 
@@ -159,7 +159,7 @@ For deeper analysis, use Emscripten's LLVM tools:
 LLVM_DIR="/opt/homebrew/Cellar/emscripten/4.0.20/libexec/llvm/bin"
 
 # Check if WASM has DWARF info
-$LLVM_DIR/llvm-dwarfdump --debug-info wasm-app/standalone/grid/grid_test.wasm
+$LLVM_DIR/llvm-dwarfdump --debug-info apps/standalone/grid/grid_test.wasm
 
 # Disassemble with function names
 $LLVM_DIR/llvm-objdump -d grid_test.wasm | head -200
