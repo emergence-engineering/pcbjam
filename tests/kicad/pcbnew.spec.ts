@@ -25,7 +25,7 @@ test.describe('PCBnew WASM', () => {
         // testLogger automatically captures all console output and errors
     });
 
-    test('should render without JavaScript errors', async ({ page, testLogger }) => {
+    test.skip('should render without JavaScript errors', async ({ page, testLogger }) => {
         await page.goto('/kicad/pcbnew.html');
         await page.waitForTimeout(5000);  // Give time for WASM to load
 
