@@ -1,4 +1,6 @@
-import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
+// wxDialog/wxMessageBox Tests - Modal dialogs for KiCad confirmations, errors, properties
+// Uses element registry for semantic element identification
+import { test, expect, tryLoadApp, waitForRegistry, clickByLabel } from './utils/fixtures';
 
 test.describe('wxDialog/wxMessageBox Tests', () => {
   test('Dialog test app loads successfully', async ({ page, testLogger }) => {
@@ -23,11 +25,10 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
-    // Info Dialog button is first in the wxMessageBox row
-    const centerX = box.width / 2;
-    await page.mouse.click(box.x + centerX - 110, box.y + 115);
+    // Click "Info Dialog" button
+    await clickByLabel(page, 'Info Dialog');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/dialog-02-info-clicked.png', fullPage: true });
@@ -47,11 +48,10 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
-    // Yes/No Dialog button is second (center) in the wxMessageBox row
-    const centerX = box.width / 2;
-    await page.mouse.click(box.x + centerX, box.y + 115);
+    // Click "Yes/No Dialog" button
+    await clickByLabel(page, 'Yes/No Dialog');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/dialog-03-yesno-clicked.png', fullPage: true });
@@ -70,11 +70,10 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
-    // Error Dialog button is third (rightmost) in the wxMessageBox row
-    const centerX = box.width / 2;
-    await page.mouse.click(box.x + centerX + 110, box.y + 115);
+    // Click "Error Dialog" button
+    await clickByLabel(page, 'Error Dialog');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/dialog-04-error-clicked.png', fullPage: true });
@@ -93,11 +92,10 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
-    // Custom Dialog button is first in the wxDialog row (row 2)
-    const centerX = box.width / 2;
-    await page.mouse.click(box.x + centerX - 60, box.y + 175);
+    // Click "Custom Dialog" button
+    await clickByLabel(page, 'Custom Dialog');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/dialog-05-custom-clicked.png', fullPage: true });

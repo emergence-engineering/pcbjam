@@ -1,14 +1,6 @@
 // wxClipboard Tests - Clipboard operations for KiCad copy/paste
-// Button positions found using button-finder utility
-import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
-
-// Button positions (relative to canvas) - found using button-finder.spec.ts
-const BUTTONS = {
-  COPY: { x: 352, y: 196 },
-  PASTE: { x: 600, y: 196 },
-  CHECK: { x: 700, y: 196 },
-  CLEAR: { x: 808, y: 196 },
-};
+// Uses element registry for semantic element identification
+import { test, expect, tryLoadApp, waitForRegistry, clickByLabel } from './utils/fixtures';
 
 test.describe('wxClipboard Tests', () => {
 
@@ -34,10 +26,10 @@ test.describe('wxClipboard Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Click "Copy to Clipboard" button
-    await page.mouse.click(box.x + BUTTONS.COPY.x, box.y + BUTTONS.COPY.y);
+    await clickByLabel(page, 'Copy to Clipboard');
     await page.waitForTimeout(2500);  // Wait for async clipboard operation + timeout
 
     await page.screenshot({ path: 'test-results/clipboard-02-copy-clicked.png', fullPage: true });
@@ -62,14 +54,14 @@ test.describe('wxClipboard Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // First copy something
-    await page.mouse.click(box.x + BUTTONS.COPY.x, box.y + BUTTONS.COPY.y);
+    await clickByLabel(page, 'Copy to Clipboard');
     await page.waitForTimeout(2500);
 
     // Click "Paste from Clipboard" button
-    await page.mouse.click(box.x + BUTTONS.PASTE.x, box.y + BUTTONS.PASTE.y);
+    await clickByLabel(page, 'Paste from Clipboard');
     await page.waitForTimeout(2500);
 
     await page.screenshot({ path: 'test-results/clipboard-03-paste-clicked.png', fullPage: true });
@@ -97,14 +89,14 @@ test.describe('wxClipboard Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // First copy something to ensure clipboard has content
-    await page.mouse.click(box.x + BUTTONS.COPY.x, box.y + BUTTONS.COPY.y);
+    await clickByLabel(page, 'Copy to Clipboard');
     await page.waitForTimeout(2500);
 
     // Click "Check Clipboard" button
-    await page.mouse.click(box.x + BUTTONS.CHECK.x, box.y + BUTTONS.CHECK.y);
+    await clickByLabel(page, 'Check Clipboard');
     await page.waitForTimeout(2500);
 
     await page.screenshot({ path: 'test-results/clipboard-04-check-clicked.png', fullPage: true });
@@ -125,14 +117,14 @@ test.describe('wxClipboard Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // First copy something
-    await page.mouse.click(box.x + BUTTONS.COPY.x, box.y + BUTTONS.COPY.y);
+    await clickByLabel(page, 'Copy to Clipboard');
     await page.waitForTimeout(2500);
 
     // Click "Clear Clipboard" button
-    await page.mouse.click(box.x + BUTTONS.CLEAR.x, box.y + BUTTONS.CLEAR.y);
+    await clickByLabel(page, 'Clear Clipboard');
     await page.waitForTimeout(2500);
 
     await page.screenshot({ path: 'test-results/clipboard-05-clear-clicked.png', fullPage: true });
@@ -156,10 +148,10 @@ test.describe('wxClipboard Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // 1. Copy
-    await page.mouse.click(box.x + BUTTONS.COPY.x, box.y + BUTTONS.COPY.y);
+    await clickByLabel(page, 'Copy to Clipboard');
     await page.waitForTimeout(2500);
 
     const hasCopyLog = testLogger.consoleLogs.some(l =>
@@ -168,7 +160,7 @@ test.describe('wxClipboard Tests', () => {
     expect(hasCopyLog, 'Copy should log activity').toBe(true);
 
     // 2. Check
-    await page.mouse.click(box.x + BUTTONS.CHECK.x, box.y + BUTTONS.CHECK.y);
+    await clickByLabel(page, 'Check Clipboard');
     await page.waitForTimeout(2500);
 
     const hasCheckResult = testLogger.consoleLogs.some(l =>
@@ -177,7 +169,7 @@ test.describe('wxClipboard Tests', () => {
     expect(hasCheckResult, 'Check should report clipboard').toBe(true);
 
     // 3. Paste
-    await page.mouse.click(box.x + BUTTONS.PASTE.x, box.y + BUTTONS.PASTE.y);
+    await clickByLabel(page, 'Paste from Clipboard');
     await page.waitForTimeout(2500);
 
     const hasPasteLog = testLogger.consoleLogs.some(l =>
@@ -186,7 +178,7 @@ test.describe('wxClipboard Tests', () => {
     expect(hasPasteLog, 'Paste should log activity').toBe(true);
 
     // 4. Clear
-    await page.mouse.click(box.x + BUTTONS.CLEAR.x, box.y + BUTTONS.CLEAR.y);
+    await clickByLabel(page, 'Clear Clipboard');
     await page.waitForTimeout(2500);
 
     const hasClearLog = testLogger.consoleLogs.some(l =>

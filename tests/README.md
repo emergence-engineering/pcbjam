@@ -35,6 +35,7 @@ tests/
 ├── e2e/                    # Playwright test specs
 │   ├── utils/              # Shared test utilities
 │   │   ├── fixtures.ts     # Playwright fixtures with auto-logging
+│   │   ├── element-tracker.ts  # Element registry utilities (clickByLabel, etc.)
 │   │   └── test-utils.ts   # Logging and helper functions
 │   ├── menu.spec.ts        # wxMenuBar tests
 │   ├── timer.spec.ts       # wxTimer tests
@@ -165,9 +166,78 @@ $LLVM_DIR/llvm-dwarfdump --debug-info apps/standalone/grid/grid_test.wasm
 $LLVM_DIR/llvm-objdump -d grid_test.wasm | head -200
 ```
 
-## Button Finder Utility
+## Element Registry (Recommended)
 
-The wxWidgets WASM apps render to a canvas, so UI tests need to click at specific pixel coordinates. The button-finder utility scans a test app to find clickable button positions.
+The wxWidgets WASM port includes an element registry that tracks all wxWindow instances with their positions, labels, and types. This enables tests to find UI elements by semantic identifiers instead of hardcoded pixel coordinates.
+
+### Usage
+
+```typescript
+import { waitForRegistry, clickByLabel, findByLabel, findByType } from './utils/fixtures';
+
+// Wait for registry to be available
+await waitForRegistry(page);
+
+// Click buttons by label text
+await clickByLabel(page, 'Copy to Clipboard');
+await clickByLabel(page, 'Save File...');
+
+// Find elements for inspection
+const button = await findByLabel(page, 'OK');
+if (button) {
+  console.log(`Button at (${button.centerX}, ${button.centerY})`);
+}
+
+// Find all elements of a type
+const buttons = await findByType(page, 'wxButton');
+```
+
+### Available Functions
+
+| Function | Description |
+|----------|-------------|
+| `waitForRegistry(page)` | Wait for element registry to initialize |
+| `findByLabel(page, label, options?)` | Find element by label text |
+| `findByName(page, name, options?)` | Find element by wxWindow name |
+| `findByType(page, typeName, options?)` | Find all elements of a type (e.g., 'wxButton') |
+| `clickByLabel(page, label, options?)` | Click element by label |
+| `clickByName(page, name, options?)` | Click element by name |
+
+### Options
+
+```typescript
+interface FindOptions {
+  visible?: boolean;  // Filter by visibility (default: true)
+  enabled?: boolean;  // Filter by enabled state
+  exact?: boolean;    // Exact label match (default: substring)
+  type?: string;      // Filter by type name
+}
+```
+
+### When to Use
+
+Use the element registry for tests that click on **wxButton** and other wxWindow-based controls. The registry tracks:
+- wxButton, wxTextCtrl, wxStaticText, wxPanel, wxFrame, etc.
+
+**Not trackable** (use pixel coordinates instead):
+- wxToolBar tool items (rendered by toolbar)
+- wxMenuBar menu items (rendered by menu system)
+- wxAuiManager panel controls (title bars, close buttons)
+- wxGrid cells (rendered by grid)
+- wxSplitterWindow sash (rendered by splitter)
+
+### Migrated Tests
+
+These tests use the element registry:
+- `clipboard.spec.ts` - Copy, Paste, Check, Clear buttons
+- `dialog.spec.ts` - Info, Yes/No, Error, Custom dialog buttons
+- `timer.spec.ts` - Start, Stop, Reset buttons
+- `filedialog.spec.ts` - Open, Save, Open Multiple buttons
+- `logerror.spec.ts` - Trigger Error, Flush Log buttons
+
+## Button Finder Utility (Legacy)
+
+For elements not trackable by the registry, the button-finder utility scans a test app to find clickable positions by pixel coordinates.
 
 **Note:** This utility is excluded from regular test runs (`npm test`). Use the dedicated config to run it.
 

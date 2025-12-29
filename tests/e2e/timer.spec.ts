@@ -1,4 +1,6 @@
-import { test, expect, tryLoadApp, getCanvasBox } from './utils/fixtures';
+// wxTimer Tests - Timer functionality for KiCad animations, auto-save, periodic updates
+// Uses element registry for semantic element identification
+import { test, expect, tryLoadApp, waitForRegistry, clickByLabel, findByLabel } from './utils/fixtures';
 
 test.describe('wxTimer Tests', () => {
 
@@ -20,11 +22,14 @@ test.describe('wxTimer Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-    const centerX = box.width / 2;
+    await waitForRegistry(page);
 
-    // Click Start button for slow timer (left of center in button row)
-    await page.mouse.click(box.x + centerX - 40, box.y + 125);
+    // Click Start button for slow timer
+    // Note: There are two "Start" buttons, we need the first one in "Slow Timer" section
+    const startButton = await findByLabel(page, 'Start', { exact: true });
+    if (startButton) {
+      await page.mouse.click(startButton.centerX, startButton.centerY);
+    }
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/timer-02-started.png', fullPage: true });
@@ -38,8 +43,11 @@ test.describe('wxTimer Tests', () => {
     await page.waitForTimeout(1500);
     await page.screenshot({ path: 'test-results/timer-03-ticked.png', fullPage: true });
 
-    // Click Stop button (right of center in button row)
-    await page.mouse.click(box.x + centerX + 40, box.y + 125);
+    // Click Stop button for slow timer
+    const stopButton = await findByLabel(page, 'Stop', { exact: true });
+    if (stopButton) {
+      await page.mouse.click(stopButton.centerX, stopButton.centerY);
+    }
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/timer-04-stopped.png', fullPage: true });
@@ -58,11 +66,10 @@ test.describe('wxTimer Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-    const centerX = box.width / 2;
+    await waitForRegistry(page);
 
-    // Click Start Fast button (left of center in fast timer row)
-    await page.mouse.click(box.x + centerX - 40, box.y + 265);
+    // Click "Start Fast" button
+    await clickByLabel(page, 'Start Fast');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/timer-05-fast-started.png', fullPage: true });
@@ -76,8 +83,8 @@ test.describe('wxTimer Tests', () => {
     await page.waitForTimeout(1000);
     await page.screenshot({ path: 'test-results/timer-06-fast-running.png', fullPage: true });
 
-    // Click Stop Fast button (right of center in fast timer row)
-    await page.mouse.click(box.x + centerX + 40, box.y + 265);
+    // Click "Stop Fast" button
+    await clickByLabel(page, 'Stop Fast');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/timer-07-fast-stopped.png', fullPage: true });
@@ -96,15 +103,17 @@ test.describe('wxTimer Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-    const centerX = box.width / 2;
+    await waitForRegistry(page);
 
     // Start slow timer briefly
-    await page.mouse.click(box.x + centerX - 40, box.y + 125);
+    const startButton = await findByLabel(page, 'Start', { exact: true });
+    if (startButton) {
+      await page.mouse.click(startButton.centerX, startButton.centerY);
+    }
     await page.waitForTimeout(1500);
 
-    // Click Reset All Counters (centered button, below fast timer section)
-    await page.mouse.click(box.x + centerX, box.y + 390);
+    // Click "Reset All Counters" button
+    await clickByLabel(page, 'Reset All Counters');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/timer-08-reset.png', fullPage: true });

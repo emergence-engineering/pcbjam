@@ -1,5 +1,6 @@
 // wxFileDialog Tests - File dialogs for KiCad open/save operations
-import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
+// Uses element registry for semantic element identification
+import { test, expect, tryLoadApp, waitForRegistry, clickByLabel } from './utils/fixtures';
 
 test.describe('wxFileDialog Tests', () => {
 
@@ -23,10 +24,10 @@ test.describe('wxFileDialog Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Click "Open File..." button
-    await page.mouse.click(box.x + 100, box.y + 150);
+    await clickByLabel(page, 'Open File...');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/filedialog-02-open-clicked.png', fullPage: true });
@@ -42,10 +43,10 @@ test.describe('wxFileDialog Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Click "Save File..." button
-    await page.mouse.click(box.x + 220, box.y + 150);
+    await clickByLabel(page, 'Save File...');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/filedialog-03-save-clicked.png', fullPage: true });
@@ -61,10 +62,10 @@ test.describe('wxFileDialog Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Click "Open Multiple..." button
-    await page.mouse.click(box.x + 350, box.y + 150);
+    await clickByLabel(page, 'Open Multiple...');
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/filedialog-04-multiple-clicked.png', fullPage: true });
@@ -80,14 +81,14 @@ test.describe('wxFileDialog Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Try all three buttons
-    await page.mouse.click(box.x + 100, box.y + 150);
+    await clickByLabel(page, 'Open File...');
     await page.waitForTimeout(300);
-    await page.mouse.click(box.x + 220, box.y + 150);
+    await clickByLabel(page, 'Save File...');
     await page.waitForTimeout(300);
-    await page.mouse.click(box.x + 350, box.y + 150);
+    await clickByLabel(page, 'Open Multiple...');
     await page.waitForTimeout(300);
 
     await page.screenshot({ path: 'test-results/filedialog-05-all-buttons.png', fullPage: true });

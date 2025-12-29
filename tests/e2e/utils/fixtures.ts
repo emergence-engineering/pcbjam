@@ -24,3 +24,6 @@ export const test = base.extend<{
 
 export { expect } from '@playwright/test';
 export { MAIN_CANVAS, waitForApp, tryLoadApp, getCanvasBox };
+
+// Element tracking utilities for semantic element identification
+export * from './element-tracker';

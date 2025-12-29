@@ -1,14 +1,6 @@
-import { test, expect } from './utils/fixtures';
-import { getCanvasBox } from './utils/test-utils';
-
-// Button positions found via button-finder
-const BUTTONS = {
-  triggerError: { x: 24, y: 138 },
-  triggerMultiple: { x: 24, y: 226 },
-  mixedLevels: { x: 24, y: 314 },
-  flushLog: { x: 24, y: 398 },
-  clearLog: { x: 216, y: 398 }
-};
+// wxLogError Dialog Tests - Tests wxLogDialog error handling for KiCad
+// Uses element registry for semantic element identification
+import { test, expect, waitForRegistry, clickByLabel } from './utils/fixtures';
 
 test.describe('wxLogError Dialog Tests', () => {
 
@@ -44,10 +36,7 @@ test.describe('wxLogError Dialog Tests', () => {
       return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 30000 });
 
-    // Wait for UI to be ready
-    await page.waitForTimeout(500);
-
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Take screenshot before clicking
     await page.screenshot({
@@ -56,11 +45,11 @@ test.describe('wxLogError Dialog Tests', () => {
     });
 
     // Click "Trigger Error" button
-    await page.mouse.click(box.x + BUTTONS.triggerError.x, box.y + BUTTONS.triggerError.y);
+    await clickByLabel(page, 'Trigger Error');
     await page.waitForTimeout(500);
 
-    // Click "Flush Log" to show the dialog
-    await page.mouse.click(box.x + BUTTONS.flushLog.x, box.y + BUTTONS.flushLog.y);
+    // Click "Flush Log (Show Dialog)" to show the dialog
+    await clickByLabel(page, 'Flush Log (Show Dialog)');
     await page.waitForTimeout(1000);
 
     // Take screenshot showing the error dialog
@@ -89,17 +78,14 @@ test.describe('wxLogError Dialog Tests', () => {
       return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 30000 });
 
-    // Wait for UI to be ready
-    await page.waitForTimeout(500);
-
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Click "Trigger Multiple" button
-    await page.mouse.click(box.x + BUTTONS.triggerMultiple.x, box.y + BUTTONS.triggerMultiple.y);
+    await clickByLabel(page, 'Trigger Multiple');
     await page.waitForTimeout(500);
 
-    // Click "Flush Log" to show the dialog with Details dropdown
-    await page.mouse.click(box.x + BUTTONS.flushLog.x, box.y + BUTTONS.flushLog.y);
+    // Click "Flush Log (Show Dialog)" to show the dialog with Details dropdown
+    await clickByLabel(page, 'Flush Log (Show Dialog)');
     await page.waitForTimeout(1000);
 
     // Take screenshot showing the dialog with Details
@@ -125,12 +111,10 @@ test.describe('wxLogError Dialog Tests', () => {
       return (document.querySelector('#canvas') as HTMLElement)?.style.display === 'block';
     }, { timeout: 30000 });
 
-    await page.waitForTimeout(500);
-
-    const box = await getCanvasBox(page);
+    await waitForRegistry(page);
 
     // Click "Mixed Levels" button to log error, warning, and message
-    await page.mouse.click(box.x + BUTTONS.mixedLevels.x, box.y + BUTTONS.mixedLevels.y);
+    await clickByLabel(page, 'Mixed Levels');
     await page.waitForTimeout(500);
 
     // Take screenshot
