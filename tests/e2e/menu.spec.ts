@@ -1,5 +1,6 @@
 // wxMenuBar Tests - Menu system for KiCad
 import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
+import { clickMenuBarItem, findRenderedByType } from './utils/element-tracker';
 
 test.describe('wxMenuBar Tests', () => {
 
@@ -43,16 +44,12 @@ test.describe('wxMenuBar Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-
-    // Click on File menu (top left of menu bar, around x=30, y=10-25)
-    await page.mouse.click(box.x + 30, box.y + 15);
+    // Click on File menu using element registry
+    const clicked = await clickMenuBarItem(page, 'File');
+    expect(clicked, 'File menu should be found and clicked').toBe(true);
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/menu-03-file-clicked.png', fullPage: true });
-
-    // Smoke test - no crash
-    expect(true).toBe(true);
   });
 
   test('Edit menu can be clicked', async ({ page, testLogger }) => {
@@ -63,15 +60,12 @@ test.describe('wxMenuBar Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-
-    // Click on Edit menu (next to File, around x=70, y=15)
-    await page.mouse.click(box.x + 70, box.y + 15);
+    // Click on Edit menu using element registry
+    const clicked = await clickMenuBarItem(page, 'Edit');
+    expect(clicked, 'Edit menu should be found and clicked').toBe(true);
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/menu-04-edit-clicked.png', fullPage: true });
-
-    expect(true).toBe(true);
   });
 
   test('Multiple menus can be accessed', async ({ page, testLogger }) => {
@@ -82,12 +76,15 @@ test.describe('wxMenuBar Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    // Verify all menu bar items are registered
+    const menuItems = await findRenderedByType(page, 'menuitem', { subType: 'menubar' });
+    expect(menuItems.length, 'Should have 5 menu bar items').toBeGreaterThanOrEqual(5);
 
-    // Click through all menus
-    const menuPositions = [30, 70, 110, 150, 190]; // File, Edit, View, Tools, Help
-    for (let i = 0; i < menuPositions.length; i++) {
-      await page.mouse.click(box.x + menuPositions[i], box.y + 15);
+    // Click through all menus using element registry
+    const menuLabels = ['File', 'Edit', 'View', 'Tools', 'Help'];
+    for (const label of menuLabels) {
+      const clicked = await clickMenuBarItem(page, label);
+      expect(clicked, `Menu "${label}" should be found and clicked`).toBe(true);
       await page.waitForTimeout(300);
     }
 

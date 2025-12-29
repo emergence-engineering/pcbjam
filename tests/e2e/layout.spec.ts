@@ -1,5 +1,6 @@
 // wxSplitterWindow and wxScrolledWindow Tests - Layout controls KiCad uses
 import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
+import { getSplitterSash, findRenderedByType } from './utils/element-tracker';
 
 test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
 
@@ -38,23 +39,22 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    // Get splitter sash from element registry
+    const sash = await getSplitterSash(page);
+    expect(sash, 'Splitter sash should be found in registry').not.toBeNull();
 
-    // Splitter sash is at initial position 300 from left
-    const sashX = box.x + 300;
-    const sashY = box.y + 200;
-
-    // Drag sash to the right
-    await page.mouse.move(sashX, sashY);
+    // Drag sash to the right using its center position
+    await page.mouse.move(sash!.centerX, sash!.centerY);
     await page.mouse.down();
-    await page.mouse.move(sashX + 100, sashY, { steps: 10 });
+    await page.mouse.move(sash!.centerX + 100, sash!.centerY, { steps: 10 });
     await page.mouse.up();
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/layout-03-sash-dragged.png', fullPage: true });
 
-    // Smoke test - verify no crash
-    expect(true).toBe(true);
+    // Verify sash position updated
+    const sashAfter = await getSplitterSash(page);
+    expect(sashAfter, 'Splitter sash should still be found after drag').not.toBeNull();
   });
 
   test('Scrolled windows show content', async ({ page, testLogger }) => {
@@ -92,22 +92,28 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    // Get splitter sash from element registry
+    const sash = await getSplitterSash(page);
+    expect(sash, 'Splitter sash should be found in registry').not.toBeNull();
 
-    // Drag sash
-    await page.mouse.move(box.x + 300, box.y + 200);
+    // Drag sash using registry coordinates
+    await page.mouse.move(sash!.centerX, sash!.centerY);
     await page.mouse.down();
-    await page.mouse.move(box.x + 400, box.y + 200, { steps: 5 });
+    await page.mouse.move(sash!.centerX + 100, sash!.centerY, { steps: 5 });
     await page.mouse.up();
     await page.waitForTimeout(300);
 
-    // Scroll left pane
-    await page.mouse.move(box.x + 100, box.y + 200);
+    // Get updated sash position after drag
+    const sashAfter = await getSplitterSash(page);
+    expect(sashAfter, 'Splitter sash should still be found after drag').not.toBeNull();
+
+    // Scroll left pane (use position left of sash)
+    await page.mouse.move(sashAfter!.centerX - 100, sashAfter!.centerY);
     await page.mouse.wheel(0, 50);
     await page.waitForTimeout(200);
 
-    // Scroll right pane
-    await page.mouse.move(box.x + 600, box.y + 200);
+    // Scroll right pane (use position right of sash)
+    await page.mouse.move(sashAfter!.centerX + 100, sashAfter!.centerY);
     await page.mouse.wheel(0, 50);
     await page.waitForTimeout(200);
 

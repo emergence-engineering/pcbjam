@@ -1,5 +1,6 @@
 // wxToolBar and wxStatusBar Tests - Toolbar and status bar KiCad uses
 import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
+import { clickToolbarTool, findRenderedByType } from './utils/element-tracker';
 
 test.describe('wxToolBar & wxStatusBar Tests', () => {
 
@@ -38,16 +39,12 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-
-    // Click New button (first tool, around x=30)
-    await page.mouse.click(box.x + 30, box.y + 45);
+    // Click New button using element registry
+    const clicked = await clickToolbarTool(page, 'New');
+    expect(clicked, 'New tool should be found and clicked').toBe(true);
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/toolbar-03-new-clicked.png', fullPage: true });
-
-    // Smoke test
-    expect(true).toBe(true);
   });
 
   test('Zoom tools can be clicked', async ({ page, testLogger }) => {
@@ -58,19 +55,17 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-
-    // Click Zoom In
-    await page.mouse.click(box.x + 230, box.y + 45);
+    // Click Zoom In using element registry
+    const zoomInClicked = await clickToolbarTool(page, 'Zoom In');
+    expect(zoomInClicked, 'Zoom In tool should be found and clicked').toBe(true);
     await page.waitForTimeout(300);
 
-    // Click Zoom Out
-    await page.mouse.click(box.x + 290, box.y + 45);
+    // Click Zoom Out using element registry
+    const zoomOutClicked = await clickToolbarTool(page, 'Zoom Out');
+    expect(zoomOutClicked, 'Zoom Out tool should be found and clicked').toBe(true);
     await page.waitForTimeout(300);
 
     await page.screenshot({ path: 'test-results/toolbar-04-zoom.png', fullPage: true });
-
-    expect(true).toBe(true);
   });
 
   test('Toggle tool changes state', async ({ page, testLogger }) => {
@@ -81,21 +76,19 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
-
-    // Click Toggle button (after separator, around x=350)
-    await page.mouse.click(box.x + 350, box.y + 45);
+    // Click Toggle button using element registry
+    const toggleClicked1 = await clickToolbarTool(page, 'Toggle');
+    expect(toggleClicked1, 'Toggle tool should be found and clicked').toBe(true);
     await page.waitForTimeout(300);
 
     await page.screenshot({ path: 'test-results/toolbar-05-toggle-on.png', fullPage: true });
 
     // Click again to toggle off
-    await page.mouse.click(box.x + 350, box.y + 45);
+    const toggleClicked2 = await clickToolbarTool(page, 'Toggle');
+    expect(toggleClicked2, 'Toggle tool should be found and clicked again').toBe(true);
     await page.waitForTimeout(300);
 
     await page.screenshot({ path: 'test-results/toolbar-06-toggle-off.png', fullPage: true });
-
-    expect(true).toBe(true);
   });
 
   test('Status bar shows messages', async ({ page, testLogger }) => {
@@ -121,12 +114,15 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    // Verify all tools are registered
+    const tools = await findRenderedByType(page, 'tool');
+    expect(tools.length, 'Should have 6 tools registered').toBeGreaterThanOrEqual(6);
 
-    // Click all toolbar buttons
-    const buttonPositions = [30, 85, 140, 230, 290, 350]; // New, Open, Save, ZoomIn, ZoomOut, Toggle
-    for (const x of buttonPositions) {
-      await page.mouse.click(box.x + x, box.y + 45);
+    // Click all toolbar buttons by label
+    const toolLabels = ['New', 'Open', 'Save', 'Zoom In', 'Zoom Out', 'Toggle'];
+    for (const label of toolLabels) {
+      const clicked = await clickToolbarTool(page, label);
+      expect(clicked, `Tool "${label}" should be found and clicked`).toBe(true);
       await page.waitForTimeout(200);
     }
 

@@ -1,5 +1,6 @@
 // wxAuiManager Tests - AUI docking system KiCad uses extensively
 import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
+import { clickAuiButton, findRenderedByLabel, findRenderedByType } from './utils/element-tracker';
 
 test.describe('wxAuiManager Tests', () => {
 
@@ -38,16 +39,16 @@ test.describe('wxAuiManager Tests', () => {
       return;
     }
 
-    const box = await getCanvasBox(page);
+    // Find all AUI parts to verify they're registered
+    const auiParts = await findRenderedByType(page, 'auipart');
+    expect(auiParts.length, 'Should have AUI parts registered').toBeGreaterThan(0);
 
-    // Click on Properties panel close button (top right of left panel)
-    await page.mouse.click(box.x + 145, box.y + 35);
+    // Click on Properties panel close button using element registry
+    const clicked = await clickAuiButton(page, 'close', 'Properties');
+    expect(clicked, 'Properties close button should be found and clicked').toBe(true);
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/aui-03-close-clicked.png', fullPage: true });
-
-    // Smoke test
-    expect(true).toBe(true);
   });
 
   test('Panel can be dragged', async ({ page, testLogger }) => {
@@ -60,20 +61,18 @@ test.describe('wxAuiManager Tests', () => {
 
     const box = await getCanvasBox(page);
 
-    // Drag Properties panel title bar
-    const titleX = box.x + 75;
-    const titleY = box.y + 35;
+    // Get Properties panel caption using element registry
+    const caption = await findRenderedByLabel(page, 'Properties', { elementType: 'auipart', subType: 'caption' });
+    expect(caption, 'Properties caption should be found in registry').not.toBeNull();
 
-    await page.mouse.move(titleX, titleY);
+    // Drag panel title bar using registry coordinates
+    await page.mouse.move(caption!.centerX, caption!.centerY);
     await page.mouse.down();
     await page.mouse.move(box.x + 300, box.y + 200, { steps: 10 });
     await page.mouse.up();
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/aui-04-dragged.png', fullPage: true });
-
-    // Smoke test
-    expect(true).toBe(true);
   });
 
   test('Multiple panels can be interacted with', async ({ page, testLogger }) => {
