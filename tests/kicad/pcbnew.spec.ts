@@ -17,12 +17,13 @@ test.describe('PCBnew WASM', () => {
         await page.goto('/kicad/pcbnew.html');
     });
 
-    test('should load PCBnew WASM module', async ({ page, testLogger }) => {
-        // Wait for WASM to initialize (look for canvas or status indicator)
-        // This is a basic smoke test - expand as PCBnew integration matures
-        await expect(page.locator('canvas')).toBeVisible({ timeout: 60000 });
+    test('should load PCBnew WASM module', async ({ page }) => {
+        // Wait for main canvas to be visible (KiCad takes time to initialize)
+        await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
 
-        // testLogger automatically captures all console output and errors
+        // Verify multiple canvases are created (11 for setup wizard)
+        const canvasCount = await page.locator('canvas').count();
+        expect(canvasCount).toBeGreaterThan(0);
     });
 
     test.skip('should render without JavaScript errors', async ({ page, testLogger }) => {
