@@ -17,7 +17,7 @@ test.describe('PCBnew WASM', () => {
         await page.goto('/kicad/pcbnew.html');
     });
 
-    test('should load PCBnew WASM module', async ({ page }) => {
+    test('should load PCBnew WASM module', async ({ page, testLogger }) => {
         // Wait for main canvas to be visible (KiCad takes time to initialize)
         await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
 
