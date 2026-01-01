@@ -93,18 +93,23 @@ public:
 
         m_btnSelect = new wxBitmapButton(mainPanel, wxID_ANY, CreateToolIcon(*wxBLACK, "S"));
         m_btnSelect->SetToolTip("Select Tool");
+        m_btnSelect->SetName("SelectTool");
 
         m_btnLine = new wxBitmapButton(mainPanel, wxID_ANY, CreateToolIcon(*wxBLUE, "L"));
         m_btnLine->SetToolTip("Line Tool");
+        m_btnLine->SetName("LineTool");
 
         m_btnRect = new wxBitmapButton(mainPanel, wxID_ANY, CreateToolIcon(wxColour(0, 128, 0), "R"));
         m_btnRect->SetToolTip("Rectangle Tool");
+        m_btnRect->SetName("RectangleTool");
 
         m_btnCircle = new wxBitmapButton(mainPanel, wxID_ANY, CreateToolIcon(*wxRED, "C"));
         m_btnCircle->SetToolTip("Circle Tool");
+        m_btnCircle->SetName("CircleTool");
 
         m_btnText = new wxBitmapButton(mainPanel, wxID_ANY, CreateToolIcon(wxColour(128, 0, 128), "T"));
         m_btnText->SetToolTip("Text Tool");
+        m_btnText->SetName("TextTool");
 
         m_btnSelect->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Log("Select tool clicked"); });
         m_btnLine->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Log("Line tool clicked"); });
@@ -182,9 +187,17 @@ public:
         wxStaticBoxSizer* shapesSizer = new wxStaticBoxSizer(wxHORIZONTAL, mainPanel, "Different Icon Shapes");
 
         wxBitmapButton* btnRect = new wxBitmapButton(mainPanel, wxID_ANY, CreateIcon(*wxRED, 32, "rect"));
+        btnRect->SetToolTip("Rectangle");
+        btnRect->SetName("Rectangle");
         wxBitmapButton* btnCircle = new wxBitmapButton(mainPanel, wxID_ANY, CreateIcon(*wxBLUE, 32, "circle"));
+        btnCircle->SetToolTip("Circle");
+        btnCircle->SetName("Circle");
         wxBitmapButton* btnTriangle = new wxBitmapButton(mainPanel, wxID_ANY, CreateIcon(wxColour(0, 128, 0), 32, "triangle"));
+        btnTriangle->SetToolTip("Triangle");
+        btnTriangle->SetName("Triangle");
         wxBitmapButton* btnDiamond = new wxBitmapButton(mainPanel, wxID_ANY, CreateIcon(wxColour(128, 0, 128), 32, "diamond"));
+        btnDiamond->SetToolTip("Diamond");
+        btnDiamond->SetName("Diamond");
 
         btnRect->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Log("Rectangle shape clicked"); });
         btnCircle->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Log("Circle shape clicked"); });
@@ -213,10 +226,15 @@ public:
             wxArtProvider::GetBitmap(wxART_REDO, wxART_TOOLBAR));
 
         btnNew->SetToolTip("New");
+        btnNew->SetName("New");
         btnOpen->SetToolTip("Open");
+        btnOpen->SetName("Open");
         btnSave->SetToolTip("Save");
+        btnSave->SetName("Save");
         btnUndo->SetToolTip("Undo");
+        btnUndo->SetName("Undo");
         btnRedo->SetToolTip("Redo");
+        btnRedo->SetName("Redo");
 
         btnNew->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Log("New clicked"); });
         btnOpen->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { Log("Open clicked"); });

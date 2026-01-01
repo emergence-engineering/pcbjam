@@ -19,10 +19,7 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
   test('Splitter is visible with two panes', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.screenshot({ path: 'test-results/layout-02-splitter.png', fullPage: true });
 
@@ -34,10 +31,7 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
   test('Splitter sash can be dragged', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Get splitter sash from element registry
     const sash = await getSplitterSash(page);
@@ -60,10 +54,7 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
   test('Scrolled windows show content', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const box = await getCanvasBox(page);
 
@@ -87,10 +78,7 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
   test('Layout controls work together', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Get splitter sash from element registry
     const sash = await getSplitterSash(page);

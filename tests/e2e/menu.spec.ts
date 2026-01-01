@@ -21,10 +21,7 @@ test.describe('wxMenuBar Tests', () => {
   test('Menu bar is visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/menu/menu_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.screenshot({ path: 'test-results/menu-02-menubar.png', fullPage: true });
 
@@ -39,10 +36,7 @@ test.describe('wxMenuBar Tests', () => {
   test('File menu can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/menu/menu_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click on File menu using element registry
     const clicked = await clickMenuBarItem(page, 'File');
@@ -55,10 +49,7 @@ test.describe('wxMenuBar Tests', () => {
   test('Edit menu can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/menu/menu_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click on Edit menu using element registry
     const clicked = await clickMenuBarItem(page, 'Edit');
@@ -71,10 +62,7 @@ test.describe('wxMenuBar Tests', () => {
   test('Multiple menus can be accessed', async ({ page, testLogger }) => {
     await page.goto('/standalone/menu/menu_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Verify all menu bar items are registered
     const menuItems = await findRenderedByType(page, 'menuitem', { subType: 'menubar' });

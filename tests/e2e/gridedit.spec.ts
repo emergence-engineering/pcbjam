@@ -17,10 +17,7 @@ test.describe('wxGrid Cell Editing Tests', () => {
   test('Grid cells can be selected', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridedit/gridedit_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -35,10 +32,7 @@ test.describe('wxGrid Cell Editing Tests', () => {
   test('Grid cells can be edited', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridedit/gridedit_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -56,10 +50,7 @@ test.describe('wxGrid Cell Editing Tests', () => {
   test('Grid rows can be added', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridedit/gridedit_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -74,10 +65,7 @@ test.describe('wxGrid Cell Editing Tests', () => {
   test('Grid rows can be deleted', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridedit/gridedit_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 

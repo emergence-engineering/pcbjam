@@ -21,10 +21,7 @@ test.describe('wxDragDrop Tests', () => {
   test('DnD handlers are registered', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.screenshot({ path: 'test-results/dnd-02-handlers.png', fullPage: true });
 
@@ -37,17 +34,11 @@ test.describe('wxDragDrop Tests', () => {
   test('DragEnter event is detected', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip();
-      return;
-    }
+    expect(box, 'Canvas should have bounding box').not.toBeNull();
 
     // Simulate dragenter event
     await page.evaluate(({ x, y }) => {
@@ -74,17 +65,11 @@ test.describe('wxDragDrop Tests', () => {
   test('DragLeave event is detected', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip();
-      return;
-    }
+    expect(box, 'Canvas should have bounding box').not.toBeNull();
 
     // Simulate dragenter then dragleave
     await page.evaluate(({ x, y }) => {
@@ -118,17 +103,11 @@ test.describe('wxDragDrop Tests', () => {
   test('Drop event triggers file processing', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip();
-      return;
-    }
+    expect(box, 'Canvas should have bounding box').not.toBeNull();
 
     // Create a test file and simulate drop
     const testContent = 'Test file content for DnD';
@@ -163,17 +142,11 @@ test.describe('wxDragDrop Tests', () => {
   test('Dropped file is written to WASM filesystem', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip();
-      return;
-    }
+    expect(box, 'Canvas should have bounding box').not.toBeNull();
 
     const testFileName = 'wasm-test-file.txt';
     const testContent = 'Content written via DnD';
@@ -208,17 +181,11 @@ test.describe('wxDragDrop Tests', () => {
   test('wxDropFilesEvent is fired after drop', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip();
-      return;
-    }
+    expect(box, 'Canvas should have bounding box').not.toBeNull();
 
     const testFileName = 'event-test.kicad_pcb';
     const testContent = '(kicad_pcb (version 20230121))';
@@ -255,17 +222,11 @@ test.describe('wxDragDrop Tests', () => {
   test('Multiple files can be dropped', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip();
-      return;
-    }
+    expect(box, 'Canvas should have bounding box').not.toBeNull();
 
     await page.evaluate(({ x, y }) => {
       const canvas = document.getElementById('canvas');
@@ -300,18 +261,12 @@ test.describe('wxDragDrop Tests', () => {
   test('Clear files button exists in UI', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // First drop a file to verify drop works
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
-    if (!box) {
-      test.skip();
-      return;
-    }
+    expect(box, 'Canvas should have bounding box').not.toBeNull();
 
     await page.evaluate(({ x, y }) => {
       const canvas = document.getElementById('canvas');

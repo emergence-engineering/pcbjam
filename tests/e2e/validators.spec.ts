@@ -16,10 +16,7 @@ test.describe('wxValidator Tests', () => {
   test('Text validator input exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/validators/validators_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/validators-02-text.png', fullPage: true });
@@ -31,10 +28,7 @@ test.describe('wxValidator Tests', () => {
   test('Integer validator input exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/validators/validators_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/validators-03-integer.png', fullPage: true });
@@ -45,10 +39,7 @@ test.describe('wxValidator Tests', () => {
   test('Floating point validator input exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/validators/validators_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/validators-04-float.png', fullPage: true });
@@ -59,10 +50,7 @@ test.describe('wxValidator Tests', () => {
   test('Custom net name validator input exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/validators/validators_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/validators-05-netname.png', fullPage: true });
@@ -73,10 +61,7 @@ test.describe('wxValidator Tests', () => {
   test('Validate all button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/validators/validators_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/validators-06-button.png', fullPage: true });

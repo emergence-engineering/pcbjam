@@ -1,5 +1,5 @@
 import { test, expect, MAIN_CANVAS, waitForApp, getCanvasBox } from './utils/fixtures';
-import { clickTab, clickByLabel, findByLabel, clickListItem } from './utils/element-tracker';
+import { clickTab, clickByLabel, selectComboItem } from './utils/element-tracker';
 
 async function switchToOpenGLTab(page: any) {
   // Click OpenGL tab using element registry
@@ -13,20 +13,8 @@ async function switchToOpenGLTab(page: any) {
 
 // Open the test dropdown and select by name
 async function selectGLTest(page: any, testName: string) {
-  // Click the dropdown (it's a choice control with label "Select Test:")
-  const dropdownClicked = await clickByLabel(page, 'Select Test:');
-  if (!dropdownClicked) {
-    // Fallback: try finding by partial label
-    await clickByLabel(page, 'Immediate Mode'); // Click currently selected value
-  }
-  await page.waitForTimeout(300);
-
-  // Click the test item in the dropdown list
-  const itemClicked = await clickListItem(page, testName);
-  if (!itemClicked) {
-    // Fallback: try by label
-    await clickByLabel(page, testName);
-  }
+  // Use combo helper to select from wxChoice dropdown
+  await selectComboItem(page, testName);
   await page.waitForTimeout(500);
 }
 
@@ -64,10 +52,9 @@ test.describe('OpenGL Tests', () => {
 
     const testNames = [
       'Immediate Mode',
-      'Matrix Ops',
+      'Matrix Operations',
       'Vertex Arrays',
-      'State Mgmt',
-      'Texture Coords'
+      'State Management'
     ];
 
     for (let i = 0; i < testNames.length; i++) {

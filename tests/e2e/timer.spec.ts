@@ -17,10 +17,7 @@ test.describe('wxTimer Tests', () => {
   test('Slow timer can be started and stopped', async ({ page, testLogger }) => {
     await page.goto('/standalone/timer/timer_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -61,10 +58,7 @@ test.describe('wxTimer Tests', () => {
   test('Fast timer can be started and updates gauge', async ({ page, testLogger }) => {
     await page.goto('/standalone/timer/timer_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -98,10 +92,7 @@ test.describe('wxTimer Tests', () => {
   test('Reset counters button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/timer/timer_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 

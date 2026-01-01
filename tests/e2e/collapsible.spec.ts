@@ -19,10 +19,7 @@ test.describe('wxCollapsiblePane Tests', () => {
   test('Collapsible panes are created', async ({ page, testLogger }) => {
     await page.goto('/standalone/collapsible/collapsible_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/collapsible-02-panes.png', fullPage: true });
@@ -36,10 +33,7 @@ test.describe('wxCollapsiblePane Tests', () => {
   test('First pane is expanded by default', async ({ page, testLogger }) => {
     await page.goto('/standalone/collapsible/collapsible_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/collapsible-03-expanded.png', fullPage: true });
@@ -51,10 +45,7 @@ test.describe('wxCollapsiblePane Tests', () => {
   test('Expand All button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/collapsible/collapsible_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click Expand All button using element registry
     const clicked = await clickByLabel(page, 'Expand All');
@@ -72,10 +63,7 @@ test.describe('wxCollapsiblePane Tests', () => {
   test('Collapse All button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/collapsible/collapsible_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click Collapse All button using element registry
     const clicked = await clickByLabel(page, 'Collapse All');

@@ -16,10 +16,7 @@ test.describe('wxPopupWindow Tests', () => {
   test('Status popup button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/popup/popup_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/popup-02-status.png', fullPage: true });
@@ -31,10 +28,7 @@ test.describe('wxPopupWindow Tests', () => {
   test('Tool palette button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/popup/popup_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/popup-03-palette.png', fullPage: true });
@@ -45,10 +39,7 @@ test.describe('wxPopupWindow Tests', () => {
   test('Color picker button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/popup/popup_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/popup-04-color.png', fullPage: true });
@@ -59,10 +50,7 @@ test.describe('wxPopupWindow Tests', () => {
   test('Positioning buttons exist', async ({ page, testLogger }) => {
     await page.goto('/standalone/popup/popup_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/popup-05-positioning.png', fullPage: true });
@@ -73,10 +61,7 @@ test.describe('wxPopupWindow Tests', () => {
   test('Event log panel exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/popup/popup_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/popup-06-log.png', fullPage: true });

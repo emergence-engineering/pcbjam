@@ -19,10 +19,7 @@ test.describe('wxPropertyGrid Tests', () => {
   test('PropertyGrid displays properties with categories', async ({ page, testLogger }) => {
     await page.goto('/standalone/propgrid/propgrid_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/propgrid-02-categories.png', fullPage: true });
@@ -37,10 +34,7 @@ test.describe('wxPropertyGrid Tests', () => {
   test('PropertyGrid selection events fire', async ({ page, testLogger }) => {
     await page.goto('/standalone/propgrid/propgrid_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click on a property row using element registry
     const clicked = await clickPropertyRow(page, 'Reference');
@@ -59,10 +53,7 @@ test.describe('wxPropertyGrid Tests', () => {
   test('PropertyGridManager has multiple pages', async ({ page, testLogger }) => {
     await page.goto('/standalone/propgrid/propgrid_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 

@@ -1,6 +1,6 @@
 // wxBitmapButton Tests - Bitmap buttons, toggle buttons, disabled states
 import { test, expect, tryLoadApp } from './utils/fixtures';
-import { clickByLabel } from './utils/element-tracker';
+import { clickByLabel, clickByName } from './utils/element-tracker';
 
 test.describe('wxBitmapButton Tests', () => {
 
@@ -17,18 +17,15 @@ test.describe('wxBitmapButton Tests', () => {
   test('Toolbar-style buttons can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/bitmapbuttons/bitmapbuttons_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
-    // Click Select tool button using element registry
-    await clickByLabel(page, 'Select Tool');
+    // Click Select tool button using element registry (by name)
+    await clickByName(page, 'SelectTool');
     await page.waitForTimeout(100);
     // Click Line tool button
-    await clickByLabel(page, 'Line Tool');
+    await clickByName(page, 'LineTool');
     await page.waitForTimeout(100);
 
     await page.screenshot({ path: 'test-results/bitmapbuttons-02-toolbar-click.png', fullPage: true });
@@ -37,10 +34,7 @@ test.describe('wxBitmapButton Tests', () => {
   test('Toggle buttons can be toggled', async ({ page, testLogger }) => {
     await page.goto('/standalone/bitmapbuttons/bitmapbuttons_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -54,10 +48,7 @@ test.describe('wxBitmapButton Tests', () => {
   test('Toggle button can toggle multiple layers', async ({ page, testLogger }) => {
     await page.goto('/standalone/bitmapbuttons/bitmapbuttons_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -73,10 +64,7 @@ test.describe('wxBitmapButton Tests', () => {
   test('Disabled button can be re-enabled', async ({ page, testLogger }) => {
     await page.goto('/standalone/bitmapbuttons/bitmapbuttons_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -90,19 +78,16 @@ test.describe('wxBitmapButton Tests', () => {
   test('Shape buttons display different icons', async ({ page, testLogger }) => {
     await page.goto('/standalone/bitmapbuttons/bitmapbuttons_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
-    // Click different shape buttons using element registry (by tooltip)
-    await clickByLabel(page, 'Rectangle');
+    // Click different shape buttons using element registry (by name)
+    await clickByName(page, 'Rectangle');
     await page.waitForTimeout(100);
-    await clickByLabel(page, 'Circle');
+    await clickByName(page, 'Circle');
     await page.waitForTimeout(100);
-    await clickByLabel(page, 'Triangle');
+    await clickByName(page, 'Triangle');
     await page.waitForTimeout(200);
 
     await page.screenshot({ path: 'test-results/bitmapbuttons-06-shapes.png', fullPage: true });
@@ -111,17 +96,14 @@ test.describe('wxBitmapButton Tests', () => {
   test('Art Provider buttons display system icons', async ({ page, testLogger }) => {
     await page.goto('/standalone/bitmapbuttons/bitmapbuttons_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
-    // Click New, Open buttons using element registry (by tooltip)
-    await clickByLabel(page, 'New');
+    // Click New, Open buttons using element registry (by name)
+    await clickByName(page, 'New');
     await page.waitForTimeout(100);
-    await clickByLabel(page, 'Open');
+    await clickByName(page, 'Open');
     await page.waitForTimeout(200);
 
     await page.screenshot({ path: 'test-results/bitmapbuttons-07-artprovider.png', fullPage: true });

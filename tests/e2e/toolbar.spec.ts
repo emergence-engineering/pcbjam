@@ -19,10 +19,7 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
   test('Toolbar buttons are visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/toolbar/toolbar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.screenshot({ path: 'test-results/toolbar-02-buttons.png', fullPage: true });
 
@@ -34,10 +31,7 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
   test('New tool button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/toolbar/toolbar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click New button using element registry
     const clicked = await clickToolbarTool(page, 'New');
@@ -50,10 +44,7 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
   test('Zoom tools can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/toolbar/toolbar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click Zoom In using element registry
     const zoomInClicked = await clickToolbarTool(page, 'Zoom In');
@@ -71,10 +62,7 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
   test('Toggle tool changes state', async ({ page, testLogger }) => {
     await page.goto('/standalone/toolbar/toolbar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click Toggle button using element registry
     const toggleClicked1 = await clickToolbarTool(page, 'Toggle');
@@ -94,10 +82,7 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
   test('Status bar shows messages', async ({ page, testLogger }) => {
     await page.goto('/standalone/toolbar/toolbar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.screenshot({ path: 'test-results/toolbar-07-statusbar.png', fullPage: true });
 
@@ -109,10 +94,7 @@ test.describe('wxToolBar & wxStatusBar Tests', () => {
   test('All toolbar buttons accessible', async ({ page, testLogger }) => {
     await page.goto('/standalone/toolbar/toolbar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Verify all tools are registered
     const tools = await findRenderedByType(page, 'tool');

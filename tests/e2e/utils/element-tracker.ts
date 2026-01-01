@@ -364,6 +364,48 @@ export async function findRenderedByType(
 }
 
 /**
+ * Find rendered element by tooltip
+ */
+export async function findByTooltip(
+  page: Page,
+  tooltip: string,
+  options: RenderedFindOptions = {}
+): Promise<WxRenderedElement | null> {
+  const elements = await page.evaluate(
+    ([tooltip, opts]: [string, RenderedFindOptions]) => {
+      const registry = window.wxElementRegistry;
+      if (!registry || !registry.findAllRendered) return [];
+      // Find all rendered elements and filter by tooltip
+      const all = registry.findAllRendered(opts);
+      return all.filter(e => e.tooltip && e.tooltip.includes(tooltip));
+    },
+    [tooltip, options] as [string, RenderedFindOptions]
+  );
+  return elements.length > 0 ? elements[0] : null;
+}
+
+/**
+ * Click on a rendered element by tooltip
+ */
+export async function clickByTooltip(
+  page: Page,
+  tooltip: string,
+  options: RenderedFindOptions = {}
+): Promise<boolean> {
+  const element = await findByTooltip(page, tooltip, options);
+  if (!element) {
+    console.warn(`Element with tooltip "${tooltip}" not found`);
+    return false;
+  }
+  if (!element.enabled) {
+    console.warn(`Element with tooltip "${tooltip}" is disabled`);
+    return false;
+  }
+  await page.mouse.click(element.centerX, element.centerY);
+  return true;
+}
+
+/**
  * Click on a toolbar tool by label or tooltip
  */
 export async function clickToolbarTool(

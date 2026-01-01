@@ -3,6 +3,7 @@ import { Page } from '@playwright/test';
 import {
   clickTab,
   clickByLabel,
+  clickMenuBarItem,
   clickSlider,
   dragSliderTo,
   findSliderTrack,
@@ -89,8 +90,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.screenshot({ path: 'test-results/03-after-load.png', fullPage: true });
 
     // === TAB 1: Controls ===
-    console.log('--- Testing Controls Tab ---');
-
     // Click Controls tab using element registry
     await clickTab(page, 'Controls');
     await page.waitForTimeout(300);
@@ -125,8 +124,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.screenshot({ path: 'test-results/04-controls-tab.png', fullPage: true });
 
     // === TAB 2: Text Input ===
-    console.log('--- Testing Text Input Tab ---');
-
     // Click Text Input tab using element registry
     await clickTab(page, 'Text Input');
     await page.waitForTimeout(500);
@@ -152,8 +149,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.screenshot({ path: 'test-results/06-text-input-typed.png', fullPage: true });
 
     // === TAB 3: Drawing ===
-    console.log('--- Testing Drawing Tab ---');
-
     // Click Drawing tab using element registry
     await clickTab(page, 'Drawing');
     await page.waitForTimeout(500);
@@ -174,8 +169,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.screenshot({ path: 'test-results/08-drawing-done.png', fullPage: true });
 
     // === TAB 4: Lists ===
-    console.log('--- Testing Lists Tab ---');
-
     // Click Lists tab using element registry
     await clickTab(page, 'Lists');
     await page.waitForTimeout(500);
@@ -191,8 +184,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.screenshot({ path: 'test-results/10-lists-clicked.png', fullPage: true });
 
     // Test wxChoice dropdown using element tracking
-    console.log('--- Testing wxChoice Dropdown ---');
-
     // Find the Choice dropdown by its current value ("Red") and click to open it
     const { findAllComboButtons } = await import('./utils/element-tracker');
     const comboButtons = await findAllComboButtons(page);
@@ -222,8 +213,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.waitForTimeout(300);
 
     // === TAB 5: OpenGL ===
-    console.log('--- Testing OpenGL Tab ---');
-
     // Click OpenGL tab using element registry
     await clickTab(page, 'OpenGL');
     await page.waitForTimeout(1000);  // Give GL time to initialize
@@ -242,10 +231,8 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.screenshot({ path: 'test-results/15-opengl-tests.png', fullPage: true });
 
     // === Menu interaction ===
-    console.log('--- Testing Menus ---');
-
     // Click File menu using element registry
-    await clickByLabel(page, 'File');
+    await clickMenuBarItem(page, 'File');
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/11-file-menu.png', fullPage: true });
 
@@ -254,7 +241,7 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.waitForTimeout(300);
 
     // Click Help menu using element registry
-    await clickByLabel(page, 'Help');
+    await clickMenuBarItem(page, 'Help');
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/12-help-menu.png', fullPage: true });
 
@@ -263,8 +250,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     await page.waitForTimeout(300);
 
     // === Rapid interactions ===
-    console.log('--- Rapid interactions ---');
-
     // Click rapidly on various areas
     for (let i = 0; i < 30; i++) {
       const x = 50 + (i * 37) % 400;
@@ -274,24 +259,6 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     }
 
     await page.screenshot({ path: 'test-results/13-final.png', fullPage: true });
-
-    // Print all logs
-    console.log('\n=== ALL CONSOLE LOGS ===');
-    testLogger.consoleLogs.forEach(log => console.log(log));
-    console.log('\n=== ALL ERRORS ===');
-    testLogger.errors.forEach(err => console.log(err));
-    console.log('========================\n');
-
-    // Fail test if there are critical errors
-    const criticalErrors = testLogger.errors.filter(e =>
-      !e.includes('SharedArrayBuffer') &&
-      !e.includes('cross-origin')
-    );
-
-    if (criticalErrors.length > 0) {
-      console.log('\n!!! CRITICAL ERRORS FOUND !!!');
-      criticalErrors.forEach(e => console.log(e));
-    }
   });
 });
 
@@ -604,8 +571,6 @@ test.describe('wxWidgets WASM - OpenGL', () => {
       };
     });
 
-    console.log('GL Canvas Debug Info:', JSON.stringify(glCanvasInfo, null, 2));
-
     // Take screenshot of GL canvas
     const screenshot = await page.screenshot();
     expect(screenshot.length).toBeGreaterThan(0);
@@ -645,7 +610,6 @@ test.describe('wxWidgets WASM - Canvas Z-Ordering and Visibility', () => {
         zIndex: window.getComputedStyle(glCanvas).zIndex
       };
     });
-    console.log('GL Canvas on OpenGL tab:', JSON.stringify(glCanvasBefore));
 
     // Step 2: Switch to Controls tab using element registry
     await clickTab(page, 'Controls');
@@ -665,7 +629,6 @@ test.describe('wxWidgets WASM - Canvas Z-Ordering and Visibility', () => {
         zIndex: window.getComputedStyle(glCanvas).zIndex
       };
     });
-    console.log('GL Canvas after switching to Controls:', JSON.stringify(glCanvasAfter));
 
     // Step 3: Switch to Drawing tab using element registry
     await clickTab(page, 'Drawing');
@@ -680,11 +643,8 @@ test.describe('wxWidgets WASM - Canvas Z-Ordering and Visibility', () => {
     await page.screenshot({ path: 'test-results/glcanvas-04-on-lists-tab.png', fullPage: true });
 
     // GL canvas should be hidden (display: none) when not on OpenGL tab
-    // This assertion will fail before the fix and pass after
     if (glCanvasAfter.exists) {
-      console.log(`GL Canvas display after tab switch: ${glCanvasAfter.display}`);
-      // Uncomment after fix is applied:
-      // expect(glCanvasAfter.display).toBe('none');
+      expect(glCanvasAfter.display).toBe('none');
     }
   });
 
@@ -696,63 +656,19 @@ test.describe('wxWidgets WASM - Canvas Z-Ordering and Visibility', () => {
     const box = await canvas.boundingBox();
     if (!box) throw new Error('Canvas not found');
 
-    console.log('Canvas bounding box:', JSON.stringify(box));
-
     // Step 1: Go to OpenGL tab using element registry
     await clickTab(page, 'OpenGL');
     await page.waitForTimeout(1000);
 
     await page.screenshot({ path: 'test-results/zorder-01-opengl-tab.png', fullPage: true });
 
-    // Debug: Log the event log contents to understand what events are being received
-    const eventLogBefore = await page.evaluate(() => {
-      // Find all text in event log listbox area
-      const canvas = document.getElementById('canvas');
-      return canvas ? 'Canvas exists' : 'No canvas';
-    });
-    console.log('Event log check:', eventLogBefore);
-
     // Step 2: Click on the test selection dropdown (wxChoice) on the OpenGL tab using element tracking
-
-    // First check what windows exist before clicking
-    const windowsBefore = await page.evaluate(() => {
-      const windows = document.querySelectorAll('[id^="window-"]');
-      return Array.from(windows).map(w => ({
-        id: w.id,
-        display: (w as HTMLElement).style.display,
-        width: (w as HTMLElement).style.width,
-        height: (w as HTMLElement).style.height
-      }));
-    });
-    console.log('Windows BEFORE click:', JSON.stringify(windowsBefore));
-
     // Open dropdown using element tracking
     const dropdownClicked = await clickComboButton(page);
     expect(dropdownClicked, 'Should be able to click dropdown on OpenGL tab').toBe(true);
     await page.waitForTimeout(500);
 
     await page.screenshot({ path: 'test-results/zorder-02-dropdown-clicked.png', fullPage: true });
-
-    // Check what windows exist after clicking
-    const windowsAfter = await page.evaluate(() => {
-      const windows = document.querySelectorAll('[id^="window-"]');
-      return Array.from(windows).map(w => ({
-        id: w.id,
-        display: (w as HTMLElement).style.display,
-        width: (w as HTMLElement).style.width,
-        height: (w as HTMLElement).style.height,
-        rect: w.getBoundingClientRect()
-      }));
-    });
-    console.log('Windows AFTER click:', JSON.stringify(windowsAfter));
-
-    // Check for any logged events
-    const clickEvents = testLogger.consoleLogs.filter(log =>
-      log.includes('GL Test selected') ||
-      log.includes('clicked') ||
-      log.includes('Choice')
-    );
-    console.log('Click-related events in logs:', clickEvents);
 
     // Check z-index values
     const zIndexInfo = await page.evaluate(() => {
@@ -789,8 +705,6 @@ test.describe('wxWidgets WASM - Canvas Z-Ordering and Visibility', () => {
 
       return result;
     });
-
-    console.log('Z-Index info:', JSON.stringify(zIndexInfo, null, 2));
 
     // Step 3: Close the dropdown using Escape
     await page.keyboard.press('Escape');
@@ -830,7 +744,12 @@ test.describe('wxWidgets WASM - Canvas Z-Ordering and Visibility', () => {
         return window.getComputedStyle(glCanvas).display;
       });
 
-      console.log(`Tab: ${tabName}, GL Canvas display: ${glVisible}`);
+      // GL canvas should only be visible on OpenGL tab
+      if (tabName === 'OpenGL') {
+        expect(glVisible).toBe('block');
+      } else {
+        expect(glVisible).toBe('none');
+      }
     }
   });
 });

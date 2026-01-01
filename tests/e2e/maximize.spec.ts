@@ -20,10 +20,7 @@ test.describe('wxFrame::Maximize() Tests', () => {
   test('Maximized window has reasonable size (not tiny)', async ({ page, testLogger }) => {
     await page.goto('/standalone/maximize/maximize_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Wait for maximize to complete
     await page.waitForTimeout(500);
@@ -62,10 +59,7 @@ test.describe('wxFrame::Maximize() Tests', () => {
   test.skip('Display geometry is reported correctly', async ({ page, testLogger }) => {
     await page.goto('/standalone/maximize/maximize_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 
@@ -91,10 +85,7 @@ test.describe('wxFrame::Maximize() Tests', () => {
   test('Canvas is properly sized after maximize', async ({ page, testLogger }) => {
     await page.goto('/standalone/maximize/maximize_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 

@@ -17,10 +17,7 @@ test.describe('wxGrid Custom Cell Renderers Tests', () => {
   test('Color cells tab displays color swatches', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridrenderers/gridrenderers_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -31,10 +28,7 @@ test.describe('wxGrid Custom Cell Renderers Tests', () => {
   test('Icon+Text tab displays icons with text', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridrenderers/gridrenderers_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -49,10 +43,7 @@ test.describe('wxGrid Custom Cell Renderers Tests', () => {
   test('Striped rows tab displays alternating colors', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridrenderers/gridrenderers_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -67,10 +58,7 @@ test.describe('wxGrid Custom Cell Renderers Tests', () => {
   test('Checkbox cells can be toggled in striped grid', async ({ page, testLogger }) => {
     await page.goto('/standalone/gridrenderers/gridrenderers_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 

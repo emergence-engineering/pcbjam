@@ -19,10 +19,7 @@ test.describe('wxListCtrl Virtual Mode Tests', () => {
   test('Virtual list displays 10000 items', async ({ page, testLogger }) => {
     await page.goto('/standalone/listctrl/listctrl_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/listctrl-02-virtual.png', fullPage: true });
@@ -36,10 +33,7 @@ test.describe('wxListCtrl Virtual Mode Tests', () => {
   test('List columns are visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/listctrl/listctrl_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/listctrl-03-columns.png', fullPage: true });
@@ -51,10 +45,7 @@ test.describe('wxListCtrl Virtual Mode Tests', () => {
   test('Item selection works', async ({ page, testLogger }) => {
     await page.goto('/standalone/listctrl/listctrl_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -74,10 +65,7 @@ test.describe('wxListCtrl Virtual Mode Tests', () => {
   test('Scroll to bottom works with large list', async ({ page, testLogger }) => {
     await page.goto('/standalone/listctrl/listctrl_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 

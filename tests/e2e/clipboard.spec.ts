@@ -21,10 +21,7 @@ test.describe('wxClipboard Tests', () => {
   test('Copy button copies text to clipboard', async ({ page, testLogger }) => {
     await page.goto('/standalone/clipboard/clipboard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -49,10 +46,7 @@ test.describe('wxClipboard Tests', () => {
   test('Paste button retrieves text from clipboard', async ({ page, testLogger }) => {
     await page.goto('/standalone/clipboard/clipboard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -84,10 +78,7 @@ test.describe('wxClipboard Tests', () => {
   test('Check clipboard button reports clipboard content', async ({ page, testLogger }) => {
     await page.goto('/standalone/clipboard/clipboard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -112,10 +103,7 @@ test.describe('wxClipboard Tests', () => {
   test('Clear clipboard button clears clipboard', async ({ page, testLogger }) => {
     await page.goto('/standalone/clipboard/clipboard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -143,10 +131,7 @@ test.describe('wxClipboard Tests', () => {
   test('Full clipboard flow: copy, check, paste, clear', async ({ page, testLogger }) => {
     await page.goto('/standalone/clipboard/clipboard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 

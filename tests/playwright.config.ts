@@ -55,9 +55,6 @@ export default defineConfig({
   reporter: 'html',
   timeout: 60000,  // WASM can be slow to load
 
-  // Exclude button-finder from regular test runs - it's a utility, not a test
-  testIgnore: ['**/button-finder.spec.ts'],
-
   use: {
     baseURL: `http://localhost:${port}`,
     trace: 'on-first-retry',

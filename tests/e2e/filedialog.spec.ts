@@ -19,10 +19,7 @@ test.describe('wxFileDialog Tests', () => {
   test('Open file button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/filedialog/filedialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -38,10 +35,7 @@ test.describe('wxFileDialog Tests', () => {
   test('Save file button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/filedialog/filedialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -57,10 +51,7 @@ test.describe('wxFileDialog Tests', () => {
   test('Open multiple button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/filedialog/filedialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -76,10 +67,7 @@ test.describe('wxFileDialog Tests', () => {
   test('All file dialog buttons accessible', async ({ page, testLogger }) => {
     await page.goto('/standalone/filedialog/filedialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 

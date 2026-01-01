@@ -19,10 +19,7 @@ test.describe('wxAuiManager Tests', () => {
   test('AUI dockable panels are visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/aui/aui_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.screenshot({ path: 'test-results/aui-02-panels.png', fullPage: true });
 
@@ -34,10 +31,7 @@ test.describe('wxAuiManager Tests', () => {
   test('Panel close button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/aui/aui_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Find all AUI parts to verify they're registered
     const auiParts = await findRenderedByType(page, 'auipart');
@@ -54,10 +48,7 @@ test.describe('wxAuiManager Tests', () => {
   test('Panel can be dragged', async ({ page, testLogger }) => {
     await page.goto('/standalone/aui/aui_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     const box = await getCanvasBox(page);
 
@@ -78,10 +69,7 @@ test.describe('wxAuiManager Tests', () => {
   test('Multiple panels can be interacted with', async ({ page, testLogger }) => {
     await page.goto('/standalone/aui/aui_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click in Properties panel using element tracking
     const propsClicked = await clickAuiPaneContent(page, 'Properties');

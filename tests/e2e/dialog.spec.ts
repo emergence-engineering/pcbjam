@@ -20,10 +20,7 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
   test('Info dialog button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -43,10 +40,7 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
   test('Yes/No dialog button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -65,10 +59,7 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
   test('Error dialog button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 
@@ -87,10 +78,7 @@ test.describe('wxDialog/wxMessageBox Tests', () => {
   test('Custom dialog button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await waitForRegistry(page);
 

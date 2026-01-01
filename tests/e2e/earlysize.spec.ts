@@ -20,10 +20,7 @@ test.describe('Early GetClientSize() Tests', () => {
   test('GetClientSize() returns reasonable values before Show()', async ({ page, testLogger }) => {
     await page.goto('/standalone/earlysize/earlysize_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Wait for the app to finish initialization
     await page.waitForTimeout(500);

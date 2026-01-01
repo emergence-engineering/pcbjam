@@ -16,10 +16,7 @@ test.describe('WASM Edge Cases Tests', () => {
   test('File system test button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/wasmedge/wasmedge_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/wasmedge-02-filesystem.png', fullPage: true });
@@ -31,10 +28,7 @@ test.describe('WASM Edge Cases Tests', () => {
   test('Threading test button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/wasmedge/wasmedge_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/wasmedge-03-threading.png', fullPage: true });
@@ -45,10 +39,7 @@ test.describe('WASM Edge Cases Tests', () => {
   test('Font enumeration test button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/wasmedge/wasmedge_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/wasmedge-04-fonts.png', fullPage: true });
@@ -59,10 +50,7 @@ test.describe('WASM Edge Cases Tests', () => {
   test('Clipboard test button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/wasmedge/wasmedge_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/wasmedge-05-clipboard.png', fullPage: true });
@@ -73,10 +61,7 @@ test.describe('WASM Edge Cases Tests', () => {
   test('Memory test button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/wasmedge/wasmedge_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/wasmedge-06-memory.png', fullPage: true });
@@ -87,10 +72,7 @@ test.describe('WASM Edge Cases Tests', () => {
   test('Run all tests button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/wasmedge/wasmedge_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/wasmedge-07-runall.png', fullPage: true });
@@ -101,10 +83,7 @@ test.describe('WASM Edge Cases Tests', () => {
   test('Test results log exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/wasmedge/wasmedge_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/wasmedge-08-log.png', fullPage: true });

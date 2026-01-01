@@ -6,11 +6,7 @@ test.describe('wxFontEnumerator Tests', () => {
   test('Font enumeration renders correctly', async ({ page, testLogger }) => {
     await page.goto('/standalone/fontenum/fontenum_test.html');
     const loaded = await tryLoadApp(page);
-
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Wait for auto font enumeration to complete (uses Asyncify)
     await page.waitForTimeout(3000);

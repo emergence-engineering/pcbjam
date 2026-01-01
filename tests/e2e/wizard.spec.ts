@@ -17,10 +17,7 @@ test.describe('wxWizard Tests', () => {
   test('Wizard dialog can be launched', async ({ page, testLogger }) => {
     await page.goto('/standalone/wizard/wizard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -35,10 +32,7 @@ test.describe('wxWizard Tests', () => {
   test('Wizard can navigate to next page', async ({ page, testLogger }) => {
     await page.goto('/standalone/wizard/wizard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -58,10 +52,7 @@ test.describe('wxWizard Tests', () => {
   test('Wizard can navigate back', async ({ page, testLogger }) => {
     await page.goto('/standalone/wizard/wizard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -86,10 +77,7 @@ test.describe('wxWizard Tests', () => {
   test('Wizard can be cancelled', async ({ page, testLogger }) => {
     await page.goto('/standalone/wizard/wizard_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 

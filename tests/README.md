@@ -235,30 +235,6 @@ These tests use the element registry:
 - `filedialog.spec.ts` - Open, Save, Open Multiple buttons
 - `logerror.spec.ts` - Trigger Error, Flush Log buttons
 
-## Button Finder Utility (Legacy)
-
-For elements not trackable by the registry, the button-finder utility scans a test app to find clickable positions by pixel coordinates.
-
-**Note:** This utility is excluded from regular test runs (`npm test`). Use the dedicated config to run it.
-
-### Usage
-
-```bash
-cd tests
-
-# Use the dedicated button-finder config (recommended)
-APP_URL=/standalone/clipboard/clipboard_test.html npx playwright test --config=playwright-button-finder.config.ts
-
-# Scan with custom region (faster - focus on likely button area)
-APP_URL=/standalone/dialog/dialog_test.html START_Y=150 END_Y=300 STEP=8 npx playwright test --config=playwright-button-finder.config.ts
-
-# Scan dataview test app for button positions
-APP_URL=/standalone/dataview/dataview_test.html STEP=8 START_Y=80 END_Y=180 npx playwright test --config=playwright-button-finder.config.ts
-
-# Scan htmlwin test app
-APP_URL=/standalone/htmlwin/htmlwin_test.html STEP=8 START_Y=80 END_Y=160 npx playwright test --config=playwright-button-finder.config.ts
-```
-
 ### Available Test Apps
 
 | App URL | Description |

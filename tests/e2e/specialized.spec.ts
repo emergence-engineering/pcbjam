@@ -1,6 +1,6 @@
 // Specialized wxWidgets Controls Tests - Treebook, RearrangeCtrl, BitmapComboBox
 import { test, expect, tryLoadApp } from './utils/fixtures';
-import { clickByLabel, clickComboButton, selectComboItem, clickListboxItem } from './utils/element-tracker';
+import { clickByLabel, clickComboButton, selectComboItem, clickListboxItem, clickTreeItem } from './utils/element-tracker';
 
 test.describe('Specialized wxWidgets Controls Tests', () => {
 
@@ -17,10 +17,7 @@ test.describe('Specialized wxWidgets Controls Tests', () => {
   test('wxTreebook displays tree with pages', async ({ page, testLogger }) => {
     await page.goto('/standalone/specialized/specialized_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 
@@ -28,18 +25,19 @@ test.describe('Specialized wxWidgets Controls Tests', () => {
     await page.screenshot({ path: 'test-results/specialized-02-treebook-initial.png', fullPage: true });
   });
 
-  test('wxTreebook can navigate to sub-pages', async ({ page, testLogger }) => {
+  test('wxTreebook can navigate between pages', async ({ page, testLogger }) => {
     await page.goto('/standalone/specialized/specialized_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
-    // Click on Colors sub-page in tree using element registry
-    await clickByLabel(page, 'Colors');
+    // Click on Display page using element registry
+    await clickTreeItem(page, 'Display');
+    await page.waitForTimeout(200);
+
+    // Click on Printing page using element registry
+    await clickTreeItem(page, 'Printing');
     await page.waitForTimeout(200);
 
     await page.screenshot({ path: 'test-results/specialized-03-treebook-subpage.png', fullPage: true });
@@ -48,15 +46,12 @@ test.describe('Specialized wxWidgets Controls Tests', () => {
   test('wxTreebook can expand tree nodes', async ({ page, testLogger }) => {
     await page.goto('/standalone/specialized/specialized_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
     // Click on Editing page using element registry
-    await clickByLabel(page, 'Editing');
+    await clickTreeItem(page, 'Editing');
     await page.waitForTimeout(200);
 
     await page.screenshot({ path: 'test-results/specialized-04-treebook-expand.png', fullPage: true });
@@ -65,10 +60,7 @@ test.describe('Specialized wxWidgets Controls Tests', () => {
   test('wxBitmapComboBox displays layer swatches', async ({ page, testLogger }) => {
     await page.goto('/standalone/specialized/specialized_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -83,10 +75,7 @@ test.describe('Specialized wxWidgets Controls Tests', () => {
   test('wxBitmapComboBox can select different layer', async ({ page, testLogger }) => {
     await page.goto('/standalone/specialized/specialized_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -101,10 +90,7 @@ test.describe('Specialized wxWidgets Controls Tests', () => {
   test('wxRearrangeCtrl displays layer order', async ({ page, testLogger }) => {
     await page.goto('/standalone/specialized/specialized_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 
@@ -115,10 +101,7 @@ test.describe('Specialized wxWidgets Controls Tests', () => {
   test('wxRearrangeCtrl Get Layer Status button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/specialized/specialized_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 

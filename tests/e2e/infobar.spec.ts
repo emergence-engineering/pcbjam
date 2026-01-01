@@ -19,10 +19,7 @@ test.describe('wxInfoBar Tests', () => {
   test('Show Info Message button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/infobar/infobar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click Show Info Message button using element registry
     const clicked = await clickByLabel(page, 'Show Info Message');
@@ -40,10 +37,7 @@ test.describe('wxInfoBar Tests', () => {
   test('Show Warning Message button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/infobar/infobar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click Show Warning Message button using element registry
     const clicked = await clickByLabel(page, 'Show Warning Message');
@@ -61,10 +55,7 @@ test.describe('wxInfoBar Tests', () => {
   test('Show Error Message button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/infobar/infobar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // Click Show Error Message button using element registry
     const clicked = await clickByLabel(page, 'Show Error Message');
@@ -82,10 +73,7 @@ test.describe('wxInfoBar Tests', () => {
   test('Dismiss button works', async ({ page, testLogger }) => {
     await page.goto('/standalone/infobar/infobar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     // First show a message using element registry
     const infoClicked = await clickByLabel(page, 'Show Info Message');

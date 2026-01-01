@@ -18,10 +18,7 @@ test.describe('wxPicker Controls Tests', () => {
   test('Color pickers are visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/pickers/pickers_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/pickers-02-colors.png', fullPage: true });
@@ -35,10 +32,7 @@ test.describe('wxPicker Controls Tests', () => {
   test('Font picker is visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/pickers/pickers_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/pickers-03-font.png', fullPage: true });
@@ -50,10 +44,7 @@ test.describe('wxPicker Controls Tests', () => {
   test('Color preview panel exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/pickers/pickers_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/pickers-04-preview.png', fullPage: true });

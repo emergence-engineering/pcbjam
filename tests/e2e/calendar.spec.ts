@@ -17,10 +17,7 @@ test.describe('wxCalendarCtrl Tests', () => {
   test('Calendar dates can be selected', async ({ page, testLogger }) => {
     await page.goto('/standalone/calendar/calendar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -35,10 +32,7 @@ test.describe('wxCalendarCtrl Tests', () => {
   test('Calendar can navigate to next month', async ({ page, testLogger }) => {
     await page.goto('/standalone/calendar/calendar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -53,10 +47,7 @@ test.describe('wxCalendarCtrl Tests', () => {
   test('Calendar can navigate to previous month', async ({ page, testLogger }) => {
     await page.goto('/standalone/calendar/calendar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -71,10 +62,7 @@ test.describe('wxCalendarCtrl Tests', () => {
   test('Calendar can navigate to today', async ({ page, testLogger }) => {
     await page.goto('/standalone/calendar/calendar_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 

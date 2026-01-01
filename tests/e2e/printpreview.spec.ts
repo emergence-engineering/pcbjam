@@ -17,10 +17,7 @@ test.describe('wxPrintPreview Tests', () => {
   test('Preview area displays schematic-like content', async ({ page, testLogger }) => {
     await page.goto('/standalone/printpreview/printpreview_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 
@@ -31,10 +28,7 @@ test.describe('wxPrintPreview Tests', () => {
   test('Print Preview button opens preview frame', async ({ page, testLogger }) => {
     await page.goto('/standalone/printpreview/printpreview_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -49,10 +43,7 @@ test.describe('wxPrintPreview Tests', () => {
   test('Page Setup button opens dialog', async ({ page, testLogger }) => {
     await page.goto('/standalone/printpreview/printpreview_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -67,10 +58,7 @@ test.describe('wxPrintPreview Tests', () => {
   test('Print settings display shows current configuration', async ({ page, testLogger }) => {
     await page.goto('/standalone/printpreview/printpreview_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 

@@ -16,10 +16,7 @@ test.describe('wxXmlDocument Tests', () => {
   test('Sample XML input exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/xml-02-input.png', fullPage: true });
@@ -31,10 +28,7 @@ test.describe('wxXmlDocument Tests', () => {
   test('Parse button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/xml-03-parse.png', fullPage: true });
@@ -45,10 +39,7 @@ test.describe('wxXmlDocument Tests', () => {
   test('Traverse button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/xml-04-traverse.png', fullPage: true });
@@ -59,10 +50,7 @@ test.describe('wxXmlDocument Tests', () => {
   test('Create XML button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/xml-05-create.png', fullPage: true });
@@ -73,10 +61,7 @@ test.describe('wxXmlDocument Tests', () => {
   test('Results output panel exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/xml-06-results.png', fullPage: true });

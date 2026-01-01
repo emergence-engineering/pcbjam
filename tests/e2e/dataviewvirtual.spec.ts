@@ -17,10 +17,7 @@ test.describe('wxDataViewCtrl Virtual Mode Tests', () => {
   test('Virtual list handles large datasets', async ({ page, testLogger }) => {
     await page.goto('/standalone/dataviewvirtual/dataviewvirtual_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
 
@@ -40,10 +37,7 @@ test.describe('wxDataViewCtrl Virtual Mode Tests', () => {
   test('Virtual list scrolling works', async ({ page, testLogger }) => {
     await page.goto('/standalone/dataviewvirtual/dataviewvirtual_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -58,10 +52,7 @@ test.describe('wxDataViewCtrl Virtual Mode Tests', () => {
   test('Virtual list selection works', async ({ page, testLogger }) => {
     await page.goto('/standalone/dataviewvirtual/dataviewvirtual_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -77,10 +68,7 @@ test.describe('wxDataViewCtrl Virtual Mode Tests', () => {
   test('Zone manager panel works', async ({ page, testLogger }) => {
     await page.goto('/standalone/dataviewvirtual/dataviewvirtual_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 

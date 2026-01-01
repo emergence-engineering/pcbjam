@@ -16,10 +16,7 @@ test.describe('wxOwnerDrawnComboBox Tests', () => {
   test('Layer combobox is visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/ownerdrawn/ownerdrawn_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/ownerdrawn-02-layer.png', fullPage: true });
@@ -31,10 +28,7 @@ test.describe('wxOwnerDrawnComboBox Tests', () => {
   test('Font combobox is visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/ownerdrawn/ownerdrawn_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/ownerdrawn-03-font.png', fullPage: true });
@@ -45,10 +39,7 @@ test.describe('wxOwnerDrawnComboBox Tests', () => {
   test('Icon combobox is visible', async ({ page, testLogger }) => {
     await page.goto('/standalone/ownerdrawn/ownerdrawn_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/ownerdrawn-04-icon.png', fullPage: true });
@@ -59,10 +50,7 @@ test.describe('wxOwnerDrawnComboBox Tests', () => {
   test('Selection log panel exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/ownerdrawn/ownerdrawn_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
     await page.screenshot({ path: 'test-results/ownerdrawn-05-log.png', fullPage: true });

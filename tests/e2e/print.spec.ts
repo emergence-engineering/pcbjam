@@ -150,9 +150,8 @@ test.describe('wxPrinting Tests', () => {
       log.includes('PRINTOUT_CALLBACK')
     );
 
-    // Log what callbacks we found (for debugging)
-    console.log('Printout callbacks found:', callbacks.length);
-    callbacks.forEach(cb => console.log('  -', cb));
+    // Verify printout callbacks were triggered
+    expect(callbacks.length).toBeGreaterThan(0);
   });
 
   test('No JavaScript errors during print operations', async ({ page, testLogger }) => {

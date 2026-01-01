@@ -17,10 +17,7 @@ test.describe('wxAuiNotebook Tests', () => {
   test('AuiNotebook tabs can be switched', async ({ page, testLogger }) => {
     await page.goto('/standalone/auinotebook/auinotebook_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -35,10 +32,7 @@ test.describe('wxAuiNotebook Tests', () => {
   test('AuiNotebook tabs can be added', async ({ page, testLogger }) => {
     await page.goto('/standalone/auinotebook/auinotebook_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -53,10 +47,7 @@ test.describe('wxAuiNotebook Tests', () => {
   test('AuiNotebook tabs can be removed', async ({ page, testLogger }) => {
     await page.goto('/standalone/auinotebook/auinotebook_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
@@ -71,10 +62,7 @@ test.describe('wxAuiNotebook Tests', () => {
   test('AuiNotebook tab style can be changed', async ({ page, testLogger }) => {
     await page.goto('/standalone/auinotebook/auinotebook_test.html');
     const loaded = await tryLoadApp(page);
-    if (!loaded) {
-      test.skip();
-      return;
-    }
+    expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(300);
 
