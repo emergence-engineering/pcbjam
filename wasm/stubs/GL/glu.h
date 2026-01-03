@@ -40,6 +40,7 @@ typedef struct GLUquadric GLUquadric;
 #define GLU_TESS_WINDING_POSITIVE   100132
 #define GLU_TESS_WINDING_NEGATIVE   100133
 #define GLU_TESS_WINDING_ABS_GEQ_TWO 100134
+#define GLU_TESS_BOUNDARY_ONLY      100141
 
 // Tesselator functions
 GLUtesselator* gluNewTess(void);
