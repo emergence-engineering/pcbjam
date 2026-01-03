@@ -21,6 +21,33 @@ This directory contains Docker configuration for building KiCad for WebAssembly 
 ./docker/shell.sh
 ```
 
+## Branch-Specific Builds
+
+Each git branch gets isolated Docker containers and volumes, enabling parallel development:
+
+```bash
+# On branch 'main' → containers/volumes prefixed with 'kicad-wasm-main'
+# On branch 'feature-x' → containers/volumes prefixed with 'kicad-wasm-feature-x'
+```
+
+This allows you to:
+- Work on multiple branches simultaneously using git worktrees
+- Each worktree has its own build cache (no conflicts)
+- Switch branches without rebuilding from scratch
+
+**Using git worktrees for parallel development:**
+```bash
+# Create a worktree for a new branch
+git worktree add ../kicad-wasm-feature path/to/branch
+
+# Build in the worktree (uses isolated Docker volumes)
+cd ../kicad-wasm-feature
+./docker/build.sh
+
+# List all worktrees
+git worktree list
+```
+
 ## What Gets Built
 
 The build process includes:

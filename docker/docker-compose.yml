@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: kicad-wasm-builder
+    # Container name is auto-generated with project prefix (set in build.sh)
 
     # Resource limits (adjust based on your machine)
     deploy:

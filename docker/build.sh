@@ -11,6 +11,11 @@ set -e
 
 cd "$(dirname "$0")/.."
 
+# Use branch name as Docker Compose project name for isolated containers/volumes
+BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+export COMPOSE_PROJECT_NAME="kicad-wasm-${BRANCH_NAME}"
+echo "Using Docker project: ${COMPOSE_PROJECT_NAME}"
+
 # Add -j 10 by default if no -j flag is given
 ARGS=("$@")
 if [[ ! " ${ARGS[*]} " =~ " -j " ]]; then

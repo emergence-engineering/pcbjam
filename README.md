@@ -2,6 +2,38 @@
 
 Run KiCad PCBnew in the browser using WebAssembly.
 
+## Quick Start
+
+### Full Build (KiCad + All Tests)
+
+```bash
+# 1. Initialize submodules
+git submodule update --init --recursive
+
+# 2. Build KiCad WASM (Docker, ~10 min incremental, ~1-2 hours full)
+./docker/build.sh
+
+# 3. Build wxWidgets for local testing
+./scripts/build-wxuniversal-wasm.sh
+
+# 4. Build wxWidgets test apps
+./scripts/build-wasm-test.sh
+
+# 5. Run all tests
+cd tests && npm install
+npm test              # wxWidgets tests (256 tests)
+npm run test:kicad    # KiCad tests (2 tests)
+```
+
+### wxWidgets Only (No Docker)
+
+```bash
+# Requires: Emscripten SDK 4.0+, Node.js 18+
+./scripts/build-wxuniversal-wasm.sh
+./scripts/build-wasm-test.sh
+cd tests && npm install && npm test
+```
+
 ## Project Structure
 
 ```
