@@ -28,16 +28,20 @@ fi
 # Start container if not running
 docker compose -f docker/docker-compose.yml up -d
 
-# Sync source code to container volume (fixes macOS Docker timestamp issues)
-# rsync -a preserves host timestamps, but make needs container timestamps to
-# correctly detect changes against cached object files. We touch transferred
-# files to set their mtime to container's current time.
+# Sync source code to container volume (fixes macOS Docker VirtioFS issues)
+# Use --checksum to only transfer files with different CONTENT, not timestamps.
+# This avoids the timestamp mismatch cycle that caused full rebuilds every time.
+# Transferred files get current container time, so make detects them correctly.
 echo "Syncing source code to container..."
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
-    bash -c 'rsync -ai --delete --exclude="build-wasm" --exclude="output" /workspace-host/ /workspace/ | \
-        grep "^>f" | \
-        sed "s/^[^ ]* //" | \
-        while read f; do touch "/workspace/$f" 2>/dev/null; done'
+    rsync -r --delete --checksum \
+        --exclude="build-wasm" \
+        --exclude="output" \
+        --exclude=".git" \
+        --exclude="logs" \
+        --exclude=".idea" \
+        --exclude="node_modules" \
+        /workspace-host/ /workspace/
 
 # Run build command (without asyncify - handled on host due to memory requirements)
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
