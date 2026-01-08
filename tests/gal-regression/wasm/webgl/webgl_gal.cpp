@@ -2050,11 +2050,11 @@ void WEBGL_GAL::Flush()
 
 void WEBGL_GAL::ClearScreen()
 {
-    // Clear screen
+    // Clear screen with the configured clear color
     m_compositor->SetBuffer( WEBGL_COMPOSITOR::DIRECT_RENDERING );
 
-    // NOTE: Black used here instead of m_clearColor; it will be composited later
-    glClearColor( 0, 0, 0, 1 );
+    // Use m_clearColor for background (set via SetClearColor())
+    glClearColor( m_clearColor.r, m_clearColor.g, m_clearColor.b, m_clearColor.a );
     glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 }
 

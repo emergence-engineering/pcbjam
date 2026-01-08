@@ -84,18 +84,21 @@ log_error() {
     echo -e "${RED}✗ $1${NC}"
 }
 
-# Compare two directories of screenshots
-# Usage: compare_screenshots <dir1> <dir2> <label>
-# Returns 0 if identical, 1 if different
+# Compare two directories of screenshots using ImageMagick
+# Supports different dimensions (resizes to match) and allows small pixel differences
+# Usage: compare_screenshots <dir1> <dir2> <label> [threshold]
+# Returns 0 if match within threshold, 1 if different
 compare_screenshots() {
     local dir1="$1"
     local dir2="$2"
     local label="$3"
+    local threshold="${4:-1.0}"  # Default 1% difference allowed
 
     echo ""
     echo "Comparing: $label"
     echo "  Reference: $dir1"
     echo "  Current:   $dir2"
+    echo "  Threshold: ${threshold}% pixel difference"
     echo ""
 
     if [ ! -d "$dir1" ]; then
@@ -108,10 +111,20 @@ compare_screenshots() {
         return 1
     fi
 
+    # Check for ImageMagick
+    if ! command -v compare &> /dev/null; then
+        log_error "ImageMagick 'compare' command not found. Install with: brew install imagemagick"
+        return 1
+    fi
+
     local total=0
-    local identical=0
+    local matching=0
     local different=0
     local missing=0
+
+    # Create temp directory for resized images
+    local tmpdir=$(mktemp -d)
+    trap "rm -rf '$tmpdir'" EXIT
 
     # Compare all reference screenshots
     for ref in "$dir1"/*.png; do
@@ -127,16 +140,62 @@ compare_screenshots() {
             continue
         fi
 
-        if cmp -s "$ref" "$current"; then
-            identical=$((identical + 1))
+        # Get dimensions
+        local ref_dims=$(identify -format "%wx%h" "$ref" 2>/dev/null)
+        local cur_dims=$(identify -format "%wx%h" "$current" 2>/dev/null)
+
+        # If dimensions differ, resize current to match reference
+        local compare_file="$current"
+        if [ "$ref_dims" != "$cur_dims" ]; then
+            compare_file="$tmpdir/resized_$filename"
+            convert "$current" -resize "$ref_dims!" "$compare_file" 2>/dev/null
             if [ -n "$VERBOSE" ]; then
-                echo "  IDENTICAL: $filename"
+                echo "  RESIZED: $filename ($cur_dims -> $ref_dims)"
+            fi
+        fi
+
+        # Compare with fuzz factor (allows small pixel differences from anti-aliasing)
+        # Use AE (Absolute Error) metric - counts differing pixels
+        # Output format: "123456 (0.123)" - extract just the first number
+        local compare_output=$(compare -metric AE -fuzz 2% "$ref" "$compare_file" null: 2>&1 || true)
+        local diff_pixels=$(echo "$compare_output" | awk '{print $1}')
+
+        # Handle scientific notation (e.g., 1.92e+06)
+        if [[ "$diff_pixels" =~ [eE] ]]; then
+            diff_pixels=$(printf "%.0f" "$diff_pixels")
+        fi
+
+        # Handle error cases (non-numeric output)
+        if ! [[ "$diff_pixels" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+            echo "  ERROR: $filename (comparison failed: $compare_output)"
+            different=$((different + 1))
+            continue
+        fi
+
+        # Calculate percentage
+        local total_pixels=$(identify -format "%[fx:w*h]" "$ref" 2>/dev/null)
+        # Handle scientific notation in total_pixels
+        if [[ "$total_pixels" =~ [eE] ]]; then
+            total_pixels=$(printf "%.0f" "$total_pixels")
+        fi
+        if [ -z "$total_pixels" ] || [ "$total_pixels" = "0" ]; then
+            total_pixels=1  # Avoid division by zero
+        fi
+
+        # Use awk for floating point arithmetic (more portable than bc)
+        local diff_pct=$(awk "BEGIN {printf \"%.4f\", ($diff_pixels * 100.0) / $total_pixels}")
+
+        # Compare against threshold
+        local is_match=$(awk "BEGIN {print ($diff_pct < $threshold) ? 1 : 0}")
+
+        if [ "$is_match" -eq 1 ]; then
+            matching=$((matching + 1))
+            if [ -n "$VERBOSE" ] || [ "$diff_pixels" -gt 0 ]; then
+                echo "  MATCH: $filename (${diff_pct}% different)"
             fi
         else
             different=$((different + 1))
-            local ref_size=$(stat -f%z "$ref" 2>/dev/null || stat -c%s "$ref")
-            local cur_size=$(stat -f%z "$current" 2>/dev/null || stat -c%s "$current")
-            echo "  DIFFERENT: $filename (ref: ${ref_size}B, cur: ${cur_size}B)"
+            echo "  DIFFERENT: $filename (${diff_pct}% different, threshold: ${threshold}%)"
         fi
     done
 
@@ -153,7 +212,7 @@ compare_screenshots() {
     done
 
     echo ""
-    echo "  Results: $identical/$total identical, $different different, $missing missing, $extra extra"
+    echo "  Results: $matching/$total matching, $different different, $missing missing, $extra extra"
 
     if [ "$different" -gt 0 ] || [ "$missing" -gt 0 ]; then
         log_error "$label: FAILED"

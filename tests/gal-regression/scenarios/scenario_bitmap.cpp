@@ -7,10 +7,6 @@
  * In OPENGL_GAL, it uses GL_BITMAP_CACHE to create GPU textures from wxImage data.
  * Position is controlled via Save/Translate/Restore, not by arguments to DrawBitmap.
  *
- * IMPORTANT: DrawBitmap uses legacy OpenGL immediate mode (glBegin/glVertex3f/glEnd)
- * which is incompatible with active shaders. We must deactivate the shader before
- * calling DrawBitmap and reactivate it afterward.
- *
  * This scenario demonstrates:
  * 1. Basic bitmap rendering with checkerboard pattern
  * 2. Gradient patterns (horizontal, vertical, radial)
@@ -19,12 +15,17 @@
  * 5. Multiple bitmaps in a scene
  */
 
-#include <GL/glew.h>
 #include <gal/graphics_abstraction_layer.h>
-#include <gal/opengl/opengl_gal.h>
 #include "../native/bitmap_base_stub.h"
-#include "../native/gal_test_accessor.h"
 #include <cmath>
+
+// Native-only includes for shader workaround
+// WebGL uses a different shader architecture and doesn't need this workaround
+#ifndef __EMSCRIPTEN__
+#include <GL/glew.h>
+#include <gal/opengl/opengl_gal.h>
+#include "../native/gal_test_accessor.h"
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -34,6 +35,10 @@ namespace GALTest {
 
 using KIGFX::COLOR4D;
 using KIGFX::GAL;
+
+#ifndef __EMSCRIPTEN__
+// Native build only: OpenGL-specific code
+
 using KIGFX::OPENGL_GAL;
 
 // Setup state needed for DrawBitmap (width/height cached per scenario)
@@ -84,10 +89,24 @@ static void DrawBitmapWithShaderFix(GAL* gal, const BITMAP_BASE& bitmap, double 
     ActivateGALShader(oglGal);
 }
 
+#else
+// WebGL build: Use DrawBitmap directly through the abstract interface
+// WEBGL_GAL::DrawBitmap should be implemented using modern GL (VAO/VBO) not immediate mode
+
+static void DrawBitmapWithShaderFix(GAL* gal, const BITMAP_BASE& bitmap, double alpha = 1.0) {
+    // In WebGL, just call DrawBitmap directly
+    // The shader is managed internally by WEBGL_GAL
+    gal->DrawBitmap(bitmap, alpha);
+}
+
+#endif
+
 void RenderBitmap(GAL* gal, int width, int height) {
-    // Cache viewport size for fixed-function matrix setup
+#ifndef __EMSCRIPTEN__
+    // Cache viewport size for fixed-function matrix setup (native only)
     s_viewportWidth = width;
     s_viewportHeight = height;
+#endif
 
     gal->SetLayerDepth(100);
     gal->SetIsFill(true);

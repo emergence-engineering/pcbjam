@@ -94,7 +94,10 @@ KICAD_SRCS = $(KICAD_ROOT)/common/gal/hidpi_gl_canvas.cpp \
              $(KICAD_ROOT)/common/gal/gal_display_options.cpp
 
 # Test scenario sources (shared with native test)
-SCENARIO_SRCS = ../scenarios/gal_test_scenarios.cpp
+# Include ALL scenario files - they should use the abstract GAL interface only.
+# The harness decides whether to use OPENGL_GAL (native) or WEBGL_GAL (wasm).
+SCENARIO_SRCS = ../scenarios/gal_test_scenarios.cpp \
+                $(wildcard ../scenarios/scenario_*.cpp)
 
 # GLU tesselator - stub (no actual implementation needed for basic shapes)
 GLU_SRCS =

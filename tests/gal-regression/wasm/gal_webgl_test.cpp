@@ -27,9 +27,9 @@
 
 #include <cstdio>
 
-// Canvas dimensions (matching native test)
-static const int CANVAS_WIDTH = 800;
-static const int CANVAS_HEIGHT = 600;
+// Canvas dimensions (matching native baseline at 2x Retina scale)
+static const int CANVAS_WIDTH = 1600;
+static const int CANVAS_HEIGHT = 1200;
 
 // Global state
 static int g_currentScenario = -1;
@@ -166,7 +166,8 @@ bool GALTestApp::OnInit() {
     // Set up the GAL
     g_gal->SetScreenSize(VECTOR2I(CANVAS_WIDTH, CANVAS_HEIGHT));
     g_gal->ResizeScreen(CANVAS_WIDTH, CANVAS_HEIGHT);
-    g_gal->SetClearColor(KIGFX::COLOR4D(0.1, 0.1, 0.15, 1.0));
+    // Use white background to match native baseline screenshots
+    g_gal->SetClearColor(KIGFX::COLOR4D(1.0, 1.0, 1.0, 1.0));
 
     // CRITICAL: Set worldUnitLength for 1:1 world-to-screen coordinate mapping
     // GAL default worldUnitLength is for PCB nanometers, which would compress

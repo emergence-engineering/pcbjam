@@ -138,9 +138,15 @@ test.describe('GAL WebGL Regression Tests', () => {
 
       await expect(canvas).toBeVisible({ timeout: 5000 });
 
+      // Hide controls overlay before screenshot (it sits on top of canvas)
+      await page.locator('#controls-overlay').evaluate(el => el.style.visibility = 'hidden');
+
       // Screenshot the canvas (matching native 800x600 output)
       const screenshotPath = path.join(OUTPUT_DIR, `gal-${scenarioName}.png`);
       await canvas.screenshot({ path: screenshotPath });
+
+      // Restore overlay for manual debugging
+      await page.locator('#controls-overlay').evaluate(el => el.style.visibility = 'visible');
 
       // Print console logs for first scenario (debugging)
       if (scenarioIndex === 0) {
@@ -174,10 +180,16 @@ test.describe('GAL WebGL Regression Tests', () => {
       // Wait for rendering
       await page.waitForTimeout(50);
 
+      // Hide controls overlay before screenshot
+      await page.locator('#controls-overlay').evaluate(el => el.style.visibility = 'hidden');
+
       // Screenshot the canvas
       const canvas = await page.locator('#canvas');
       const screenshotPath = path.join(OUTPUT_DIR, `gal-${scenarioName}.png`);
       await canvas.screenshot({ path: screenshotPath });
+
+      // Restore overlay
+      await page.locator('#controls-overlay').evaluate(el => el.style.visibility = 'visible');
 
       console.log(`[${i + 1}/28] ${scenarioName}`);
     }
