@@ -176,7 +176,8 @@ bool GALTestApp::OnInit() {
     // We need to match this: GAL thinks it's 800x600, but actually renders to 1600x1200
     g_gal->SetScreenSize(VECTOR2I(CANVAS_WIDTH, CANVAS_HEIGHT));  // Physical: 1600x1200
     g_gal->ResizeScreen(CANVAS_WIDTH, CANVAS_HEIGHT);  // Framebuffer: 1600x1200
-    // Use white background to match native baseline screenshots
+    // Native screenshots have transparent backgrounds that flatten to WHITE during comparison
+    // WebGL must use white background to match after flattening
     g_gal->SetClearColor(KIGFX::COLOR4D(1.0, 1.0, 1.0, 1.0));
 
     // CRITICAL: Set worldUnitLength to match native (which uses DPI=91)
