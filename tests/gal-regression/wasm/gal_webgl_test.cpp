@@ -27,9 +27,14 @@
 
 #include <cstdio>
 
-// Canvas dimensions (matching native baseline at 2x Retina scale)
+// Canvas dimensions
+// Physical canvas is 1600x1200 (matching native baseline at 2x Retina scale)
+// But GAL coordinate space is 800x600 (matching native logical dimensions)
+// The 2x scaling happens via devicePixelRatio in the canvas
 static const int CANVAS_WIDTH = 1600;
 static const int CANVAS_HEIGHT = 1200;
+static const int GAL_WIDTH = 800;   // Logical coordinate space (matches native)
+static const int GAL_HEIGHT = 600;
 
 // Global state
 static int g_currentScenario = -1;
@@ -63,8 +68,8 @@ void renderCurrentScenario() {
     // Clear the screen (clears the direct rendering buffer)
     g_gal->ClearScreen();
 
-    // Render the scenario
-    GALTest::RenderScenario(g_gal, g_currentScenario, CANVAS_WIDTH, CANVAS_HEIGHT);
+    // Render the scenario using logical coordinate space (matches native)
+    GALTest::RenderScenario(g_gal, g_currentScenario, GAL_WIDTH, GAL_HEIGHT);
 
     // End drawing and present
     g_gal->EndDrawing();
@@ -167,22 +172,21 @@ bool GALTestApp::OnInit() {
     g_frame->Show(true);
 
     // Set up the GAL
-    g_gal->SetScreenSize(VECTOR2I(CANVAS_WIDTH, CANVAS_HEIGHT));
-    g_gal->ResizeScreen(CANVAS_WIDTH, CANVAS_HEIGHT);
+    // Native test runs at 800x600 logical but outputs 1600x1200 due to Retina 2x scaling
+    // We need to match this: GAL thinks it's 800x600, but actually renders to 1600x1200
+    g_gal->SetScreenSize(VECTOR2I(CANVAS_WIDTH, CANVAS_HEIGHT));  // Physical: 1600x1200
+    g_gal->ResizeScreen(CANVAS_WIDTH, CANVAS_HEIGHT);  // Framebuffer: 1600x1200
     // Use white background to match native baseline screenshots
     g_gal->SetClearColor(KIGFX::COLOR4D(1.0, 1.0, 1.0, 1.0));
 
-    // CRITICAL: Set worldUnitLength for 1:1 world-to-screen coordinate mapping
-    // GAL default worldUnitLength is for PCB nanometers, which would compress
-    // our pixel-scale coordinates (0-800) to tiny values!
-    // With screenDPI=96 and zoomFactor=1.0, worldUnitLength should be 1/96
-    g_gal->SetScreenDPI(96);
-    g_gal->SetWorldUnitLength(1.0 / 96.0);
+    // CRITICAL: Set worldUnitLength to match native (which uses DPI=91)
+    g_gal->SetWorldUnitLength(1.0 / 91.0);  // Match native KiCad default
 
-    // Set up coordinate transformation for 1:1 world-to-screen mapping
-    // LookAtPoint should be at center, ZoomFactor of 1.0 gives 1:1 mapping
-    g_gal->SetLookAtPoint(VECTOR2D(CANVAS_WIDTH / 2.0, CANVAS_HEIGHT / 2.0));
-    g_gal->SetZoomFactor(1.0);
+    // Set up coordinate transformation to simulate Retina 2x scaling:
+    // - LookAtPoint at center of LOGICAL space (400, 300)
+    // - ZoomFactor of 2.0 to scale 800x600 content to fill 1600x1200
+    g_gal->SetLookAtPoint(VECTOR2D(GAL_WIDTH / 2.0, GAL_HEIGHT / 2.0));
+    g_gal->SetZoomFactor(2.0);  // 2x zoom to simulate Retina scaling
     g_gal->ComputeWorldScreenMatrix();
 
     // Initialize the compositor with proper context locking
