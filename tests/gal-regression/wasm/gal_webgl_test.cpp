@@ -79,6 +79,9 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE
 int runScenario(int scenarioIndex) {
+    printf("[DEBUG] runScenario called with index %d, g_gal=%p\n",
+           scenarioIndex, (void*)g_gal);
+
     if (scenarioIndex < 0 || scenarioIndex >= g_totalScenarios) {
         printf("ERROR: Invalid scenario index %d (valid: 0-%d)\n",
                scenarioIndex, g_totalScenarios - 1);
@@ -163,16 +166,20 @@ bool GALTestApp::OnInit() {
     // Set up the GAL
     g_gal->SetScreenSize(VECTOR2I(CANVAS_WIDTH, CANVAS_HEIGHT));
     g_gal->ResizeScreen(CANVAS_WIDTH, CANVAS_HEIGHT);
+    g_gal->SetClearColor(KIGFX::COLOR4D(0.1, 0.1, 0.15, 1.0));
 
-    // Set default world coordinates (matching native test)
-    double worldScale = 1.0 / 10000.0;  // Convert nm to screen units
-    g_gal->SetWorldUnitLength(worldScale);
+    // CRITICAL: Set worldUnitLength for 1:1 world-to-screen coordinate mapping
+    // GAL default worldUnitLength is for PCB nanometers, which would compress
+    // our pixel-scale coordinates (0-800) to tiny values!
+    // With screenDPI=96 and zoomFactor=1.0, worldUnitLength should be 1/96
     g_gal->SetScreenDPI(96);
+    g_gal->SetWorldUnitLength(1.0 / 96.0);
 
-    // Set world boundaries
-    VECTOR2D worldSize(CANVAS_WIDTH / worldScale, CANVAS_HEIGHT / worldScale);
-    BOX2D worldBounds(VECTOR2D(0, 0), worldSize);
-    g_gal->SetWorldScreenMatrix(g_gal->GetWorldScreenMatrix());
+    // Set up coordinate transformation for 1:1 world-to-screen mapping
+    // LookAtPoint should be at center, ZoomFactor of 1.0 gives 1:1 mapping
+    g_gal->SetLookAtPoint(VECTOR2D(CANVAS_WIDTH / 2.0, CANVAS_HEIGHT / 2.0));
+    g_gal->SetZoomFactor(1.0);
+    g_gal->ComputeWorldScreenMatrix();
 
     // Initialize the compositor with proper context locking
     g_gal->LockContext(-1);  // Lock with init ID

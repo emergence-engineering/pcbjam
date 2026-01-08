@@ -94,7 +94,7 @@ test.describe('GAL WebGL Regression Tests', () => {
 
       // Wait for module to be ready
       await page.waitForFunction(() => {
-        return (window as any).galTest !== undefined;
+        return (window as any).galTest !== undefined && (window as any).galTest.isReady();
       }, { timeout: 60000 });
 
       // Run the scenario

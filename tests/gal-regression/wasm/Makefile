@@ -1,7 +1,7 @@
 # Makefile for GAL WebGL Test (WASM)
 #
 # Builds WEBGL_GAL (ported from OPENGL_GAL) using wxWidgets WASM build.
-# Uses LEGACY_GL_EMULATION for legacy OpenGL compatibility.
+# Uses pure WebGL 2.0 / OpenGL ES 3.0 (no LEGACY_GL_EMULATION).
 #
 # Usage:
 #   make                    # Build
@@ -72,7 +72,14 @@ BASE_LDFLAGS = -sALLOW_MEMORY_GROWTH=1 \
 # No LEGACY_GL_EMULATION - WEBGL_GAL uses VBOs and custom shaders
 EM_GL_FLAGS = -sFULL_ES3=1 -sMAX_WEBGL_VERSION=2
 
-LDFLAGS = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(EM_GL_FLAGS) $(WX_LDFLAGS)
+# Legacy GL stubs for wxWidgets compatibility
+# wxWidgets GL library may reference legacy functions at runtime, but actual
+# rendering uses WEBGL_GAL which only uses modern WebGL 2.0 APIs
+# Use absolute path to ensure the library is found
+MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+LEGACY_GL_STUBS = --js-library=$(MAKEFILE_DIR)legacy_gl_stubs.js
+
+LDFLAGS = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(EM_GL_FLAGS) $(LEGACY_GL_STUBS) $(WX_LDFLAGS)
 
 # Templates
 JS = $(TOOLS_ROOT)/wx.js

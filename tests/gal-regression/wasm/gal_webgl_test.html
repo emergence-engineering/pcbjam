@@ -129,13 +129,23 @@
 
         // Run a single scenario
         function runScenario(index) {
-            if (!wasmModule) return;
+            console.log('[DEBUG JS] runScenario called with index:', index, 'wasmModule:', !!wasmModule);
+            if (!wasmModule) {
+                console.log('[DEBUG JS] wasmModule is null, returning early');
+                return;
+            }
 
-            const result = wasmModule.ccall('runScenario', 'number', ['number'], [index]);
-            if (result === 0) {
-                setStatus(`Rendered: ${SCENARIO_NAMES[index]}`);
-            } else {
-                setStatus(`ERROR: Failed scenario ${index}`);
+            try {
+                console.log('[DEBUG JS] Calling ccall...');
+                const result = wasmModule.ccall('runScenario', 'number', ['number'], [index]);
+                console.log('[DEBUG JS] ccall returned:', result);
+                if (result === 0) {
+                    setStatus(`Rendered: ${SCENARIO_NAMES[index]}`);
+                } else {
+                    setStatus(`ERROR: Failed scenario ${index}`);
+                }
+            } catch (e) {
+                console.error('[DEBUG JS] ccall threw error:', e);
             }
         }
 
@@ -182,7 +192,8 @@
             runAllScenarios,
             getScenarioName: (index) => SCENARIO_NAMES[index],
             getTotalScenarios: () => SCENARIO_NAMES.length,
-            getGLCanvas: getGLCanvas
+            getGLCanvas: getGLCanvas,
+            isReady: () => wasmModule !== null
         };
 
         // Create canvas immediately (before module loads)

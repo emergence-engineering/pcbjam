@@ -329,9 +329,20 @@ void WEBGL_COMPOSITOR::SetBuffer( unsigned int aBufferHandle )
     if( m_curFbo != DIRECT_RENDERING )
     {
         m_curBuffer = aBufferHandle - 1;
+
         // WebGL 2.0/OpenGL ES 3.0: use glDrawBuffers instead of glDrawBuffer
-        GLenum drawBuffers[] = { m_buffers[m_curBuffer].attachmentPoint };
-        glDrawBuffers( 1, drawBuffers );
+        // In WebGL 2.0, the draw buffer array index must match the attachment index.
+        // So for GL_COLOR_ATTACHMENTn, we need array[n] = GL_COLOR_ATTACHMENTn
+        GLenum attachmentPoint = m_buffers[m_curBuffer].attachmentPoint;
+        unsigned int attachmentIndex = attachmentPoint - GL_COLOR_ATTACHMENT0;
+
+        // Create draw buffers array with GL_NONE for all entries except the target
+        GLenum drawBuffers[16];
+        for( unsigned int i = 0; i <= attachmentIndex && i < 16; i++ )
+            drawBuffers[i] = GL_NONE;
+        drawBuffers[attachmentIndex] = attachmentPoint;
+
+        glDrawBuffers( attachmentIndex + 1, drawBuffers );
         checkGlError( "setting draw buffer", __FILE__, __LINE__ );
 
         glViewport( 0, 0, m_buffers[m_curBuffer].dimensions.x, m_buffers[m_curBuffer].dimensions.y );

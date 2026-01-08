@@ -751,7 +751,7 @@ void WEBGL_GAL::BeginDrawing()
 
         m_shader->Use();
         m_shader->SetParameter( ufm_fontTexture, (int) FONT_TEXTURE_UNIT );
-        m_shader->SetParameter( ufm_fontTextureWidth, (int) font_image.width );
+        m_shader->SetParameter( ufm_fontTextureWidth, (float) font_image.width );
         m_shader->Deactivate();
         checkGlError( "setting bitmap font sampler as shader parameter", __FILE__, __LINE__ );
 
