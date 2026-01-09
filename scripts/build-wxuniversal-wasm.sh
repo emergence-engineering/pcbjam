@@ -3,6 +3,9 @@
 
 # Redirect all output to a log file (re-execs script with redirection)
 source "$(dirname "$0")/common/logging.sh"
+
+# Source common environment (sets up EMSDK_PYTHON for Emscripten 4.0.22+)
+source "$(dirname "$0")/common/env.sh"
 # This builds the GUI-enabled wxWidgets needed for KiCad
 #
 # Prerequisites:
