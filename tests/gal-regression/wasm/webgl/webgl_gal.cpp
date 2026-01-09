@@ -697,7 +697,12 @@ void WEBGL_GAL::BeginDrawing()
 
     // Setup blending, required for transparent objects
     glEnable( GL_BLEND );
-    glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+    // Use separate blend functions for RGB and alpha channels
+    // RGB: standard alpha blending (src.rgb * src.a + dst.rgb * (1 - src.a))
+    // Alpha: accumulate coverage (src.a + dst.a * (1 - src.a))
+    // This prevents framebuffer alpha from becoming too low when rendering to transparent FBOs
+    glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                         GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
 
     // Set up the world <-> screen transformation (replacing legacy glMatrixMode/glLoadMatrixd)
     ComputeWorldScreenMatrix();
@@ -1656,7 +1661,9 @@ void WEBGL_GAL::DrawBitmap( const BITMAP_BASE& aBitmap, double alphaBlend )
     // Setup for drawing
     glDepthFunc( GL_ALWAYS );
     glEnable( GL_BLEND );
-    glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+    // Use separate blend functions for RGB and alpha (same as main initialization)
+    glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA,
+                         GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
 
     // Use the vertex manager to draw a textured quad (same pattern as DrawGlyph)
     // The shader uses texture coordinates from SHADER_FONT parameters
@@ -2061,23 +2068,12 @@ void WEBGL_GAL::ClearScreen()
 
 void WEBGL_GAL::Transform( const MATRIX3x3D& aTransformation )
 {
-    // Convert 3x3 matrix to 4x4 matrix (column-major order for GLM)
-    // The 3x3 matrix represents a 2D affine transformation
-    glm::mat4 matrix( 1.0f );
-
-    matrix[0][0] = static_cast<float>( aTransformation.m_data[0][0] );
-    matrix[0][1] = static_cast<float>( aTransformation.m_data[1][0] );
-    matrix[0][2] = static_cast<float>( aTransformation.m_data[2][0] );
-
-    matrix[1][0] = static_cast<float>( aTransformation.m_data[0][1] );
-    matrix[1][1] = static_cast<float>( aTransformation.m_data[1][1] );
-    matrix[1][2] = static_cast<float>( aTransformation.m_data[2][1] );
-
-    matrix[3][0] = static_cast<float>( aTransformation.m_data[0][2] );
-    matrix[3][1] = static_cast<float>( aTransformation.m_data[1][2] );
-    matrix[3][2] = static_cast<float>( aTransformation.m_data[2][2] );
-
-    m_currentManager->MultiplyMatrix( matrix );
+    // NOTE: Transform() is dead code in KiCad - never actually called anywhere.
+    // In native OPENGL_GAL, it modifies GL_MODELVIEW via glMultMatrixd(), but
+    // VERTEX_MANAGER uses its own independent m_transform, so the glMultMatrixd
+    // call has no visible effect on rendered output.
+    // We intentionally do nothing here to match that native behavior.
+    (void) aTransformation;  // Suppress unused parameter warning
 }
 
 

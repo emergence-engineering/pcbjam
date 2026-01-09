@@ -395,7 +395,9 @@ void WEBGL_COMPOSITOR::DrawBuffer( unsigned int aSourceHandle, unsigned int aDes
 
     // Depth test has to be disabled to make transparency working
     glDisable( GL_DEPTH_TEST );
-    glBlendFunc( GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+    // Use standard alpha blending for straight (non-premultiplied) alpha
+    // Note: GL_ONE would be for premultiplied alpha, but our FBOs use straight alpha
+    glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
 
     // Bind the source texture
     glActiveTexture( GL_TEXTURE0 );
