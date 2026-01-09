@@ -90,26 +90,8 @@ KIID niluuid;
 // Note: GAL class is provided by graphics_abstraction_layer.cpp
 
 //=============================================================================
-// GLU tesselator stubs (needed for polygon rendering)
-// These are no-op stubs - polygons won't render correctly until
-// we add a real tesselator implementation
+// GLU tesselator - now implemented in glu_tess_impl.cpp using earcut.hpp
 //=============================================================================
-
-extern "C" {
-
-struct GLUtesselator {};
-
-GLUtesselator* gluNewTess() { return new GLUtesselator(); }
-void gluDeleteTess(GLUtesselator* tess) { delete tess; }
-void gluTessProperty(GLUtesselator*, GLenum, GLdouble) {}
-void gluTessCallback(GLUtesselator*, GLenum, void(*)()) {}
-void gluTessBeginPolygon(GLUtesselator*, void*) {}
-void gluTessEndPolygon(GLUtesselator*) {}
-void gluTessBeginContour(GLUtesselator*) {}
-void gluTessEndContour(GLUtesselator*) {}
-void gluTessVertex(GLUtesselator*, GLdouble*, void*) {}
-
-}
 
 //=============================================================================
 // Additional stubs from kicad_stubs.cpp that are needed
