@@ -6,7 +6,9 @@
 
 #include <3d_cache/3d_cache.h>
 #include <3d_cache/3d_plugin_manager.h>
+#include <plugins/3dapi/ifsg_all.h>
 #include <wx/log.h>
+#include <cmath>
 
 // S3D_CACHE stub implementations
 
@@ -125,3 +127,314 @@ SCENEGRAPH* S3D_CACHE::load( const wxString& aModelFile, const wxString& aBasePa
         *aCachePtr = nullptr;
     return nullptr;
 }
+
+
+// SGPOINT stub implementations
+
+SGPOINT::SGPOINT() : x( 0.0 ), y( 0.0 ), z( 0.0 )
+{
+}
+
+SGPOINT::SGPOINT( double aXVal, double aYVal, double aZVal ) noexcept
+    : x( aXVal ), y( aYVal ), z( aZVal )
+{
+}
+
+void SGPOINT::GetPoint( const double& aXVal, const double& aYVal, const double& aZVal ) noexcept
+{
+    (void)aXVal; (void)aYVal; (void)aZVal;
+}
+
+void SGPOINT::GetPoint( const SGPOINT& aPoint ) noexcept
+{
+    (void)aPoint;
+}
+
+void SGPOINT::GetPoint( const SGPOINT* aPoint ) noexcept
+{
+    (void)aPoint;
+}
+
+void SGPOINT::SetPoint( double aXVal, double aYVal, double aZVal ) noexcept
+{
+    x = aXVal; y = aYVal; z = aZVal;
+}
+
+void SGPOINT::SetPoint( const SGPOINT& aPoint ) noexcept
+{
+    x = aPoint.x; y = aPoint.y; z = aPoint.z;
+}
+
+
+// SGVECTOR stub implementations
+
+SGVECTOR::SGVECTOR() : vx( 0.0 ), vy( 0.0 ), vz( 1.0 )
+{
+}
+
+SGVECTOR::SGVECTOR( double aXVal, double aYVal, double aZVal )
+    : vx( aXVal ), vy( aYVal ), vz( aZVal )
+{
+    normalize();
+}
+
+void SGVECTOR::GetVector( double& aXVal, double& aYVal, double& aZVal ) const noexcept
+{
+    aXVal = vx; aYVal = vy; aZVal = vz;
+}
+
+void SGVECTOR::SetVector( double aXVal, double aYVal, double aZVal )
+{
+    vx = aXVal; vy = aYVal; vz = aZVal;
+    normalize();
+}
+
+void SGVECTOR::SetVector( const SGVECTOR& aVector )
+{
+    vx = aVector.vx; vy = aVector.vy; vz = aVector.vz;
+}
+
+SGVECTOR& SGVECTOR::operator=( const SGVECTOR& source ) noexcept
+{
+    vx = source.vx; vy = source.vy; vz = source.vz;
+    return *this;
+}
+
+void SGVECTOR::normalize() noexcept
+{
+    double mag = vx*vx + vy*vy + vz*vz;
+    if( mag > 1e-12 )
+    {
+        mag = 1.0 / sqrt( mag );
+        vx *= mag; vy *= mag; vz *= mag;
+    }
+}
+
+
+// SGCOLOR stub implementations
+
+SGCOLOR::SGCOLOR() : red( 0.0f ), green( 0.0f ), blue( 0.0f )
+{
+}
+
+SGCOLOR::SGCOLOR( float aRVal, float aGVal, float aBVal )
+    : red( aRVal ), green( aGVal ), blue( aBVal )
+{
+}
+
+void SGCOLOR::GetColor( float& aRedVal, float& aGreenVal, float& aBlueVal ) const noexcept
+{
+    aRedVal = red; aGreenVal = green; aBlueVal = blue;
+}
+
+void SGCOLOR::GetColor( SGCOLOR& aColor ) const noexcept
+{
+    aColor.red = red; aColor.green = green; aColor.blue = blue;
+}
+
+void SGCOLOR::GetColor( SGCOLOR* aColor ) const noexcept
+{
+    if( aColor ) { aColor->red = red; aColor->green = green; aColor->blue = blue; }
+}
+
+bool SGCOLOR::SetColor( float aRedVal, float aGreenVal, float aBlueVal )
+{
+    red = aRedVal; green = aGreenVal; blue = aBlueVal;
+    return true;
+}
+
+bool SGCOLOR::SetColor( const SGCOLOR& aColor ) noexcept
+{
+    red = aColor.red; green = aColor.green; blue = aColor.blue;
+    return true;
+}
+
+bool SGCOLOR::SetColor( const SGCOLOR* aColor ) noexcept
+{
+    if( aColor ) { red = aColor->red; green = aColor->green; blue = aColor->blue; return true; }
+    return false;
+}
+
+bool SGCOLOR::checkRange( float aRedVal, float aGreenVal, float aBlueVal ) const noexcept
+{
+    (void)aRedVal; (void)aGreenVal; (void)aBlueVal;
+    return true;
+}
+
+
+// IFSG_NODE stub implementations
+
+IFSG_NODE::IFSG_NODE() : m_node( nullptr )
+{
+}
+
+IFSG_NODE::~IFSG_NODE()
+{
+}
+
+void IFSG_NODE::Destroy()
+{
+    m_node = nullptr;
+}
+
+SGNODE* IFSG_NODE::GetRawPtr() noexcept
+{
+    return m_node;
+}
+
+S3D::SGTYPES IFSG_NODE::GetNodeType() const
+{
+    return S3D::SGTYPE_TRANSFORM;
+}
+
+SGNODE* IFSG_NODE::GetParent() const
+{
+    return nullptr;
+}
+
+bool IFSG_NODE::SetParent( SGNODE* aParent )
+{
+    (void)aParent;
+    return false;
+}
+
+const char* IFSG_NODE::GetName()
+{
+    return nullptr;
+}
+
+bool IFSG_NODE::SetName( const char* aName )
+{
+    (void)aName;
+    return false;
+}
+
+const char* IFSG_NODE::GetNodeTypeName( S3D::SGTYPES aNodeType ) const
+{
+    (void)aNodeType;
+    return "STUB";
+}
+
+SGNODE* IFSG_NODE::FindNode( const char* aNodeName )
+{
+    (void)aNodeName;
+    return nullptr;
+}
+
+bool IFSG_NODE::AddRefNode( SGNODE* aNode )
+{
+    (void)aNode;
+    return false;
+}
+
+bool IFSG_NODE::AddRefNode( IFSG_NODE& aNode )
+{
+    (void)aNode;
+    return false;
+}
+
+bool IFSG_NODE::AddChildNode( SGNODE* aNode )
+{
+    (void)aNode;
+    return false;
+}
+
+bool IFSG_NODE::AddChildNode( IFSG_NODE& aNode )
+{
+    (void)aNode;
+    return false;
+}
+
+
+// IFSG_TRANSFORM stub implementations
+
+IFSG_TRANSFORM::IFSG_TRANSFORM( bool create ) : IFSG_NODE()
+{
+    (void)create;
+}
+
+IFSG_TRANSFORM::IFSG_TRANSFORM( SGNODE* aParent ) : IFSG_NODE()
+{
+    (void)aParent;
+}
+
+bool IFSG_TRANSFORM::Attach( SGNODE* aNode )
+{
+    (void)aNode;
+    return false;
+}
+
+bool IFSG_TRANSFORM::NewNode( SGNODE* aParent )
+{
+    (void)aParent;
+    return false;
+}
+
+bool IFSG_TRANSFORM::NewNode( IFSG_NODE& aParent )
+{
+    (void)aParent;
+    return false;
+}
+
+bool IFSG_TRANSFORM::SetScaleOrientation( const SGVECTOR& aScaleAxis, double aAngle )
+{
+    (void)aScaleAxis; (void)aAngle;
+    return false;
+}
+
+bool IFSG_TRANSFORM::SetRotation( const SGVECTOR& aRotationAxis, double aAngle )
+{
+    (void)aRotationAxis; (void)aAngle;
+    return false;
+}
+
+bool IFSG_TRANSFORM::SetScale( const SGPOINT& aScale ) noexcept
+{
+    (void)aScale;
+    return false;
+}
+
+bool IFSG_TRANSFORM::SetScale( double aScale )
+{
+    (void)aScale;
+    return false;
+}
+
+bool IFSG_TRANSFORM::SetCenter( const SGPOINT& aCenter ) noexcept
+{
+    (void)aCenter;
+    return false;
+}
+
+bool IFSG_TRANSFORM::SetTranslation( const SGPOINT& aTranslation ) noexcept
+{
+    (void)aTranslation;
+    return false;
+}
+
+
+// S3D namespace stub implementations
+
+namespace S3D
+{
+
+bool WriteVRML( const char* filename, bool overwrite, SGNODE* aTopNode,
+                bool reuse, bool renameNodes )
+{
+    (void)filename; (void)overwrite; (void)aTopNode;
+    (void)reuse; (void)renameNodes;
+    return false;
+}
+
+SGNODE* GetSGNodeParent( SGNODE* aNode )
+{
+    (void)aNode;
+    return nullptr;
+}
+
+void DestroyNode( SGNODE* aNode ) noexcept
+{
+    (void)aNode;
+}
+
+}  // namespace S3D

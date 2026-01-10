@@ -7,6 +7,7 @@
 #include <3d_viewer/eda_3d_viewer_frame.h>
 #include <3d_viewer/eda_3d_viewer_settings.h>
 #include <3d_viewer/toolbars_3d.h>
+#include <base_units.h>
 
 // EDA_3D_VIEWER_FRAME stub implementations
 // The 3D viewer is not available in WASM builds
@@ -14,7 +15,7 @@
 EDA_3D_VIEWER_FRAME::EDA_3D_VIEWER_FRAME( KIWAY* aKiway, PCB_BASE_FRAME* aParent,
                                            const wxString& aTitle, long style ) :
     KIWAY_PLAYER( aKiway, aParent, FRAME_PCB_DISPLAY3D, aTitle, wxDefaultPosition,
-                  wxDefaultSize, style, wxT( "3D Viewer" ) ),
+                  wxDefaultSize, style, wxT( "3D Viewer" ), unityScale ),
     m_currentCamera( m_trackBallCamera ),
     m_trackBallCamera( 2 * RANGE_SCALE_3D )
 {
