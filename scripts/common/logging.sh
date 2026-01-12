@@ -41,8 +41,18 @@ mkdir -p "${_LOGS_DIR}"
 # Show log path before re-exec
 echo "Logging to: ${_LOG_FILE}"
 
-# Re-exec the calling script with output redirected
+# Run the calling script with output redirected
 # This is equivalent to: ./script.sh > logfile 2>&1
 # and reliably captures ALL output including docker compose TTY messages
 export KICAD_LOG_NESTED=1
-exec "${_CALLER_SCRIPT}" "$@" > "${_LOG_FILE}" 2>&1
+"${_CALLER_SCRIPT}" "$@" > "${_LOG_FILE}" 2>&1
+_EXIT_CODE=$?
+
+# Print completion message (this runs AFTER the script finishes)
+if [[ ${_EXIT_CODE} -eq 0 ]]; then
+    echo "Done. Log: ${_LOG_FILE}"
+else
+    echo "Failed (exit ${_EXIT_CODE}). Log: ${_LOG_FILE}"
+fi
+
+exit ${_EXIT_CODE}
