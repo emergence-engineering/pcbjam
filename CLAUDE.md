@@ -12,8 +12,8 @@ The tests have log files in tests/logs/{wxwidgets/kicad}/{test-name} after each 
 Always check screenshots for validating tests
 Run e2e tests from /tests folder: `npm run test:kicad` or `npm run test:e2e` (not playwright directly)
 
-Build wxwidgets with scripts/build-wxuniversal-wasm.sh
-Build kicad with docker/build.sh
+Build kicad with docker/build.sh (includes wxwidgets build, runs in docker)
+Build wxwidgets standalone with scripts/build-wxuniversal-wasm.sh (runs on machine, for wxwidgets-only changes)
 Build CPP wxwidgets tests with scripts/builds-wasm-test.sh
 The build scripts pipe their outputs into log files so that they won't clog the LLM context. 
 Don't pipe outputs, just run the scripts. Maybe with flex if you need that.
