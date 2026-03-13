@@ -4,12 +4,12 @@
 # Redirect all output to a log file (re-execs script with redirection)
 source "$(dirname "$0")/common/logging.sh"
 
-# Source common environment (sets up EMSDK_PYTHON for Emscripten 4.0.22+)
+# Source common environment (sets up local emsdk)
 source "$(dirname "$0")/common/env.sh"
 # This builds the GUI-enabled wxWidgets needed for KiCad
 #
 # Prerequisites:
-# - Emscripten SDK installed and activated
+# - Emscripten SDK (auto-installed by env.sh via scripts/setup-emsdk.sh)
 # - autoconf (for regenerating configure from configure.in)
 #
 # To regenerate Makefile.in from bakefiles (after modifying files.bkl):
@@ -22,14 +22,6 @@ source "$(dirname "$0")/common/env.sh"
 #   ./build-wxuniversal-wasm.sh --clean  # Clean build from scratch
 
 set -e
-
-# Ensure 'python' command is available (macOS only has python3)
-# Homebrew's python libexec has the python -> python3 symlink
-if [[ -d "/opt/homebrew/opt/python/libexec/bin" ]]; then
-    export PATH="/opt/homebrew/opt/python/libexec/bin:$PATH"
-elif [[ -d "/usr/local/opt/python/libexec/bin" ]]; then
-    export PATH="/usr/local/opt/python/libexec/bin:$PATH"
-fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"

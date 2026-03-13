@@ -53,7 +53,7 @@ setup_error_trap() {
 # Verify Emscripten is available
 verify_emscripten() {
     if ! command -v emcc &> /dev/null; then
-        log_error "Emscripten not found. Please run: source /path/to/emsdk/emsdk_env.sh"
+        log_error "Emscripten not found. Run: ./scripts/setup-emsdk.sh"
         exit 1
     fi
     log_info "Using Emscripten: $(emcc --version | head -1)"

@@ -38,6 +38,11 @@ cat > "$SHIM_FILE" << 'HEADER'
 // === dynCall shims for Emscripten exception handling ===
 // Auto-generated: maps dynCall_SIG() calls to getWasmTableEntry()
 // This fixes "dynCall_* is not defined" errors in Emscripten 4.x
+//
+// These shims are asyncify-aware: they track Asyncify.exportCallStack so that
+// asyncify can rewind through indirect calls (e.g., main loop callbacks,
+// timer callbacks, event handlers). Without this tracking, asyncify's doRewind
+// fails because it can't find the entry function to re-enter the WASM module.
 HEADER
 
 for sig in $SIGNATURES; do
@@ -55,11 +60,30 @@ for sig in $SIGNATURES; do
         call_args="${call_args}a$i"
     done
 
-    echo "var dynCall_$sig = ($args) => getWasmTableEntry(index)($call_args);" >> "$SHIM_FILE"
+    cat >> "$SHIM_FILE" << SHIMEOF
+function dynCall_$sig($args) {
+  var tableFunc = getWasmTableEntry(index);
+  if (typeof Asyncify !== 'undefined') {
+    var rewindKey = '__dyn_${sig}_' + index;
+    if (!wasmExports[rewindKey]) wasmExports[rewindKey] = tableFunc;
+    Asyncify.exportCallStack.push(rewindKey);
+    try {
+      return tableFunc($call_args);
+    } finally {
+      if (!ABORT) {
+        Asyncify.exportCallStack.pop();
+        Asyncify.maybeStopUnwind();
+      }
+    }
+  }
+  return tableFunc($call_args);
+}
+SHIMEOF
 done
 
 echo "" >> "$SHIM_FILE"
 echo "// === End dynCall shims ===" >> "$SHIM_FILE"
+
 
 # Find the insertion point: after getWasmTableEntry definition
 # The pattern is:
@@ -166,6 +190,18 @@ if [ "$COUNT_BEFORE" -gt 0 ]; then
     COUNT_AFTER=$(grep -c 'var wrapper = () => (a1 => {})(arg);' "$JS_FILE" || true)
     FIXED=$((COUNT_BEFORE - COUNT_AFTER))
     echo "  Fixed $FIXED async timer callback(s) (dynCall_vi)"
+    TOTAL_FIXED=$((TOTAL_FIXED + FIXED))
+fi
+
+# Fix 5: _emscripten_set_main_loop empty iterFunc callback - signature v (void, no args)
+# Pattern: var iterFunc = (() => {});
+# The 'func' variable is the function pointer passed to _emscripten_set_main_loop
+COUNT_BEFORE=$(grep -c 'var iterFunc = (() => {});' "$JS_FILE" || true)
+if [ "$COUNT_BEFORE" -gt 0 ]; then
+    sed -i '' 's/var iterFunc = (() => {});/var iterFunc = () => dynCall_v(func);/g' "$JS_FILE"
+    COUNT_AFTER=$(grep -c 'var iterFunc = (() => {});' "$JS_FILE" || true)
+    FIXED=$((COUNT_BEFORE - COUNT_AFTER))
+    echo "  Fixed $FIXED main loop callback(s) (dynCall_v)"
     TOTAL_FIXED=$((TOTAL_FIXED + FIXED))
 fi
 

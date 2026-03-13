@@ -2,6 +2,9 @@
 # Dependency versions for KiCad WASM build
 # These versions match KiCad 8.99 requirements from CMakeLists.txt and vcpkg.json
 
+# Emscripten SDK version (single source of truth for Docker and local builds)
+export EMSCRIPTEN_VERSION="4.0.2"
+
 # KiCad submodule version
 export KICAD_COMMIT="4bfed3f1746e8cc0a7d942767770f56fa28b393c"
 export KICAD_VERSION="8.99"

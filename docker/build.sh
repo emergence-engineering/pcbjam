@@ -33,6 +33,7 @@ docker compose -f docker/docker-compose.yml up -d
 # This avoids the timestamp mismatch cycle that caused full rebuilds every time.
 # Transferred files get current container time, so make detects them correctly.
 echo "Syncing source code to container..."
+# rsync exit code 24 = "some files vanished before transfer" (harmless race condition)
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
     rsync -r --delete --checksum \
         --exclude="build-wasm" \
@@ -41,7 +42,8 @@ docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
         --exclude="logs" \
         --exclude=".idea" \
         --exclude="node_modules" \
-        /workspace-host/ /workspace/
+        --exclude="tools/emsdk" \
+        /workspace-host/ /workspace/ || [ $? -eq 24 ]
 
 # Run build command (without asyncify - handled on host due to memory requirements)
 docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \

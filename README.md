@@ -28,7 +28,7 @@ npm run test:kicad    # KiCad tests (2 tests)
 ### wxWidgets Only (No Docker)
 
 ```bash
-# Requires: Emscripten SDK 4.0+, Node.js 18+
+# Requires: Node.js 18+ (Emscripten SDK auto-installed on first build)
 ./scripts/build-wxuniversal-wasm.sh
 ./scripts/build-wasm-test.sh
 cd tests && npm install && npm test
@@ -117,15 +117,15 @@ Output: `tests/apps/standalone/`
 - 10+ GB disk space for build cache
 
 ### For wxWidgets Build (Local)
-- Emscripten SDK 4.0+
 - Node.js 18+ (for tests)
+- Emscripten SDK (auto-installed on first build)
 
 ```bash
-# macOS
-brew install emscripten node
-
 # Initialize submodules
 git submodule update --init --recursive
+
+# Install Emscripten SDK (auto-runs on first build, or run manually)
+./scripts/setup-emsdk.sh
 ```
 
 ## Testing

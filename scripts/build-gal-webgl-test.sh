@@ -21,7 +21,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source common environment (sets up Python 3.10+ for Emscripten)
+# Source common environment (sets up local emsdk)
 QUIET=1 source "$SCRIPT_DIR/common/env.sh"
 
 TEST_DIR="$PROJECT_ROOT/tests/gal-regression/wasm"
@@ -35,7 +35,7 @@ echo "  clang: $(which clang)"
 
 # Verify em++ is available
 if ! command -v em++ &> /dev/null; then
-    echo "ERROR: em++ not found. Please install via: brew install emscripten"
+    echo "ERROR: em++ not found. Run: ./scripts/setup-emsdk.sh"
     exit 1
 fi
 

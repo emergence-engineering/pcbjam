@@ -1,5 +1,5 @@
 # Use ARM64-native image for Apple Silicon (M1/M2/M3/M4)
-FROM emscripten/emsdk:4.0.22-arm64
+FROM emscripten/emsdk:4.0.2-arm64
 
 # Install build tools required for KiCad WASM build
 RUN apt-get update && apt-get install -y \
