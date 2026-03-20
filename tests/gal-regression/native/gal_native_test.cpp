@@ -97,6 +97,15 @@ bool SaveScreenshot(const std::string& path, KIGFX::OPENGL_GAL* gal, int width, 
     if (hasContent) std::cout << " (" << nonBlackCount << " non-black pixels)";
     std::cout << std::endl;
 
+    // Force all alpha values to 255 (opaque) to match the composited canvas output.
+    // Native reads from the FBO where alpha < 255 for semi-transparent regions.
+    // WebGL captures the composited canvas where alpha is always 1.0 (composited on
+    // black with GL_ONE blend). By making native output opaque, both tests produce
+    // equivalent "user-visible" screenshots that can be compared directly.
+    for (size_t i = 3; i < pixels.size(); i += 4) {
+        pixels[i] = 255;
+    }
+
     // Flip vertically (OpenGL has origin at bottom-left)
     stbi_flip_vertically_on_write(1);
 
@@ -173,7 +182,11 @@ public:
 
         // Set up the viewport - use ResizeScreen to properly initialize compositor
         m_gal->ResizeScreen(g_width, g_height);
-        m_gal->SetClearColor(KIGFX::COLOR4D(0.1, 0.1, 0.15, 1.0));
+        // Use white background to match WebGL test (which captures the composited canvas).
+        // Native reads from the FBO (pre-compositing), so we set alpha to 255 in SaveScreenshot
+        // to simulate the composited result. White background ensures both tests see the same
+        // blended colors for semi-transparent shapes.
+        m_gal->SetClearColor(KIGFX::COLOR4D(1.0, 1.0, 1.0, 1.0));
 
         // CRITICAL: Set worldUnitLength for 1:1 world-to-screen coordinate mapping
         // GAL default worldUnitLength is for PCB nanometers (3.937e-8), which would

@@ -243,7 +243,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
     -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
-    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 -sFULL_ES3=1 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a ${STUBS_BUILD}/libpcbnew_scripting_stub.a ${STUBS_BUILD}/libnng_stub.a ${STUBS_BUILD}/pcbnew_embind.o" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a ${STUBS_BUILD}/libpcbnew_scripting_stub.a ${STUBS_BUILD}/libnng_stub.a ${STUBS_BUILD}/pcbnew_embind.o" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \

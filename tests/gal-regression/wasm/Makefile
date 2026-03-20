@@ -69,11 +69,11 @@ BASE_LDFLAGS = -sALLOW_MEMORY_GROWTH=1 \
                -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','HEAPU8'] \
                -sMODULARIZE=1 \
                -sEXPORT_NAME='createGALTest' \
-               -sENVIRONMENT=web
+               -sENVIRONMENT=web,worker
 
-# GL-specific flags - WebGL 2.0 with full ES3 support
+# GL-specific flags - pure WebGL 2.0 (matching KiCad PCBnew build, no FULL_ES3 emulation)
 # No LEGACY_GL_EMULATION - WEBGL_GAL uses VBOs and custom shaders
-EM_GL_FLAGS = -sFULL_ES3=1 -sMAX_WEBGL_VERSION=2
+EM_GL_FLAGS = -sMAX_WEBGL_VERSION=2
 
 # Legacy GL stubs for wxWidgets compatibility
 # wxWidgets GL library may reference legacy functions at runtime, but actual
