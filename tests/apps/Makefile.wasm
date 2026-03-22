@@ -146,7 +146,8 @@ all: minimal_test.html \
      $(S)/maximize/maximize_test.html \
      $(S)/earlysize/earlysize_test.html \
      $(S)/threadpool/threadpool_test.html \
-     $(S)/logerror/logerror_test.html
+     $(S)/logerror/logerror_test.html \
+     $(S)/retinascale/retinascale_test.html
 
 # Main test app (uses GL)
 minimal_test.o: minimal_test.cpp
@@ -493,8 +494,17 @@ earlysize: $(S)/earlysize/earlysize_test.html
 threadpool: $(S)/threadpool/threadpool_test.html
 logerror: $(S)/logerror/logerror_test.html
 
+# Retina/HiDPI scaling test
+$(S)/retinascale/retinascale_test.o: $(S)/retinascale/retinascale_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/retinascale/retinascale_test.html: $(S)/retinascale/retinascale_test.o $(WX_CORE_LIB)
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+retinascale: $(S)/retinascale/retinascale_test.html
+
 clean:
 	rm -f minimal_test.o minimal_test.html minimal_test.js minimal_test.wasm
 	rm -f $(S)/*/*.o $(S)/*/*.html $(S)/*/*.js $(S)/*/*.wasm
 
-.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize threadpool logerror
+.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize threadpool logerror retinascale

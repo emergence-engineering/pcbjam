@@ -9,7 +9,7 @@
     "build-wasm": "cd apps && make -f Makefile.wasm",
     "serve": "npx serve apps -p 8080 -c ../serve.json",
     "setup:kicad": "./scripts/setup-kicad-wasm.sh",
-    "test:kicad": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=firefox",
+    "test:kicad": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=firefox --headed",
     "test:kicad:headed": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed"
   },
   "devDependencies": {

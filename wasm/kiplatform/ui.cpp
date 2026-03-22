@@ -93,11 +93,14 @@ void EllipsizeChoiceBox( wxChoice* aChoice )
 
 double GetPixelScaleFactor( const wxWindow* aWindow )
 {
+    // Return actual device pixel ratio for hi-res bitmap loading and bundle
+    // selection. KiCad keeps its own logical content scale at 1.0 in WASM, so
+    // bitmap selection must stay decoupled from layout sizing.
 #ifdef __EMSCRIPTEN__
-    double scale = EM_ASM_DOUBLE({
+    double scale = aWindow ? aWindow->GetDPIScaleFactor() : EM_ASM_DOUBLE({
         return window.devicePixelRatio || 1.0;
     });
-    return scale;
+    return scale >= 1.5 ? 2.0 : 1.0;
 #else
     if( aWindow )
         return aWindow->GetContentScaleFactor();
@@ -107,7 +110,9 @@ double GetPixelScaleFactor( const wxWindow* aWindow )
 
 double GetContentScaleFactor( const wxWindow* aWindow )
 {
-    return GetPixelScaleFactor( aWindow );
+    // KiCad layout uses logical coordinates in WASM. wxWidgets window/content
+    // scaling still reports the display scale separately for DIP conversions.
+    return aWindow ? aWindow->GetContentScaleFactor() : 1.0;
 }
 
 void GetInfoBarColours( wxColour& aFGColour, wxColour& aBGColour )

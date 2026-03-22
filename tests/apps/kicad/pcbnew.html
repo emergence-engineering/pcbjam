@@ -79,11 +79,10 @@
       var canvas = document.createElement('canvas');
       canvas.id = 'canvas';
       canvas.style.display = 'none';
-      // Set both CSS display size and internal pixel resolution
+      // wx.js owns the backing-store size via setWindowRect(); keep the HTML
+      // shell responsible only for the CSS size.
       var width = window.innerWidth;
       var height = window.innerHeight;
-      canvas.width = width;
-      canvas.height = height;
       canvas.style.width = width + 'px';
       canvas.style.height = height + 'px';
       canvas.oncontextmenu = function() { event.preventDefault(); };

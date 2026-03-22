@@ -43,7 +43,16 @@ fi
 
 # wxWidgets WASM JavaScript glue code (defines JS functions called from WASM)
 echo "Copying wxWidgets WASM glue code..."
-cp "$PROJECT_ROOT/wxwidgets/build/wasm/wx.js" "$KICAD_TEST/"
+if [ -f "$OUTPUT_DIR/wx.js" ]; then
+    cp "$OUTPUT_DIR/wx.js" "$KICAD_TEST/"
+else
+    if docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
+      kicad-wasm-builder:/workspace/build-wasm/wxwidgets/build/wasm/wx.js "$KICAD_TEST/" 2>/dev/null; then
+        :
+    else
+        cp "$PROJECT_ROOT/wxwidgets/build/wasm/wx.js" "$KICAD_TEST/"
+    fi
+fi
 
 echo "KiCad WASM files copied to $KICAD_TEST"
 ls -lh "$KICAD_TEST"

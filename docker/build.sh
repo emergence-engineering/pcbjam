@@ -56,7 +56,8 @@ docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
     bash -c "mkdir -p /workspace/output && \
         cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || \
         cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm} /workspace/output/; \
-        cp /workspace/build-wasm/kicad-pcbnew/resources/images.tar.gz /workspace/output/ 2>/dev/null || true"
+        cp /workspace/build-wasm/kicad-pcbnew/resources/images.tar.gz /workspace/output/ 2>/dev/null || true; \
+        cp /workspace/build-wasm/wxwidgets/build/wasm/wx.js /workspace/output/ 2>/dev/null || true"
 
 # Inject dynCall shims into pcbnew.js
 # This fixes "dynCall_* is not defined" errors in Emscripten 4.x
