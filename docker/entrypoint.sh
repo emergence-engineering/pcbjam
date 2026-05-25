@@ -13,6 +13,7 @@ if [[ -d /workspace-host ]]; then
     rsync -ai --delete \
         --exclude='build-wasm' \
         --exclude='output' \
+        --exclude='tools/emsdk' \
         /workspace-host/ /workspace/ | \
         grep "^>f" | \
         sed "s/^[^ ]* //" | \

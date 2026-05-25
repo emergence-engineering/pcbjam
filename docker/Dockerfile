@@ -32,6 +32,13 @@ RUN git clone https://github.com/emscripten-core/emsdk.git /emsdk \
     && ./emsdk install ${EMSCRIPTEN_VERSION} \
     && ./emsdk activate ${EMSCRIPTEN_VERSION}
 
+# Make Docker's own emsdk authoritative for EVERY process in the container, including
+# `docker compose exec` (which bypasses the ENTRYPOINT). env.sh keys off $EMSDK: with it
+# set, env.sh sources /emsdk/emsdk_env.sh and never falls back to the local tools/emsdk
+# (which, inside this Linux container, can be a host macOS emsdk rsync'd in by mistake and
+# thus unrunnable). This is what lets the wxWidgets autoconf build find emmake on PATH.
+ENV EMSDK=/emsdk
+
 # Configure ccache for Emscripten
 # CCACHE_DIR in named volume persists across containers
 ENV CCACHE_DIR=/workspace/build-wasm/.ccache
