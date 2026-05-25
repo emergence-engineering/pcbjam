@@ -12,7 +12,9 @@
     "test:kicad:firefox": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=firefox",
     "test:kicad:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed",
     "test:kicad": "npm run test:kicad:firefox",
-    "test:kicad:headed": "npm run test:kicad:chrome"
+    "test:kicad:headed": "npm run test:kicad:chrome",
+    "test:coroutine:firefox": "playwright test --config=playwright-coroutine.config.ts --project=firefox",
+    "test:coroutine:chrome": "playwright test --config=playwright-coroutine.config.ts --project=chromium --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",

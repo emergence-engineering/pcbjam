@@ -541,3 +541,112 @@ clean:
 	rm -f $(S)/*/*.o $(S)/*/*.html $(S)/*/*.js $(S)/*/*.wasm
 
 .PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize threadpool logerror retinascale coroutine coroutine-nested
+
+# === Coroutine pthread variant — reproduces the KiCad Asyncify-fiber x pthreads crash ===
+# Same modal-free harness as `coroutine`, but compiled/linked with pthreads to match
+# KiCad's runtime (-pthread + PTHREAD_POOL_SIZE). The single-threaded `coroutine` build
+# passes in system Chrome; KiCad (pthreads) crashes. This isolates that difference.
+LDFLAGS_COROUTINE_PTHREAD = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -pthread \
+                  -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 \
+                  $(WX_LDFLAGS_NOGL)
+
+$(S)/coroutine-pthread/coroutine_test_pt.o: $(S)/coroutine/coroutine_test.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/libcontext_pt.o: $(KICAD_ROOT)/thirdparty/libcontext/libcontext.cpp $(KICAD_ROOT)/thirdparty/libcontext/libcontext.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -I$(KICAD_ROOT)/thirdparty/libcontext $< -o $@
+
+$(S)/coroutine-pthread/coroutine_test.html: $(S)/coroutine-pthread/coroutine_test_pt.o $(S)/coroutine-pthread/libcontext_pt.o $(WX_CORE_LIB)
+	$(CXX) $^ $(LDFLAGS_COROUTINE_PTHREAD) --pre-js $(JS) --shell-file $(HTML) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread: $(S)/coroutine-pthread/coroutine_test.html
+.PHONY: coroutine-pthread
+
+# === No-wx pthread main() reproduction: fiber pattern in main + pthreads, no wxWidgets ===
+LDFLAGS_COROUTINE_PTHREAD_NOWX = $(DEBUG_LDFLAGS) -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+                  -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sASYNCIFY_IMPORTS=['emscripten_fiber_swap'] \
+                  -sDYNCALLS=1 -pthread -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' \
+                  -sPTHREAD_POOL_SIZE_STRICT=0 -sEXPORTED_RUNTIME_METHODS=['ccall']
+
+$(S)/coroutine-pthread/main_repro.o: $(S)/coroutine-pthread/main_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/main_repro.html: $(S)/coroutine-pthread/main_repro.o $(S)/coroutine-pthread/libcontext_pt.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_PTHREAD_NOWX) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-main: $(S)/coroutine-pthread/main_repro.html
+.PHONY: coroutine-pthread-main
+
+# Nested JS<->wasm dynCall-boundary reproduction (no wx + pthreads)
+$(S)/coroutine-pthread/nested_repro.o: $(S)/coroutine-pthread/nested_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/nested_repro.html: $(S)/coroutine-pthread/nested_repro.o $(S)/coroutine-pthread/libcontext_pt.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_PTHREAD_NOWX) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-nested: $(S)/coroutine-pthread/nested_repro.html
+.PHONY: coroutine-pthread-nested
+
+# Nested invoke_/dynCall reproduction WITH exceptions (invoke_* boundaries, asyncify-unwindable)
+LDFLAGS_COROUTINE_INVOKE = $(DEBUG_LDFLAGS) -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+                  -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 \
+                  -sASYNCIFY_IMPORTS=['invoke_vi','invoke_v','invoke_ii','invoke_iii','emscripten_fiber_swap'] \
+                  -sDYNCALLS=1 -fexceptions -pthread -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' \
+                  -sPTHREAD_POOL_SIZE_STRICT=0 -sEXPORTED_RUNTIME_METHODS=['ccall']
+
+$(S)/coroutine-pthread/nested_repro_ex.o: $(S)/coroutine-pthread/nested_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -fexceptions -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/libcontext_ex.o: $(KICAD_ROOT)/thirdparty/libcontext/libcontext.cpp $(KICAD_ROOT)/thirdparty/libcontext/libcontext.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -fexceptions -I$(KICAD_ROOT)/thirdparty/libcontext $< -o $@
+
+$(S)/coroutine-pthread/nested_repro_ex.html: $(S)/coroutine-pthread/nested_repro_ex.o $(S)/coroutine-pthread/libcontext_ex.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_INVOKE) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-nested-ex: $(S)/coroutine-pthread/nested_repro_ex.html
+.PHONY: coroutine-pthread-nested-ex
+
+# wx event loop + pthreads (KiCad's 13-scenario harness) with a worker DOM stub so the
+# pthread workers don't crash on wx's module-eval document access.
+$(S)/coroutine-pthread/coroutine_test_wxpt.html: $(S)/coroutine-pthread/coroutine_test_pt.o $(S)/coroutine-pthread/libcontext_pt.o $(WX_CORE_LIB)
+	$(CXX) $^ $(LDFLAGS_COROUTINE_PTHREAD) --pre-js $(S)/coroutine-pthread/worker_dom_stub.js --pre-js $(JS) --shell-file $(HTML) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-wx: $(S)/coroutine-pthread/coroutine_test_wxpt.html
+.PHONY: coroutine-pthread-wx
+
+# embind reproduction: coroutine activated via an embind (--bind) call
+LDFLAGS_COROUTINE_EMBIND = $(LDFLAGS_COROUTINE_INVOKE) --bind
+
+$(S)/coroutine-pthread/embind_repro.o: $(S)/coroutine-pthread/embind_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -fexceptions -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/embind_repro.html: $(S)/coroutine-pthread/embind_repro.o $(S)/coroutine-pthread/libcontext_ex.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_EMBIND) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-embind: $(S)/coroutine-pthread/embind_repro.html
+.PHONY: coroutine-pthread-embind
+
+# Main-loop (rAF) activation reproduction: coroutine activated inside emscripten_set_main_loop
+$(S)/coroutine-pthread/mainloop_repro.o: $(S)/coroutine-pthread/mainloop_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/mainloop_repro.html: $(S)/coroutine-pthread/mainloop_repro.o $(S)/coroutine-pthread/libcontext_pt.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_PTHREAD_NOWX) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-mainloop: $(S)/coroutine-pthread/mainloop_repro.html
+.PHONY: coroutine-pthread-mainloop

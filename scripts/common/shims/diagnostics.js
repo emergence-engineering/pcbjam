@@ -78,6 +78,26 @@
     }, 100);
   }
 
+  // 6. EM_ASYNC_JS sleeps (startModal, js_enumerateFonts, clipboard, etc.) — log
+  //    enter/wake so we can see whether an async sleep is NESTED with a fiber swap
+  //    at the crash (the #9153 collision). Logging only; delegates unchanged.
+  if (typeof Asyncify !== "undefined" && typeof Asyncify.handleSleep === "function") {
+    var __diagOrigHandleSleep = Asyncify.handleSleep.bind(Asyncify);
+    var diagSleepId = 0;
+    Asyncify.handleSleep = function(startAsync) {
+      var id = ++diagSleepId;
+      console.warn("[DIAG_SLEEP] ENTER id=" + id + " state=" + asyncState() +
+                   " currData=" + ((typeof Asyncify.currData !== "undefined" && Asyncify.currData) || "null"));
+      return __diagOrigHandleSleep(function(wakeUp) {
+        return startAsync(function(result) {
+          console.warn("[DIAG_SLEEP] WAKE id=" + id + " state=" + asyncState() +
+                       " currData=" + ((typeof Asyncify.currData !== "undefined" && Asyncify.currData) || "null"));
+          return wakeUp(result);
+        });
+      });
+    };
+  }
+
   console.warn("[DIAG] Asyncify/fiber/modal diagnostics installed (logging only)");
 })();
 // === End diagnostics ===
