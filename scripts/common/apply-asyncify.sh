@@ -45,6 +45,7 @@ StepAP214_Protocol::StepAP214_Protocol()
 BRepCheck_ParallelAnalyzer::operator()(int) const
 ShapeFix_Wire::FixGap3d(int, bool)
 ShapeFix_Wire::FixGap2d(int, bool)
+PCB_EDIT_FRAME::setupUIConditions()
 REMOVELIST
 )
 

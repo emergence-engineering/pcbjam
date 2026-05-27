@@ -95,4 +95,56 @@ test.describe('Coroutine pthread main() reproduction', () => {
       'main loop should have run and activated the coroutine'
     ).toBe(true);
   });
+
+  // Probe #6: WebGL 2.0 + coroutine activated mid-render-frame (KiCad's GAL render path).
+  test('WebGL2 + mid-frame fiber reaches DONE without renderer crash', async ({ page, testLogger }) => {
+    await page.goto('/standalone/coroutine-pthread/gl_repro.html');
+    await tryLoadApp(page, 20000).catch(() => {});
+
+    await expect
+      .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
+        timeout: 30000,
+        message: 'should reach [REPRO] DONE (rewind of a mid-GL-frame survived)',
+      })
+      .toBe(true);
+
+    expect(
+      testLogger.consoleLogs.some((l) => l.includes('WebGL2 context=')),
+      'a WebGL2 context should have been created'
+    ).toBe(true);
+  });
+
+  // Probe #7: WebGL2 + coroutine mid-frame + PTHREADS (the GL x pthreads combo KiCad uses).
+  test('WebGL2 + pthreads mid-frame fiber reaches DONE without renderer crash', async ({ page, testLogger }) => {
+    await page.goto('/standalone/coroutine-pthread/gl_repro_pt.html');
+    await tryLoadApp(page, 25000).catch(() => {});
+
+    await expect
+      .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
+        timeout: 30000,
+        message: 'should reach [REPRO] DONE (GL + pthreads mid-frame rewind survived)',
+      })
+      .toBe(true);
+  });
+
+  // Probe #8: a VIRTUAL call via invoke_vi -> instrumented dynCall_vi made from the
+  // asyncify-rewound frame AFTER a coroutine round-trip. This is the exact factor the
+  // KiCad crash has that nested_repro lacked: PCB_EDIT_FRAME's ctor calls the virtual
+  // setupUIConditions() after InvokeTool's first coroutine unwinds/rewinds the ctor stack.
+  test('post-coroutine virtual call (invoke_vi->dynCall_vi) reaches DONE without renderer crash', async ({ page, testLogger }) => {
+    await page.goto('/standalone/coroutine-pthread/vcall_repro.html');
+    await tryLoadApp(page, 25000).catch(() => {});
+
+    await expect
+      .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
+        timeout: 30000,
+        message: 'should reach [REPRO] DONE (virtual call from the rewound frame survived)',
+      })
+      .toBe(true);
+
+    expect(
+      testLogger.consoleLogs.some((l) => l.includes('post-coroutine virtual call returned OK')),
+      'the post-coroutine virtual call should have completed'
+    ).toBe(true);
+  });
 });

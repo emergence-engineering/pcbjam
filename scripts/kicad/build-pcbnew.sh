@@ -41,6 +41,7 @@ NO_CLEAN=1
 FULL_CLEAN=0
 SKIP_DEPS=1
 DEBUG=0
+DIAG_LIST=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --full)
@@ -66,6 +67,14 @@ while [[ $# -gt 0 ]]; do
             export DEBUG_BUILD
             shift
             ;;
+        --diag=*)
+            DIAG_LIST="${1#--diag=}"
+            shift
+            ;;
+        --diag)
+            DIAG_LIST="$2"
+            shift 2
+            ;;
         -j)
             export JOBS="$2"
             shift 2
@@ -79,6 +88,25 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Diagnostic preprocessor defines from --diag=<csv> (gal, coroutine, ctor, all).
+# These gate the KI_DIAG_* macros in kicad/include/kicad_wasm_diag.h. Output goes
+# to stdout ([KICAD_OUT] logs), never errors. Off by default.
+DIAG_DEFINES=""
+if [ -n "${DIAG_LIST}" ]; then
+    IFS=',' read -ra _diag_cats <<< "${DIAG_LIST}"
+    for _cat in "${_diag_cats[@]}"; do
+        case "${_cat}" in
+            gal)       DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_GAL=1" ;;
+            coroutine) DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_COROUTINE=1" ;;
+            ctor)      DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_CTOR=1" ;;
+            all)       DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_GAL=1 -DKICAD_DIAG_COROUTINE=1 -DKICAD_DIAG_CTOR=1" ;;
+            "")        ;;
+            *)         log_warn "Unknown --diag category: '${_cat}' (valid: gal, coroutine, ctor, all)" ;;
+        esac
+    done
+    log_info "Diagnostic logging enabled:${DIAG_DEFINES}"
+fi
 
 log_info "Using ${JOBS} parallel jobs"
 
@@ -241,7 +269,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \
     -DSYSROOT="${SYSROOT}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
+    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1${DIAG_DEFINES} -I${SYSROOT}/include -I${STUBS_DIR}" \
     -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
     -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a ${STUBS_BUILD}/libpcbnew_scripting_stub.a ${STUBS_BUILD}/libnng_stub.a ${STUBS_BUILD}/pcbnew_embind.o" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \

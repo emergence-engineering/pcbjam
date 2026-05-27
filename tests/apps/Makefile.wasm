@@ -650,3 +650,45 @@ $(S)/coroutine-pthread/mainloop_repro.html: $(S)/coroutine-pthread/mainloop_repr
 
 coroutine-pthread-mainloop: $(S)/coroutine-pthread/mainloop_repro.html
 .PHONY: coroutine-pthread-mainloop
+
+# WebGL2 + coroutine reproduction (no wx, no pthreads, default shell with #canvas)
+LDFLAGS_COROUTINE_GL = $(DEBUG_LDFLAGS) -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+                  -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sASYNCIFY_IMPORTS=['emscripten_fiber_swap'] \
+                  -sDYNCALLS=1 -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2 -sEXPORTED_RUNTIME_METHODS=['ccall']
+
+$(S)/coroutine-pthread/gl_repro.o: $(S)/coroutine-pthread/gl_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/gl_repro.html: $(S)/coroutine-pthread/gl_repro.o $(S)/coroutine/libcontext.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_GL) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-gl: $(S)/coroutine-pthread/gl_repro.html
+.PHONY: coroutine-pthread-gl
+
+# WebGL2 + coroutine + PTHREADS (the last untested combo: KiCad uses GL + pthreads together)
+LDFLAGS_COROUTINE_GL_PTHREAD = $(LDFLAGS_COROUTINE_GL) -pthread \
+                  -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0
+
+$(S)/coroutine-pthread/gl_repro_pt.o: $(S)/coroutine-pthread/gl_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/gl_repro_pt.html: $(S)/coroutine-pthread/gl_repro_pt.o $(S)/coroutine-pthread/libcontext_pt.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_GL_PTHREAD) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-gl-pt: $(S)/coroutine-pthread/gl_repro_pt.html
+.PHONY: coroutine-pthread-gl-pt
+
+$(S)/coroutine-pthread/vcall_repro.o: $(S)/coroutine-pthread/vcall_repro.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	@mkdir -p $(S)/coroutine-pthread
+	$(CXX) -c $(CXXFLAGS) -pthread -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/coroutine-pthread/vcall_repro.html: $(S)/coroutine-pthread/vcall_repro.o $(S)/coroutine-pthread/libcontext_pt.o
+	$(CXX) $^ $(LDFLAGS_COROUTINE_PTHREAD_NOWX) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+coroutine-pthread-vcall: $(S)/coroutine-pthread/vcall_repro.html
+.PHONY: coroutine-pthread-vcall
