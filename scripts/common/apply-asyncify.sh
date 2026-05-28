@@ -62,5 +62,15 @@ echo "This may take several minutes and use significant RAM..."
     "${INPUT_WASM}" -o "${OUTPUT_WASM}"
 
 echo ""
-echo "Asyncify complete: ${OUTPUT_WASM}"
+echo "Running wasm-opt -O2 on the asyncified wasm..."
+echo "  Purpose: shrink asyncify-instrumented functions back under V8's"
+echo "  per-function locals limit (otherwise large coroutine-entry and"
+echo "  similar functions silently stall in Chrome's V8). See DEBUG.md §7"
+echo "  and memory/bundle-size-asyncify-optimization.md."
+echo "  This pass also takes several minutes and ~10-15 GB RAM."
+
+"${WASM_OPT}" -O2 "${OUTPUT_WASM}" -o "${OUTPUT_WASM}"
+
+echo ""
+echo "Asyncify + -O2 complete: ${OUTPUT_WASM}"
 ls -lh "${OUTPUT_WASM}"
