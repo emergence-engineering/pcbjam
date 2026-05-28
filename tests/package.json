@@ -13,6 +13,11 @@
     "test:kicad:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed",
     "test:kicad": "npm run test:kicad:firefox",
     "test:kicad:headed": "npm run test:kicad:chrome",
+    "setup:calculator": "./scripts/setup-calculator-wasm.sh",
+    "test:calculator:firefox": "npm run setup:calculator && playwright test --config=playwright-calculator.config.ts --project=firefox",
+    "test:calculator:chrome": "npm run setup:calculator && playwright test --config=playwright-calculator.config.ts --project=chromium --headed",
+    "test:calculator": "npm run test:calculator:firefox",
+    "test:calculator:headed": "npm run test:calculator:chrome",
     "test:coroutine:firefox": "playwright test --config=playwright-coroutine.config.ts --project=firefox",
     "test:coroutine:chrome": "playwright test --config=playwright-coroutine.config.ts --project=chromium --headed"
   },

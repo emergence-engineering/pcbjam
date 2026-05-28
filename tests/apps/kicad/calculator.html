@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>KiCad Calculator WASM</title>
+  <style>
+    .emscripten { padding-right: 0; margin-left: auto; margin-right: auto; display: block; }
+    div.emscripten { text-align: center; }
+    /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
+    canvas.emscripten { border: 0px none; }
+
+    .window {
+      position: absolute;
+      pointer-events: none;
+      z-index: 10;
+      background-color: black;
+      overflow: hidden;
+      width: 0;
+      height: 0;
+    }
+
+    .window-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+    }
+
+    #status {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      color: #fff;
+      font-family: monospace;
+      z-index: 1000;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 5px;
+    }
+
+    #progress {
+      width: 300px;
+      height: 20px;
+      background: #333;
+      margin-top: 5px;
+    }
+
+    #progress-bar {
+      height: 100%;
+      background: #4CAF50;
+      width: 0%;
+      transition: width 0.3s;
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a1a2e;">
+  <div id="main-window" style="width: 100vw; height: 100vh; position: absolute; top: 0; left: 0;"></div>
+
+  <div id="status">
+    <div id="status-text">Initializing...</div>
+    <div id="progress"><div id="progress-bar"></div></div>
+  </div>
+
+  <div id="window-container"></div>
+
+  <script>
+    var mainWindow = document.getElementById('main-window');
+    var statusText = document.getElementById('status-text');
+    var progressBar = document.getElementById('progress-bar');
+
+    var showError = function(msg) {
+      console.error('[KICAD_ERROR] ' + msg);
+      statusText.textContent = 'Error: ' + msg;
+      statusText.style.color = 'red';
+    };
+
+    var createCanvas = function() {
+      var canvas = document.createElement('canvas');
+      canvas.id = 'canvas';
+      canvas.style.display = 'none';
+      // wx.js owns the backing-store size via setWindowRect(); keep the HTML
+      // shell responsible only for the CSS size.
+      var width = window.innerWidth;
+      var height = window.innerHeight;
+      canvas.style.width = width + 'px';
+      canvas.style.height = height + 'px';
+      canvas.oncontextmenu = function() { event.preventDefault(); };
+      canvas.addEventListener("webglcontextlost", function(e) {
+        showError('WebGL context lost. You will need to reload the page.');
+        e.preventDefault();
+      }, false);
+
+      mainWindow.appendChild(canvas);
+      Module.canvas = canvas;
+
+      console.log('[KICAD] preRun complete, canvas created: ' + width + 'x' + height);
+    };
+
+    var onRuntimeInitialized = function() {
+      console.log('[KICAD] Runtime initialized');
+      var canvas = Module.canvas;
+      canvas.style.display = 'block';
+      document.getElementById('status').style.display = 'none';
+    };
+
+    // Pre-fetched resource data (fetched before calculator.js loads)
+    var resourceData = null;
+
+    // Start fetching images.tar.gz immediately (runs in parallel with WASM loading)
+    fetch('images.tar.gz')
+      .then(function(response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.arrayBuffer();
+      })
+      .then(function(buffer) {
+        resourceData = new Uint8Array(buffer);
+        console.log('[KICAD] Prefetched images.tar.gz (' + resourceData.length + ' bytes)');
+      })
+      .catch(function(err) {
+        console.warn('[KICAD] Could not prefetch images.tar.gz:', err.message);
+      });
+
+    // Write pre-fetched resources to FS (called in preRun after FS is available)
+    var writeResources = function() {
+      // Create directory structure matching KiCad's compiled-in KICAD_DATA path.
+      // This path is baked in during CMake configuration and is shared with the
+      // pcbnew build (both use the same sysroot).
+      var resourcePath = '/workspace/build-wasm/sysroot/share/kicad/resources';
+      FS.mkdirTree(resourcePath);
+
+      if (resourceData) {
+        FS.writeFile(resourcePath + '/images.tar.gz', resourceData);
+        console.log('[KICAD] Wrote images.tar.gz to ' + resourcePath);
+      } else {
+        console.warn('[KICAD] images.tar.gz not ready yet (WASM loaded faster than fetch)');
+      }
+    };
+
+    var Module = {
+      thisProgram: '/usr/bin/pcb_calculator',  // argv[0]
+
+      preRun: [createCanvas, writeResources],
+      postRun: [],
+
+      print: function(text) {
+        if (arguments.length > 1)
+          text = Array.prototype.slice.call(arguments).join(' ');
+        console.log('[KICAD_OUT] ' + text);
+      },
+
+      printErr: function(text) {
+        if (arguments.length > 1)
+          text = Array.prototype.slice.call(arguments).join(' ');
+        console.error('[KICAD_ERR] ' + text);
+      },
+
+      setStatus: function(text) {
+        console.log('[KICAD_STATUS] ' + text);
+        statusText.textContent = text;
+
+        var match = text.match(/(\d+)\/(\d+)/);
+        if (match) {
+          var pct = (parseInt(match[1]) / parseInt(match[2])) * 100;
+          progressBar.style.width = pct + '%';
+        }
+      },
+
+      totalDependencies: 0,
+      monitorRunDependencies: function(left) {
+        this.totalDependencies = Math.max(this.totalDependencies, left);
+        Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+      },
+
+      onRuntimeInitialized: onRuntimeInitialized,
+
+      // Required for locating .wasm and .worker.js files
+      locateFile: function(path) {
+        return path;
+      }
+    };
+
+    Module.setStatus('Downloading...');
+
+    window.onerror = function(msg, url, line) {
+      showError(msg + ' at ' + url + ':' + line);
+      Module.setStatus = function(text) {
+        if (text) Module.printErr('[post-exception status] ' + text);
+      };
+      return false;
+    };
+  </script>
+
+  <!-- wxWidgets WASM glue code (defines getConfigEntryLength, etc.) -->
+  <script src="wx.js"></script>
+  <script async src="calculator.js"></script>
+</body>
+</html>

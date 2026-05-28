@@ -33,20 +33,40 @@ docker compose -f docker/docker-compose.yml up -d
 # This avoids the timestamp mismatch cycle that caused full rebuilds every time.
 # Transferred files get current container time, so make detects them correctly.
 echo "Syncing source code to container..."
-# rsync exit code 24 = "some files vanished before transfer" (harmless race condition)
-docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
-    rsync -r --delete --checksum \
-        --exclude="build-wasm" \
-        --exclude="output" \
-        --exclude=".git" \
-        --exclude="logs" \
-        --exclude=".idea" \
-        --exclude="node_modules" \
-        --exclude="tools/emsdk" \
-        /workspace-host/ /workspace/ || [ $? -eq 24 ]
+# rsync into the macOS-backed volume intermittently hits transient VirtioFS glitches:
+# temp-file rename failures (exit 23) or vanished-source files (exit 24, harmless).
+# --inplace avoids the temp-file+rename pattern that triggers exit 23; retry up to 3x
+# for any residual flakiness (--checksum makes each retry skip already-synced files).
+sync_rc=0
+for sync_attempt in 1 2 3; do
+    if docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+        rsync -r --delete --checksum --inplace \
+            --exclude="build-wasm" \
+            --exclude="output" \
+            --exclude=".git" \
+            --exclude="logs" \
+            --exclude=".idea" \
+            --exclude="node_modules" \
+            --exclude="tools/emsdk" \
+            /workspace-host/ /workspace/
+    then
+        sync_rc=0
+    else
+        sync_rc=$?
+    fi
+    { [ $sync_rc -eq 0 ] || [ $sync_rc -eq 24 ]; } && break
+    echo "rsync attempt ${sync_attempt} failed (exit ${sync_rc}); retrying in 2s..."
+    sleep 2
+done
+if [ $sync_rc -ne 0 ] && [ $sync_rc -ne 24 ]; then
+    echo "ERROR: source sync failed after retries (exit ${sync_rc})"; exit 1
+fi
 
 # Run build command (without asyncify - handled on host due to memory requirements)
-docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+# -e EMSDK=/emsdk: `docker compose exec` bypasses the entrypoint that sources
+# emsdk_env.sh, so the build shell would lack emcc/embuilder on PATH. Setting
+# EMSDK lets scripts/common/env.sh source /emsdk/emsdk_env.sh and activate the toolchain.
+docker compose -f docker/docker-compose.yml exec -e EMSDK=/emsdk kicad-wasm-builder \
     /workspace/scripts/kicad/build-pcbnew.sh "${ARGS[@]}"
 
 # Copy output to host-accessible directory
