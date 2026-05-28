@@ -205,11 +205,26 @@ constructor stack — a silent stall, not a crash; Firefox ran the identical was
 fine. Found with stub-bisection (§2.1) + the dynCall tracer (§2.3) + symbol map
 (§2.4) + cross-engine state comparison (§2.5) + `sample` (§2.6).
 
-Two fixes, both valid (see [§7](#7-debug-vs-production-builds)):
-1. **Targeted:** add the function to `ASYNCIFY_REMOVE` in `apply-asyncify.sh` (it
-   never unwinds, so excluding it from instrumentation is correct). ← committed default.
-2. **Systemic:** run the optimization Asyncify requires (§7), which shrinks the
-   instrumented function below V8's limit and removes the need for the manual entry.
+A **second instance** of the same family (May 28, 2026) hit the line-drawing
+coroutine: V8 stalled at the first instruction of the asyncify-instrumented
+`libcontext::wasm_fcontext_entry` trampoline when a new fiber for
+`pcbnew.InteractiveDrawing.line` was entered.  The `[DIAG_TOOL]` log showed
+the activate dispatching and `[WASM_FCONTEXT]` showed `jump-swap` completing,
+but `entry-call` (logged on the new fiber's first statement) never fired —
+the tool's button visually never toggled, and tests on headed Chrome **could
+not reproduce** it (same wasm, different cumulative asyncify state).  Trying
+to add the trampoline / `COROUTINE::callerStub` to `ASYNCIFY_REMOVE` broke
+runtime because both functions sit ON the suspend chain (their callees
+`emscripten_fiber_swap` / suspendable tool bodies), so removing them from
+instrumentation orphans the rewind — `null function` / `ASM_CONSTS` errors.
+
+The systemic fix (see [§7](#7-debug-vs-production-builds)) is now **committed
+default**: run `wasm-opt -O2` as a separate pass after `--asyncify` in
+`scripts/common/apply-asyncify.sh`.  This shrinks every instrumented function
+back under V8's threshold, including the coroutine trampolines that can't be
+removelist'd.  The legacy `ASYNCIFY_REMOVE` entries (`setupUIConditions`
+etc.) are kept as a redundant safety net — under `-O2` they're no longer
+required but are harmless.
 
 Details: the `chrome-asyncify-rewind-crash` and `bundle-size-asyncify-optimization`
 project memories, and git history of `apply-asyncify.sh`.
@@ -218,9 +233,11 @@ project memories, and git history of `apply-asyncify.sh`.
 
 ## 7. Debug vs. production builds
 
-The committed default is the **debug** build with a manual `ASYNCIFY_REMOVE`
-list — maximally debuggable, but large (~338 MB wasm / ~137 MB gzip). You can
-**always** produce a much smaller production build, and the recipe is below.
+The committed default is the **debug** build (compiled `-g -gseparate-dwarf`,
+DWARF sidecar) with `apply-asyncify.sh` running `wasm-opt --asyncify` followed
+by `wasm-opt -O2` (May 28, 2026).  Result: ~187 MB wasm / ~65 MB gzip, full
+source-level debugging.  Switch to release (`./docker/build.sh` without
+`--debug`) for an even smaller shippable build with no DWARF.
 
 ### What the knobs do
 Two independent knobs:
@@ -232,41 +249,46 @@ Two independent knobs:
   the optimizer to coalesce it back down**. The Emscripten/Binaryen docs are
   emphatic that you must optimize when using Asyncify.
 
-### Recipe: production build (release + Asyncify optimization)
-This is a documented procedure — **leave the committed code as-is** (debug +
-removelist) and apply these when you want a shippable build:
+### How the build flow uses both
+1. **Docker compile + link** (`./docker/build.sh [--debug]`) produces an
+   un-finalized, un-asyncified wasm.  `--debug` controls only `-g`; the
+   `-O2` optimisation level is set unconditionally at compile time.
+2. **Host post-processing** (`scripts/common/apply-finalize.sh` then
+   `scripts/common/apply-asyncify.sh`):
+   - `wasm-opt --asyncify` instruments suspendable functions.
+   - `wasm-opt -O2` (added May 28, 2026) shrinks every instrumented
+     function back under V8's per-function locals limit, fixing the
+     "Chrome-only stall on coroutine entry" class of bug systemically.
+     Without this pass, large asyncify-instrumented functions like
+     `PCB_EDIT_FRAME::setupUIConditions()` or libcontext's
+     `wasm_fcontext_entry` silently stall in Chrome's V8 even though
+     Firefox runs them fine.  The two passes are run separately so peak
+     RAM stays ~10–15 GB (one heavy `wasm-opt` at a time).
+3. **Shim injection** (`scripts/common/inject-dyncall-shims.sh`) adds the
+   asyncify-aware dynCall bindings and the nested-asyncify `handleSleep`
+   wrapper to `pcbnew.js`.
 
-1. **Build in release mode** (drops `-g`, compiles `-O2`):
-   ```bash
-   ./docker/build.sh           # no --debug  => Release
-   ```
-   (The debug build is `./docker/build.sh --debug`.)
-
-2. **Add the optimization pass to Asyncify.** In
-   `scripts/common/apply-asyncify.sh`, run `wasm-opt --asyncify …` as today, then
-   a second pass over the result:
-   ```bash
-   "${WASM_OPT}" -O2 "${ASYNCIFIED_WASM}" -o "${OUTPUT_WASM}"
-   ```
-   Run it as a **separate** invocation after `--asyncify` (asyncify-then-optimize)
-   so the optimizer cleans up the instrumentation; doing it sequentially also
-   keeps peak RAM lower (one heavy `wasm-opt` at a time — it needs ~10–15 GB).
-
-3. **Drop the now-unnecessary removelist entries.** With the optimization pass,
-   functions like `PCB_EDIT_FRAME::setupUIConditions()` no longer exceed V8's
-   limit, so they don't need to be in `ASYNCIFY_REMOVE`. (Keep any entry that is
-   still needed; validate with `asyncify-asserts`, §2.7.)
+### The `ASYNCIFY_REMOVE` list (in `apply-asyncify.sh`)
+With `-O2` after asyncify, no large function should exceed V8's limit anymore,
+so the removelist is mostly a redundant safety net.  Two situations still
+warrant adding to it:
+- A function whose subtree does **not** asyncify-suspend (so removing it is
+  always safe) and that you're confident never needs to participate in
+  unwind/rewind.  Example: `setupUIConditions()` — registers handlers, never
+  yields.
+- **Don't** add functions on the asyncify-suspend chain (coroutine
+  trampolines, anything calling `emscripten_fiber_swap` / `EM_ASYNC_JS`):
+  removing them orphans the rewind path and you get `null function` /
+  `ASM_CONSTS[code] is not a function` at runtime.
 
 ### Measured result (May 2026)
 | build | raw wasm | gzip | source-level debugging |
 |---|---|---|---|
-| debug + removelist (committed) | 338 MB | 137 MB | full (DWARF sidecar) |
-| release + `-O2` asyncify | 187 MB | **65 MB** | none |
+| debug, asyncify only (old default) | 338 MB | 137 MB | full (DWARF sidecar) |
+| debug + asyncify + `-O2` (current default) | **187 MB** | **65 MB** | full (DWARF sidecar) |
+| release + asyncify + `-O2` | smaller still | — | none |
 
-The release+optimized build passed the Chrome **and** Firefox PCBnew e2e
-("select draw lines") **without** the `setupUIConditions` removelist entry — i.e.
-optimization fixes the stall systemically. Trade-off: it loses DWARF/source-level
-debugging (see §5). **Keep the debug build for investigation** — most of our
-effective tooling (`printf` milestones, the JS-side tracers in §2.3) works
-identically in release, but symbol resolution and variable inspection need the
-debug build.
+The optimized build passes Chrome **and** Firefox `select draw lines` e2e,
+fixes the user-reported "line tool doesn't toggle in real Chrome" stall, and
+makes the test load+run ~2× faster (smaller wasm parses faster).  Tradeoff:
+each build now spends an extra ~10 minutes on the `-O2` pass.
