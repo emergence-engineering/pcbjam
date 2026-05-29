@@ -1,8 +1,13 @@
 #!/bin/bash
-# Build KiCad WASM inside Docker container, then apply asyncify on host
-
-# Redirect all output to a log file (re-execs script with redirection)
-source "$(dirname "$0")/../scripts/common/logging.sh"
+# Build a KiCad editor (pcbnew or eeschema) inside Docker, then run asyncify
+# and friends on the host.
+#
+# Usage:
+#   ./docker/build.sh                # builds pcbnew (default)
+#   ./docker/build.sh pcbnew         # explicit
+#   ./docker/build.sh eeschema       # builds the schematic editor
+#   ./docker/build.sh all            # builds both, sequentially
+#   ./docker/build.sh <app> -j 8 ... # any extra args are forwarded to build-*.sh
 #
 # The build is split into two phases:
 # 1. Docker: Compile KiCad to WASM (without asyncify)
@@ -10,14 +15,34 @@ source "$(dirname "$0")/../scripts/common/logging.sh"
 #
 # Binaryen is downloaded automatically - no prerequisites needed.
 
+# Redirect all output to a log file (re-execs script with redirection)
+source "$(dirname "$0")/../scripts/common/logging.sh"
+
 set -e
 
 cd "$(dirname "$0")/.."
+
+# First positional arg is the app name; everything else is forwarded to build-*.sh.
+APP_NAME=""
+if [[ $# -gt 0 ]] && [[ "$1" != -* ]]; then
+    APP_NAME="$1"
+    shift
+fi
+APP_NAME="${APP_NAME:-pcbnew}"
+
+case "$APP_NAME" in
+    pcbnew|eeschema|all) ;;
+    *)
+        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | all)" >&2
+        exit 1
+        ;;
+esac
 
 # Use branch name as Docker Compose project name for isolated containers/volumes
 BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD | tr '/' '-' | tr '[:upper:]' '[:lower:]')
 export COMPOSE_PROJECT_NAME="kicad-wasm-${BRANCH_NAME}"
 echo "Using Docker project: ${COMPOSE_PROJECT_NAME}"
+echo "Building app: ${APP_NAME}"
 
 # Add -j 10 by default if no -j flag is given
 ARGS=("$@")
@@ -62,34 +87,45 @@ if [ $sync_rc -ne 0 ] && [ $sync_rc -ne 24 ]; then
     echo "ERROR: source sync failed after retries (exit ${sync_rc})"; exit 1
 fi
 
-# Run build command (without asyncify - handled on host due to memory requirements)
-# -e EMSDK=/emsdk: `docker compose exec` bypasses the entrypoint that sources
+# Build one app: compile in container, then run host-side post-processing.
+build_app() {
+    local app="$1"
+    echo ""
+    echo "=== Building ${app} ==="
+
+    # Run build command (without asyncify - handled on host due to memory requirements)
+    # -e EMSDK=/emsdk: `docker compose exec` bypasses the entrypoint that sources
 # emsdk_env.sh, so the build shell would lack emcc/embuilder on PATH. Setting
 # EMSDK lets scripts/common/env.sh source /emsdk/emsdk_env.sh and activate the toolchain.
-docker compose -f docker/docker-compose.yml exec -e EMSDK=/emsdk kicad-wasm-builder \
-    /workspace/scripts/kicad/build-pcbnew.sh "${ARGS[@]}"
+docker compose -f docker/docker-compose.yml exec -e EMSDK=/emsdkkicad-wasm-builder \
+        "/workspace/scripts/kicad/build-${app}.sh" "${ARGS[@]}"
 
-# Copy output to host-accessible directory
-# Note: pcbnew.wasm.debug.wasm contains DWARF debug info (generated with -gseparate-dwarf)
-echo "Copying build output to ./output/..."
-docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
-    bash -c "mkdir -p /workspace/output && \
-        cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || \
-        cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm} /workspace/output/; \
-        cp /workspace/build-wasm/kicad-pcbnew/resources/images.tar.gz /workspace/output/ 2>/dev/null || true; \
-        cp /workspace/build-wasm/wxwidgets/build/wasm/wx.js /workspace/output/ 2>/dev/null || true"
+    # Copy output to host-accessible directory.
+    # ${app}.wasm.debug.wasm contains DWARF debug info (when built with -gseparate-dwarf).
+    echo "Copying ${app} build output to ./output/..."
+    docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+        bash -c "mkdir -p /workspace/output && \
+            cp /workspace/build-wasm/kicad-${app}/${app}/${app}.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || \
+            cp /workspace/build-wasm/kicad-${app}/${app}/${app}.{js,wasm} /workspace/output/; \
+            cp /workspace/build-wasm/kicad-${app}/resources/images.tar.gz /workspace/output/ 2>/dev/null || true; \
+            cp /workspace/build-wasm/wxwidgets/build/wasm/wx.js /workspace/output/ 2>/dev/null || true"
 
-# Inject dynCall shims into pcbnew.js
-# This fixes "dynCall_* is not defined" errors in Emscripten 4.x
-./scripts/common/inject-dyncall-shims.sh output/pcbnew.js
+    # Inject dynCall shims (fixes "dynCall_* is not defined" errors in Emscripten 4.x)
+    ./scripts/common/inject-dyncall-shims.sh "output/${app}.js"
 
-# Apply wasm-emscripten-finalize on host (skipped in Docker due to memory limits)
-# This is done on the host because finalize with DWARF needs significant RAM
-./scripts/common/apply-finalize.sh output/pcbnew.wasm output/pcbnew.wasm
+    # Apply wasm-emscripten-finalize on host (skipped in Docker due to memory limits)
+    ./scripts/common/apply-finalize.sh "output/${app}.wasm" "output/${app}.wasm"
 
-# Apply asyncify transformation on host
-# This is done on the host because wasm-opt --asyncify needs significant RAM
-./scripts/common/apply-asyncify.sh output/pcbnew.wasm output/pcbnew.wasm
+    # Apply asyncify transformation on host
+    ./scripts/common/apply-asyncify.sh "output/${app}.wasm" "output/${app}.wasm"
+}
+
+if [[ "${APP_NAME}" == "all" ]]; then
+    build_app pcbnew
+    build_app eeschema
+else
+    build_app "${APP_NAME}"
+fi
 
 echo ""
 echo "Build complete. Output files in ./output/"

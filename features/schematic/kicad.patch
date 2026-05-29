@@ -1,0 +1,432 @@
+diff --git a/eeschema/CMakeLists.txt b/eeschema/CMakeLists.txt
+index 1be2c291d1..e07d05e6e7 100644
+--- a/eeschema/CMakeLists.txt
++++ b/eeschema/CMakeLists.txt
+@@ -60,35 +60,48 @@ set( EESCHEMA_SCH_IO
+ 
+     # HTTP IO plugin
+     sch_io/http_lib/sch_io_http_lib.cpp
++    )
+ 
+-    # Database IO plugin
+-    sch_io/database/sch_io_database.cpp
+-
+-    # Eagle IO plugin
+-    sch_io/eagle/sch_io_eagle.cpp
+-
+-    # Altium IO plugin
+-    sch_io/altium/altium_parser_sch.cpp
+-    sch_io/altium/sch_io_altium.cpp
+-
+-    # Cadstar IO plugin
+-    sch_io/cadstar/cadstar_sch_archive_loader.cpp
+-    sch_io/cadstar/cadstar_sch_archive_parser.cpp
+-    sch_io/cadstar/sch_io_cadstar_archive.cpp
+-
+-    # LTSpice IO plugin
+-    sch_io/ltspice/ltspice_schematic.cpp
+-    sch_io/ltspice/sch_io_ltspice.cpp
+-    sch_io/ltspice/sch_io_ltspice_parser.cpp
+-
+-    # EasyEDA IO plugin
+-    sch_io/easyeda/sch_easyeda_parser.cpp
+-    sch_io/easyeda/sch_io_easyeda.cpp
+-
+-    # EasyEDA Pro IO plugin
+-    sch_io/easyedapro/sch_easyedapro_parser.cpp
+-    sch_io/easyedapro/sch_io_easyedapro.cpp
++# Third-party importers and database plugin are not built for WASM:
++# - Database needs nanodbc/ODBC (common/database/database_connection.cpp
++#   is also gated on NOT EMSCRIPTEN in common/CMakeLists.txt).
++# - Altium pulls in pcbnew/pcb_io/altium common code which pcbnew itself
++#   excludes for WASM (third-party uses std::basic_string<unsigned short>
++#   that the current Emscripten libc++ rejects).
++# - Eagle/Cadstar/LTspice/EasyEDA are cross-tool importers we don't need
++#   for the MVP and they bring transitive incompatible dependencies in.
++# sch_io_mgr.cpp's factory cases are guarded with __EMSCRIPTEN__ to match.
++if( NOT EMSCRIPTEN )
++    list( APPEND EESCHEMA_SCH_IO
++        # Database IO plugin
++        sch_io/database/sch_io_database.cpp
++
++        # Eagle IO plugin
++        sch_io/eagle/sch_io_eagle.cpp
++
++        # Altium IO plugin
++        sch_io/altium/altium_parser_sch.cpp
++        sch_io/altium/sch_io_altium.cpp
++
++        # Cadstar IO plugin
++        sch_io/cadstar/cadstar_sch_archive_loader.cpp
++        sch_io/cadstar/cadstar_sch_archive_parser.cpp
++        sch_io/cadstar/sch_io_cadstar_archive.cpp
++
++        # LTSpice IO plugin
++        sch_io/ltspice/ltspice_schematic.cpp
++        sch_io/ltspice/sch_io_ltspice.cpp
++        sch_io/ltspice/sch_io_ltspice_parser.cpp
++
++        # EasyEDA IO plugin
++        sch_io/easyeda/sch_easyeda_parser.cpp
++        sch_io/easyeda/sch_io_easyeda.cpp
++
++        # EasyEDA Pro IO plugin
++        sch_io/easyedapro/sch_easyedapro_parser.cpp
++        sch_io/easyedapro/sch_io_easyedapro.cpp
+     )
++endif()
+ 
+ set( EESCHEMA_DLGS
+     dialogs/dialog_annotate.cpp
+@@ -276,6 +289,22 @@ set( EESCHEMA_SIM_SRCS
+     widgets/tuner_slider_base.cpp
+     )
+ 
++# WASM: the four largest BSIM/SOI/HSIM data initializer functions exceed the
++# V8/SpiderMonkey limit on locals per function ("too many locals") once
++# compiled. Replace them with empty stubs — the simulator UI is unreachable
++# in WASM anyway (see wasm/stubs/ngspice/sharedspice.h).
++if( EMSCRIPTEN )
++    list( REMOVE_ITEM EESCHEMA_SIM_SRCS
++        sim/sim_model_ngspice_data_bsim4.cpp
++        sim/sim_model_ngspice_data_b3soi.cpp
++        sim/sim_model_ngspice_data_b4soi.cpp
++        sim/sim_model_ngspice_data_hsim.cpp
++    )
++    list( APPEND EESCHEMA_SIM_SRCS
++        ${CMAKE_SOURCE_DIR}/../wasm/stubs/eeschema_ngspice_data_stubs.cpp
++    )
++endif()
++
+ set( EESCHEMA_WIDGETS
+     widgets/hierarchy_pane.cpp
+     widgets/panel_sch_selection_filter_base.cpp
+@@ -561,14 +590,25 @@ add_executable( eeschema WIN32 MACOSX_BUNDLE
+     ${EESCHEMA_RESOURCES}
+     )
+ 
+-set_source_files_properties( ${CMAKE_SOURCE_DIR}/common/single_top.cpp PROPERTIES
+-    COMPILE_DEFINITIONS "TOP_FRAME=FRAME_SCH;PGM_DATA_FILE_EXT=\"kicad_sch\";BUILD_KIWAY_DLL"
+-    )
++if( EMSCRIPTEN )
++    # WASM: Static kiface linking - don't define BUILD_KIWAY_DLL
++    set_source_files_properties( ${CMAKE_SOURCE_DIR}/common/single_top.cpp PROPERTIES
++        COMPILE_DEFINITIONS "TOP_FRAME=FRAME_SCH;PGM_DATA_FILE_EXT=\"kicad_sch\""
++        )
++else()
++    set_source_files_properties( ${CMAKE_SOURCE_DIR}/common/single_top.cpp PROPERTIES
++        COMPILE_DEFINITIONS "TOP_FRAME=FRAME_SCH;PGM_DATA_FILE_EXT=\"kicad_sch\";BUILD_KIWAY_DLL"
++        )
++endif()
+ 
+-target_link_libraries( eeschema
+-    kicommon
+-    ${wxWidgets_LIBRARIES}
+-    )
++if( NOT EMSCRIPTEN )
++    # Native: minimal link, kiface loaded dynamically
++    target_link_libraries( eeschema
++        kicommon
++        ${wxWidgets_LIBRARIES}
++        )
++endif()
++# WASM linking is done after EESCHEMA_KIFACE_LIBRARIES is defined
+ 
+ # the main Eeschema program, in DSO form.
+ add_library( eeschema_kiface_objects OBJECT
+@@ -577,6 +617,15 @@ add_library( eeschema_kiface_objects OBJECT
+     ${EESCHEMA_COMMON_SRCS}
+     )
+ 
++# WASM: Bring eeschema.cpp (the KIFACE entry point) and stub sources into the
++# kiface_objects translation unit so static linking finds KIFACE_GETTER.
++if( EMSCRIPTEN )
++    target_sources( eeschema_kiface_objects PRIVATE
++        eeschema.cpp
++        ${CMAKE_SOURCE_DIR}/../wasm/stubs/eeschema_frame_stub.cpp
++    )
++endif()
++
+ if( KICAD_USE_PCH )
+     target_precompile_headers( eeschema_kiface_objects
+         PRIVATE
+@@ -612,21 +661,49 @@ target_link_libraries( eeschema_kiface_objects PUBLIC eeschema_navlib)
+ 
+ add_dependencies( eeschema_kiface_objects eeschema_navlib )
+ 
+-add_library( eeschema_kiface MODULE
+-    eeschema.cpp
++if( EMSCRIPTEN )
++    # WASM: empty MODULE - eeschema.cpp was hoisted into kiface_objects above
++    # so the executable can link KIFACE_GETTER statically. The empty MODULE
++    # target is kept so post-build steps that reference it still resolve.
++    add_library( eeschema_kiface MODULE )
++else()
++    add_library( eeschema_kiface MODULE
++        eeschema.cpp
++        )
++endif()
++
++set( EESCHEMA_KIFACE_LIBRARIES
++    eeschema_kiface_objects
++    common
++    eeschema_navlib
++    kicommon
++    kiplatform
++    gal
++    scripting
++    sexpr
++    core
++    markdown_lib
++    ${wxWidgets_LIBRARIES}
++    ${NGSPICE_LIBRARY}
++    Boost::headers
+     )
+ 
++# WASM: Link kiface objects directly into eeschema executable (static linking)
++if( EMSCRIPTEN )
++    target_link_libraries( eeschema
++        PRIVATE
++            ${EESCHEMA_KIFACE_LIBRARIES}
++        )
++    # WASM: Allow multiple definitions of symbols that exist in both
++    # KiCad and wxWidgets (matches the pcbnew WASM pattern).
++    target_link_options( eeschema PRIVATE
++        "LINKER:--allow-multiple-definition"
++        )
++endif()
++
+ target_link_libraries( eeschema_kiface
+     PRIVATE
+-        common
+-        eeschema_kiface_objects
+-        markdown_lib
+-        scripting
+-        sexpr
+-        core
+-        Boost::headers
+-        ${wxWidgets_LIBRARIES}
+-        ${NGSPICE_LIBRARY}
++        ${EESCHEMA_KIFACE_LIBRARIES}
+     )
+ 
+ if( MSVC )
+@@ -649,9 +726,17 @@ set_target_properties( eeschema_kiface PROPERTIES
+     )
+ 
+ # The KIFACE is in eeschema.cpp, export it:
+-set_source_files_properties( eeschema.cpp PROPERTIES
+-    COMPILE_DEFINITIONS     "BUILD_KIWAY_DLL;COMPILING_DLL"
+-    )
++if( EMSCRIPTEN )
++    # WASM: Static linking - don't define BUILD_KIWAY_DLL so KIFACE_GETTER
++    # is exported with its statically-linkable name (KIFACE_1).
++    set_source_files_properties( eeschema.cpp PROPERTIES
++        COMPILE_DEFINITIONS     "COMPILING_DLL"
++        )
++else()
++    set_source_files_properties( eeschema.cpp PROPERTIES
++        COMPILE_DEFINITIONS     "BUILD_KIWAY_DLL;COMPILING_DLL"
++        )
++endif()
+ 
+ # if building eeschema, then also build eeschema_kiface if out of date.
+ add_dependencies( eeschema eeschema_kiface )
+diff --git a/eeschema/dialogs/dialog_sim_command.cpp b/eeschema/dialogs/dialog_sim_command.cpp
+index 7ec105f35a..19fa35d460 100644
+--- a/eeschema/dialogs/dialog_sim_command.cpp
++++ b/eeschema/dialogs/dialog_sim_command.cpp
+@@ -570,7 +570,7 @@ void DIALOG_SIM_COMMAND::updateDCSources( wxChar aType, wxChoice* aSource )
+ {
+     wxString prevSelection;
+ 
+-    if( !aSource->IsEmpty() && aSource->GetSelection() >= 0 )
++    if( aSource->GetCount() > 0 && aSource->GetSelection() >= 0 )
+         prevSelection = aSource->GetString( aSource->GetSelection() );
+ 
+     std::set<wxString> sourcesList;
+diff --git a/eeschema/eeschema.cpp b/eeschema/eeschema.cpp
+index f3b334d1c8..d56ca181dc 100644
+--- a/eeschema/eeschema.cpp
++++ b/eeschema/eeschema.cpp
+@@ -201,7 +201,13 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
+         }
+ 
+         case FRAME_SCH_SYMBOL_EDITOR:
++#ifdef __EMSCRIPTEN__
++            // WASM build: symbol library editor is not supported (see
++            // features/schematic/0001-eeschema-iface-stubs.md).
++            return nullptr;
++#else
+             return new SYMBOL_EDIT_FRAME( aKiway, aParent );
++#endif
+ 
+         case FRAME_SIMULATOR:
+         {
+@@ -219,10 +225,19 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
+         }
+ 
+         case FRAME_SCH_VIEWER:
++#ifdef __EMSCRIPTEN__
++            // WASM build: symbol viewer is not supported.
++            return nullptr;
++#else
+             return new SYMBOL_VIEWER_FRAME( aKiway, aParent );
++#endif
+ 
+         case FRAME_SYMBOL_CHOOSER:
+         {
++#ifdef __EMSCRIPTEN__
++            // WASM build: symbol chooser is not supported (no bundled libs).
++            return nullptr;
++#else
+             bool cancelled = false;
+             SYMBOL_CHOOSER_FRAME* chooser = new SYMBOL_CHOOSER_FRAME( aKiway, aParent, cancelled );
+ 
+@@ -233,6 +248,7 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
+             }
+ 
+             return chooser;
++#endif
+         }
+ 
+         case DIALOG_SCH_LIBRARY_TABLE:
+diff --git a/eeschema/sch_base_frame.cpp b/eeschema/sch_base_frame.cpp
+index 161379a699..e722b7a043 100644
+--- a/eeschema/sch_base_frame.cpp
++++ b/eeschema/sch_base_frame.cpp
+@@ -775,6 +775,7 @@ wxString SCH_BASE_FRAME::SelectLibrary( const wxString& aDialogTitle, const wxSt
+ 
+ void SCH_BASE_FRAME::setSymWatcher( const LIB_ID* aID )
+ {
++#if wxUSE_FSWATCHER
+     Unbind( wxEVT_FSWATCHER, &SCH_BASE_FRAME::OnSymChange, this );
+ 
+     if( m_watcher )
+@@ -824,11 +825,15 @@ void SCH_BASE_FRAME::setSymWatcher( const LIB_ID* aID )
+         wxLogNull silence;
+         m_watcher->Add( fn );
+     }
++#else
++    (void) aID;
++#endif
+ }
+ 
+ 
+ void SCH_BASE_FRAME::OnSymChange( wxFileSystemWatcherEvent& aEvent )
+ {
++#if wxUSE_FSWATCHER
+     LEGACY_SYMBOL_LIBS* libs = PROJECT_SCH::LegacySchLibs( &Prj() );
+ 
+     wxLogTrace( traceLibWatch, "OnSymChange: %s, watcher file: %s",
+@@ -846,6 +851,9 @@ void SCH_BASE_FRAME::OnSymChange( wxFileSystemWatcherEvent& aEvent )
+         wxLogTrace( traceLibWatch, "Failed to start the debounce timer" );
+         return;
+     }
++#else
++    (void) aEvent;
++#endif
+ }
+ 
+ 
+diff --git a/eeschema/sch_base_frame.h b/eeschema/sch_base_frame.h
+index 2d701c7d28..a86ae37237 100644
+--- a/eeschema/sch_base_frame.h
++++ b/eeschema/sch_base_frame.h
+@@ -323,7 +323,9 @@ protected:
+ private:
+ 
+     /// These are file watchers for the symbol library tables.
++#if wxUSE_FSWATCHER
+     std::unique_ptr<wxFileSystemWatcher>    m_watcher;
++#endif
+     wxFileName                              m_watcherFileName;
+     wxDateTime                              m_watcherLastModified;
+     wxTimer                                 m_watcherDebounceTimer;
+diff --git a/eeschema/sch_edit_frame.cpp b/eeschema/sch_edit_frame.cpp
+index fd5a91a388..6eab185446 100644
+--- a/eeschema/sch_edit_frame.cpp
++++ b/eeschema/sch_edit_frame.cpp
+@@ -56,7 +56,9 @@
+ #include <core/profile.h>
+ #include <project/project_file.h>
+ #include <project/net_settings.h>
++#ifdef KICAD_SCRIPTING
+ #include <python_scripting.h>
++#endif
+ #include <sch_edit_frame.h>
+ #include <symbol_chooser_frame.h>
+ #include <sch_painter.h>
+diff --git a/eeschema/sch_io/sch_io_mgr.cpp b/eeschema/sch_io/sch_io_mgr.cpp
+index 63e55bcdae..922fef0d90 100644
+--- a/eeschema/sch_io/sch_io_mgr.cpp
++++ b/eeschema/sch_io/sch_io_mgr.cpp
+@@ -24,17 +24,22 @@
+ #include <wx/uri.h>
+ 
+ #include <sch_io/sch_io_mgr.h>
+-#include <sch_io/eagle/sch_io_eagle.h>
+ #include <sch_io/kicad_legacy/sch_io_kicad_legacy.h>
+ #include <sch_io/kicad_sexpr/sch_io_kicad_sexpr.h>
++#include <sch_io/http_lib/sch_io_http_lib.h>
+ 
++// Third-party importers and the database plugin are excluded from the WASM
++// build (see kicad/eeschema/CMakeLists.txt). Their FindPlugin cases below
++// return nullptr on WASM.
++#ifndef __EMSCRIPTEN__
++#include <sch_io/eagle/sch_io_eagle.h>
+ #include <sch_io/altium/sch_io_altium.h>
+ #include <sch_io/cadstar/sch_io_cadstar_archive.h>
+ #include <sch_io/easyeda/sch_io_easyeda.h>
+ #include <sch_io/easyedapro/sch_io_easyedapro.h>
+ #include <sch_io/database/sch_io_database.h>
+ #include <sch_io/ltspice/sch_io_ltspice.h>
+-#include <sch_io/http_lib/sch_io_http_lib.h>
++#endif
+ #include <common.h>     // for ExpandEnvVarSubstitutions
+ 
+ #include <wildcards_and_files_ext.h>
+@@ -68,6 +73,8 @@ SCH_IO* SCH_IO_MGR::FindPlugin( SCH_FILE_T aFileType )
+     {
+     case SCH_KICAD:           return new SCH_IO_KICAD_SEXPR();
+     case SCH_LEGACY:          return new SCH_IO_KICAD_LEGACY();
++    case SCH_HTTP:            return new SCH_IO_HTTP_LIB();
++#ifndef __EMSCRIPTEN__
+     case SCH_ALTIUM:          return new SCH_IO_ALTIUM();
+     case SCH_CADSTAR_ARCHIVE: return new SCH_IO_CADSTAR_ARCHIVE();
+     case SCH_DATABASE:        return new SCH_IO_DATABASE();
+@@ -75,7 +82,7 @@ SCH_IO* SCH_IO_MGR::FindPlugin( SCH_FILE_T aFileType )
+     case SCH_EASYEDA:         return new SCH_IO_EASYEDA();
+     case SCH_EASYEDAPRO:      return new SCH_IO_EASYEDAPRO();
+     case SCH_LTSPICE:         return new SCH_IO_LTSPICE();
+-    case SCH_HTTP:            return new SCH_IO_HTTP_LIB();
++#endif
+     default:                  return nullptr;
+     }
+ }
+diff --git a/eeschema/toolbars_sch_editor.cpp b/eeschema/toolbars_sch_editor.cpp
+index 600f4379bc..a4df373475 100644
+--- a/eeschema/toolbars_sch_editor.cpp
++++ b/eeschema/toolbars_sch_editor.cpp
+@@ -32,7 +32,9 @@
+ #include <bitmaps.h>
+ #include <eeschema_id.h>
+ #include <pgm_base.h>
++#ifdef KICAD_SCRIPTING
+ #include <python_scripting.h>
++#endif
+ #include <tool/tool_manager.h>
+ #include <tool/action_toolbar.h>
+ #include <tools/sch_actions.h>
+@@ -251,7 +253,11 @@ void SCH_EDIT_FRAME::configureToolbars()
+         [this]( ACTION_TOOLBAR* aToolbar )
+         {
+             // Add scripting console and API plugins
++            #ifdef KICAD_SCRIPTING
+             bool scriptingAvailable = SCRIPTING::IsWxAvailable();
++            #else
++            bool scriptingAvailable = false;
++            #endif
+ 
+             #ifdef KICAD_IPC_API
+             bool haveApiPlugins = Pgm().GetCommonSettings()->m_Api.enable_server &&

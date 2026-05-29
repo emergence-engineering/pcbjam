@@ -1,0 +1,2005 @@
+diff --git a/docker/build.sh b/docker/build.sh
+index 290112a..11104be 100755
+--- a/docker/build.sh
++++ b/docker/build.sh
+@@ -1,8 +1,13 @@
+ #!/bin/bash
+-# Build KiCad WASM inside Docker container, then apply asyncify on host
+-
+-# Redirect all output to a log file (re-execs script with redirection)
+-source "$(dirname "$0")/../scripts/common/logging.sh"
++# Build a KiCad editor (pcbnew or eeschema) inside Docker, then run asyncify
++# and friends on the host.
++#
++# Usage:
++#   ./docker/build.sh                # builds pcbnew (default)
++#   ./docker/build.sh pcbnew         # explicit
++#   ./docker/build.sh eeschema       # builds the schematic editor
++#   ./docker/build.sh all            # builds both, sequentially
++#   ./docker/build.sh <app> -j 8 ... # any extra args are forwarded to build-*.sh
+ #
+ # The build is split into two phases:
+ # 1. Docker: Compile KiCad to WASM (without asyncify)
+@@ -10,14 +15,34 @@ source "$(dirname "$0")/../scripts/common/logging.sh"
+ #
+ # Binaryen is downloaded automatically - no prerequisites needed.
+ 
++# Redirect all output to a log file (re-execs script with redirection)
++source "$(dirname "$0")/../scripts/common/logging.sh"
++
+ set -e
+ 
+ cd "$(dirname "$0")/.."
+ 
++# First positional arg is the app name; everything else is forwarded to build-*.sh.
++APP_NAME=""
++if [[ $# -gt 0 ]] && [[ "$1" != -* ]]; then
++    APP_NAME="$1"
++    shift
++fi
++APP_NAME="${APP_NAME:-pcbnew}"
++
++case "$APP_NAME" in
++    pcbnew|eeschema|all) ;;
++    *)
++        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | all)" >&2
++        exit 1
++        ;;
++esac
++
+ # Use branch name as Docker Compose project name for isolated containers/volumes
+ BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD | tr '/' '-' | tr '[:upper:]' '[:lower:]')
+ export COMPOSE_PROJECT_NAME="kicad-wasm-${BRANCH_NAME}"
+ echo "Using Docker project: ${COMPOSE_PROJECT_NAME}"
++echo "Building app: ${APP_NAME}"
+ 
+ # Add -j 10 by default if no -j flag is given
+ ARGS=("$@")
+@@ -45,31 +70,42 @@ docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+         --exclude="tools/emsdk" \
+         /workspace-host/ /workspace/ || [ $? -eq 24 ]
+ 
+-# Run build command (without asyncify - handled on host due to memory requirements)
+-docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+-    /workspace/scripts/kicad/build-pcbnew.sh "${ARGS[@]}"
++# Build one app: compile in container, then run host-side post-processing.
++build_app() {
++    local app="$1"
++    echo ""
++    echo "=== Building ${app} ==="
+ 
+-# Copy output to host-accessible directory
+-# Note: pcbnew.wasm.debug.wasm contains DWARF debug info (generated with -gseparate-dwarf)
+-echo "Copying build output to ./output/..."
+-docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+-    bash -c "mkdir -p /workspace/output && \
+-        cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || \
+-        cp /workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.{js,wasm} /workspace/output/; \
+-        cp /workspace/build-wasm/kicad-pcbnew/resources/images.tar.gz /workspace/output/ 2>/dev/null || true; \
+-        cp /workspace/build-wasm/wxwidgets/build/wasm/wx.js /workspace/output/ 2>/dev/null || true"
+-
+-# Inject dynCall shims into pcbnew.js
+-# This fixes "dynCall_* is not defined" errors in Emscripten 4.x
+-./scripts/common/inject-dyncall-shims.sh output/pcbnew.js
+-
+-# Apply wasm-emscripten-finalize on host (skipped in Docker due to memory limits)
+-# This is done on the host because finalize with DWARF needs significant RAM
+-./scripts/common/apply-finalize.sh output/pcbnew.wasm output/pcbnew.wasm
+-
+-# Apply asyncify transformation on host
+-# This is done on the host because wasm-opt --asyncify needs significant RAM
+-./scripts/common/apply-asyncify.sh output/pcbnew.wasm output/pcbnew.wasm
++    # Run build command (without asyncify - handled on host due to memory requirements)
++    docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
++        "/workspace/scripts/kicad/build-${app}.sh" "${ARGS[@]}"
++
++    # Copy output to host-accessible directory.
++    # ${app}.wasm.debug.wasm contains DWARF debug info (when built with -gseparate-dwarf).
++    echo "Copying ${app} build output to ./output/..."
++    docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
++        bash -c "mkdir -p /workspace/output && \
++            cp /workspace/build-wasm/kicad-${app}/${app}/${app}.{js,wasm,wasm.debug.wasm,wasm.map,worker.js} /workspace/output/ 2>/dev/null || \
++            cp /workspace/build-wasm/kicad-${app}/${app}/${app}.{js,wasm} /workspace/output/; \
++            cp /workspace/build-wasm/kicad-${app}/resources/images.tar.gz /workspace/output/ 2>/dev/null || true; \
++            cp /workspace/build-wasm/wxwidgets/build/wasm/wx.js /workspace/output/ 2>/dev/null || true"
++
++    # Inject dynCall shims (fixes "dynCall_* is not defined" errors in Emscripten 4.x)
++    ./scripts/common/inject-dyncall-shims.sh "output/${app}.js"
++
++    # Apply wasm-emscripten-finalize on host (skipped in Docker due to memory limits)
++    ./scripts/common/apply-finalize.sh "output/${app}.wasm" "output/${app}.wasm"
++
++    # Apply asyncify transformation on host
++    ./scripts/common/apply-asyncify.sh "output/${app}.wasm" "output/${app}.wasm"
++}
++
++if [[ "${APP_NAME}" == "all" ]]; then
++    build_app pcbnew
++    build_app eeschema
++else
++    build_app "${APP_NAME}"
++fi
+ 
+ echo ""
+ echo "Build complete. Output files in ./output/"
+diff --git a/scripts/create-feature-patches.sh b/scripts/create-feature-patches.sh
+index f6aa3e7..effae4e 100755
+--- a/scripts/create-feature-patches.sh
++++ b/scripts/create-feature-patches.sh
+@@ -9,15 +9,35 @@ FEATURE_DIR="features/${BRANCH}"
+ 
+ mkdir -p "$FEATURE_DIR"
+ 
+-# Root repo patch (exclude submodules)
+-git diff HEAD -- ':!kicad' ':!wxwidgets' > "$FEATURE_DIR/root.patch"
++# Root repo patch (exclude submodules and features/ — the latter would cause
++# the patch to contain itself recursively).
++git diff HEAD -- ':!kicad' ':!wxwidgets' ':!features' > "$FEATURE_DIR/root.patch"
+ 
+-# Submodule patches (diff from upstream base)
+-KICAD_BASE=$(git -C kicad log --format='%H' --author-not='viktor.vaczi@emergence-engineering.com' --author-not='noreply@anthropic.com' -1)
+-git -C kicad diff $KICAD_BASE > "$FEATURE_DIR/kicad.patch"
++# Submodule patches: diff against main's recorded submodule sha so the patch
++# captures only this feature branch's submodule work (committed + uncommitted),
++# never upstream changes that landed on main.
++sub_diff() {
++    local sub="$1"
++    local out="$2"
++    local main_sha
++    main_sha=$(git ls-tree origin/main "$sub" 2>/dev/null | awk '{print $3}')
++    if [ -z "$main_sha" ]; then
++        echo "Warning: could not resolve origin/main:$sub — skipping $out" >&2
++        rm -f "$out"
++        return
++    fi
++    local cur_sha
++    cur_sha=$(git -C "$sub" rev-parse HEAD)
++    if [ "$main_sha" = "$cur_sha" ] && git -C "$sub" diff --quiet; then
++        echo "No feature-specific $sub changes (submodule pointer matches main, worktree clean) — skipping $(basename "$out")"
++        rm -f "$out"
++        return
++    fi
++    git -C "$sub" diff "$main_sha" > "$out"
++}
+ 
+-WX_BASE="v3.2.6"
+-git -C wxwidgets diff $WX_BASE > "$FEATURE_DIR/wxwidgets.patch"
++sub_diff kicad     "$FEATURE_DIR/kicad.patch"
++sub_diff wxwidgets "$FEATURE_DIR/wxwidgets.patch"
+ 
+ echo "Patches created in $FEATURE_DIR/"
+ ls -la "$FEATURE_DIR"/*.patch 2>/dev/null || echo "No patches generated"
+diff --git a/scripts/kicad/build-eeschema.sh b/scripts/kicad/build-eeschema.sh
+new file mode 100755
+index 0000000..216bd1f
+--- /dev/null
++++ b/scripts/kicad/build-eeschema.sh
+@@ -0,0 +1,7 @@
++#!/bin/bash
++# Build KiCad Eeschema (schematic editor) for WebAssembly.
++# Thin wrapper around build-kicad-target.sh — see that script for options.
++
++set -e
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++exec "${SCRIPT_DIR}/build-kicad-target.sh" eeschema "$@"
+diff --git a/scripts/kicad/build-kicad-target.sh b/scripts/kicad/build-kicad-target.sh
+new file mode 100755
+index 0000000..5685fe0
+--- /dev/null
++++ b/scripts/kicad/build-kicad-target.sh
+@@ -0,0 +1,395 @@
++#!/bin/bash
++# Build a KiCad editor (pcbnew or eeschema) for WebAssembly.
++#
++# Usage:
++#   ./scripts/kicad/build-kicad-target.sh <app> [options]
++#
++# Args:
++#   <app>         pcbnew | eeschema (required)
++#
++# Options:
++#   --full        Full clean rebuild (dependencies + KiCad)
++#   --clean-kicad Clean only KiCad build directory (not deps)
++#   --build-deps  Build dependencies (default: skip)
++#   --debug       Build with debug symbols (default)
++#   --release     Build optimized without debug symbols
++#   --diag=...    Diagnostic preprocessor flags (gal, coroutine, ctor, all)
++#   -j N          Parallel compilation jobs (default: 1)
++#
++# Each editor builds into its own tree: build-wasm/kicad-<app>/.
++# Per-editor extras live alongside generic stubs:
++#   - wasm/bindings/<app>_embind.cpp        (optional)
++#   - wasm/stubs/<app>_frame_stub.cpp       (optional, app-specific stubs)
++#   - wasm/stubs/<app>_scripting_stub.cpp   (optional, app-specific scripting stubs)
++
++set -e
++
++if [ -z "$1" ]; then
++    echo "Error: missing <app> argument (pcbnew | eeschema)" >&2
++    exit 1
++fi
++APP_NAME="$1"
++shift
++
++case "$APP_NAME" in
++    pcbnew|eeschema) ;;
++    *)
++        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema)" >&2
++        exit 1
++        ;;
++esac
++
++SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++source "${SCRIPT_DIR}/../common/env.sh"
++source "${SCRIPT_DIR}/../common/versions.sh"
++source "${SCRIPT_DIR}/../common/functions.sh"
++
++KICAD_DIR="${PROJECT_ROOT}/kicad"
++KICAD_BUILD="${BUILD_ROOT}/kicad-${APP_NAME}"
++KICAD_STAMP="${BUILD_ROOT}/stamps/kicad-${APP_NAME}.stamp"
++WASM_LAYER="${PROJECT_ROOT}/wasm"
++WX_BUILD="${BUILD_ROOT}/wxwidgets-universal"
++
++# Parse arguments - incremental build by default (optimized for development)
++NO_CLEAN=1
++FULL_CLEAN=0
++SKIP_DEPS=1
++DEBUG=0
++DIAG_LIST=""
++while [[ $# -gt 0 ]]; do
++    case $1 in
++        --full)
++            FULL_CLEAN=1
++            NO_CLEAN=0
++            SKIP_DEPS=0
++            shift
++            ;;
++        --clean-kicad)
++            NO_CLEAN=0
++            shift
++            ;;
++        --build-deps)
++            SKIP_DEPS=0
++            shift
++            ;;
++        --debug)
++            DEBUG=1
++            shift
++            ;;
++        --release)
++            DEBUG_BUILD=0
++            export DEBUG_BUILD
++            shift
++            ;;
++        --diag=*)
++            DIAG_LIST="${1#--diag=}"
++            shift
++            ;;
++        --diag)
++            DIAG_LIST="$2"
++            shift 2
++            ;;
++        -j)
++            export JOBS="$2"
++            shift 2
++            ;;
++        -j*)
++            export JOBS="${1#-j}"
++            shift
++            ;;
++        *)
++            shift
++            ;;
++    esac
++done
++
++# Diagnostic preprocessor defines from --diag=<csv> (gal, coroutine, ctor, all).
++# These gate the KI_DIAG_* macros in kicad/include/kicad_wasm_diag.h. Output goes
++# to stdout ([KICAD_OUT] logs), never errors. Off by default.
++DIAG_DEFINES=""
++if [ -n "${DIAG_LIST}" ]; then
++    IFS=',' read -ra _diag_cats <<< "${DIAG_LIST}"
++    for _cat in "${_diag_cats[@]}"; do
++        case "${_cat}" in
++            gal)       DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_GAL=1" ;;
++            coroutine) DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_COROUTINE=1" ;;
++            ctor)      DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_CTOR=1" ;;
++            all)       DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_GAL=1 -DKICAD_DIAG_COROUTINE=1 -DKICAD_DIAG_CTOR=1" ;;
++            "")        ;;
++            *)         log_warn "Unknown --diag category: '${_cat}' (valid: gal, coroutine, ctor, all)" ;;
++        esac
++    done
++    log_info "Diagnostic logging enabled:${DIAG_DEFINES}"
++fi
++
++log_info "Building app: ${APP_NAME}"
++log_info "Using ${JOBS} parallel jobs"
++
++# Step 1: Clean build directories
++if [ $FULL_CLEAN -eq 1 ]; then
++    log_info "Full clean: removing all stamps and build directories..."
++    rm -rf "${STAMPS_DIR}"/*
++    rm -rf "${BUILD_ROOT}/deps"/*
++    rm -rf "${BUILD_ROOT}/wxwidgets-universal"
++    rm -rf "${BUILD_ROOT}/stubs"
++    rm -rf "${KICAD_BUILD}"
++    rm -rf "${SYSROOT}"/*
++elif [ $NO_CLEAN -eq 0 ]; then
++    log_info "Cleaning KiCad ${APP_NAME} build directory..."
++    rm -rf "${KICAD_BUILD}" "${KICAD_STAMP}"
++else
++    log_info "Incremental build (use --clean-kicad or --full to clean)"
++fi
++
++# Step 2: Build dependencies
++# Note: --with-occ for OpenCASCADE, but NOT ngspice since KICAD_SPICE=OFF
++if [ $SKIP_DEPS -eq 0 ]; then
++    log_info "Building dependencies..."
++    "${SCRIPT_DIR}/../deps/build-all-deps.sh" --with-occ
++else
++    log_info "Skipping dependencies (use --build-deps or --full to build)"
++fi
++
++# Note: We don't check the KiCad stamp here for incremental builds.
++# CMake handles dependency tracking - it will detect changed source files
++# and only recompile what's needed. The stamp is created at the end for
++# scripts that want to know if KiCad was ever built successfully.
++
++# Step 4: Build wxWidgets (incremental - only recompiles changed files)
++log_info "Building wxWidgets..."
++"${SCRIPT_DIR}/../build-wxuniversal-wasm.sh" --no-clean
++
++log_info "Building KiCad ${APP_NAME} ${KICAD_VERSION} for WASM..."
++
++# Step 5: Set build type
++# Use environment DEBUG_BUILD if set, otherwise check local --debug flag
++# -fexceptions is required because wxWidgets is built with exceptions enabled
++# -matomics -mbulk-memory are required for shared memory (pthreads)
++# NOTE: We use -O1 for debug builds because -O0 produces WASM with too many
++# locals for V8/Chrome to compile (error: "local count too large").
++# -O1 keeps debug info but optimizes enough to stay under V8's limits.
++if [ "${DEBUG_BUILD:-0}" = "1" ] || [ $DEBUG -eq 1 ]; then
++    BUILD_TYPE="Debug"
++    EXTRA_FLAGS="-g -O1 -fexceptions -matomics -mbulk-memory"
++    # -gseparate-dwarf puts debug info in a separate .debug.wasm file
++    # This keeps the main WASM small (~200MB) while preserving full debug info
++    # DevTools loads the debug file on-demand when debugging
++    LINKER_DEBUG_FLAGS="-O1 -g -gseparate-dwarf -fexceptions"
++    log_info "Building KiCad in DEBUG mode (separate DWARF for smaller main binary)"
++else
++    BUILD_TYPE="Release"
++    EXTRA_FLAGS="-O2 -fexceptions -matomics -mbulk-memory"
++    # -O0 at link time skips wasm-opt (which can OOM on large WASM files)
++    # Compilation is still -O2 for optimized code, but we skip post-link wasm-opt
++    LINKER_DEBUG_FLAGS="-O0 -fexceptions"
++    log_info "Building KiCad in RELEASE mode (skipping wasm-opt due to memory limits)"
++fi
++
++# Step 6: Create build directory
++mkdir -p "${KICAD_BUILD}"
++cd "${KICAD_BUILD}"
++
++# Step 6.1: Build stub libraries for missing symbols
++# Generic stubs (libgit2, curl, nng) are shared across apps and built in BUILD_ROOT/stubs.
++# App-specific stubs (e.g. pcbnew_scripting_stub) build into the same directory but
++# are only linked in when the corresponding source exists.
++STUBS_DIR="${PROJECT_ROOT}/wasm/stubs"
++STUBS_BUILD="${BUILD_ROOT}/stubs"
++mkdir -p "${STUBS_BUILD}"
++
++log_info "Building stub libraries..."
++# Compile libgit2 stub
++emcc -c "${STUBS_DIR}/libgit2_stub.c" -o "${STUBS_BUILD}/libgit2_stub.o"
++emar rcs "${STUBS_BUILD}/libgit2_stub.a" "${STUBS_BUILD}/libgit2_stub.o"
++
++# Compile curl stub
++emcc -c "${STUBS_DIR}/curl_stub.c" -o "${STUBS_BUILD}/curl_stub.o"
++emar rcs "${STUBS_BUILD}/libcurl_stub.a" "${STUBS_BUILD}/curl_stub.o"
++
++# Note: GLU tesselator is now implemented in wasm/stubs/glu_wasm_impl.cpp
++# It's compiled as part of the GAL library (requires KiCad headers)
++
++# Compile NNG stub (IPC API requires NNG but sockets don't work in WASM)
++emcc -c -I"${STUBS_DIR}" "${STUBS_DIR}/nng_stub.c" -o "${STUBS_BUILD}/nng_stub.o"
++emar rcs "${STUBS_BUILD}/libnng_stub.a" "${STUBS_BUILD}/nng_stub.o"
++
++# wx flags for any C++ stubs that include wx headers
++WX_CXXFLAGS=$("${WX_BUILD}/wx-config" --cxxflags 2>/dev/null || echo "-I${WX_BUILD}/lib/wx/include/emscripten-unicode-static-3.2 -I${PROJECT_ROOT}/wxwidgets/include")
++
++# App-specific stubs:
++# - pcbnew: pcbnew_scripting_stub.cpp (action-plugin scripting placeholders)
++# - eeschema: eeschema_frame_stub.cpp (placeholder; grows as linker dictates)
++APP_STUB_LINK=""
++APP_SCRIPTING_STUB_SRC="${STUBS_DIR}/${APP_NAME}_scripting_stub.cpp"
++if [ -f "${APP_SCRIPTING_STUB_SRC}" ]; then
++    log_info "Building app scripting stub: ${APP_NAME}_scripting_stub.cpp"
++    em++ -c ${WX_CXXFLAGS} "${APP_SCRIPTING_STUB_SRC}" -o "${STUBS_BUILD}/${APP_NAME}_scripting_stub.o"
++    emar rcs "${STUBS_BUILD}/lib${APP_NAME}_scripting_stub.a" "${STUBS_BUILD}/${APP_NAME}_scripting_stub.o"
++    APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${APP_NAME}_scripting_stub.a"
++fi
++
++APP_FRAME_STUB_SRC="${STUBS_DIR}/${APP_NAME}_frame_stub.cpp"
++if [ -f "${APP_FRAME_STUB_SRC}" ] && [ -s "${APP_FRAME_STUB_SRC}" ]; then
++    log_info "Building app frame stub: ${APP_NAME}_frame_stub.cpp"
++    em++ -c ${WX_CXXFLAGS} "${APP_FRAME_STUB_SRC}" -o "${STUBS_BUILD}/${APP_NAME}_frame_stub.o"
++    emar rcs "${STUBS_BUILD}/lib${APP_NAME}_frame_stub.a" "${STUBS_BUILD}/${APP_NAME}_frame_stub.o"
++    APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${APP_NAME}_frame_stub.a"
++fi
++
++log_info "Stub libraries built"
++
++# Step 6.2: Replace Emscripten's wasm-opt with stub to bypass asyncify transformation
++# This allows Emscripten to generate JS with Asyncify runtime, but we run the real
++# wasm-opt --asyncify on the host where more RAM is available (needs 50GB+ for KiCad)
++if [ -z "${EMSDK}" ]; then
++    log_error "EMSDK environment variable is not set."
++    exit 1
++fi
++EMSDK_WASM_OPT="${EMSDK}/upstream/bin/wasm-opt"
++if [ -f "${EMSDK_WASM_OPT}" ] && [ ! -f "${EMSDK_WASM_OPT}.real" ]; then
++    log_info "Backing up real wasm-opt..."
++    mv "${EMSDK_WASM_OPT}" "${EMSDK_WASM_OPT}.real"
++fi
++# Always copy the latest stub (in case it was updated)
++cp "${STUBS_DIR}/wasm-opt-stub.sh" "${EMSDK_WASM_OPT}"
++chmod +x "${EMSDK_WASM_OPT}"
++log_info "wasm-opt stub installed (asyncify will run on host)"
++
++# Step 6.3: Replace wasm-emscripten-finalize with stub (same pattern as wasm-opt)
++# This tool also OOMs on large WASM with debug symbols, so we run it on the host
++EMSDK_FINALIZE="${EMSDK}/upstream/bin/wasm-emscripten-finalize"
++if [ -f "${EMSDK_FINALIZE}" ] && [ ! -f "${EMSDK_FINALIZE}.real" ]; then
++    log_info "Backing up real wasm-emscripten-finalize..."
++    mv "${EMSDK_FINALIZE}" "${EMSDK_FINALIZE}.real"
++fi
++# Always copy the latest stub (in case it was updated)
++cp "${STUBS_DIR}/wasm-emscripten-finalize-stub.sh" "${EMSDK_FINALIZE}"
++chmod +x "${EMSDK_FINALIZE}"
++log_info "wasm-emscripten-finalize stub installed (finalize will run on host)"
++
++# Step 6.5: Verify WASM support is in KiCad fork
++# The kicad submodule should already have WASM port detection and kiplatform support
++KICAD_CMAKE="${KICAD_DIR}/CMakeLists.txt"
++if ! grep -q "msw|qt|gtk|osx|wasm" "${KICAD_CMAKE}"; then
++    log_error "KiCad fork is missing WASM port detection support."
++    log_error "Please ensure the kicad submodule has WASM modifications."
++    exit 1
++fi
++KIPLATFORM_CMAKE="${KICAD_DIR}/libs/kiplatform/CMakeLists.txt"
++if ! grep -q "KICAD_WX_PORT STREQUAL wasm" "${KIPLATFORM_CMAKE}"; then
++    log_error "KiCad fork is missing kiplatform WASM support."
++    log_error "Please ensure the kicad submodule has WASM modifications."
++    exit 1
++fi
++log_info "KiCad WASM support verified"
++
++# Embind object — built after CMake configure runs (so config.h exists). The
++# linker line below references "${STUBS_BUILD}/${APP_NAME}_embind.o" so we
++# create an empty placeholder when the source is missing, to keep the link
++# line stable across apps.
++EMBIND_OBJ="${STUBS_BUILD}/${APP_NAME}_embind.o"
++EMBIND_SRC="${PROJECT_ROOT}/wasm/bindings/${APP_NAME}_embind.cpp"
++
++# Step 7: Configure KiCad with CMake
++# We use CMAKE_MODULE_PATH to inject our compatibility layer
++log_info "Configuring KiCad with CMake..."
++
++# Use ccache if available (CMAKE_*_COMPILER_LAUNCHER is the proper CMake way)
++CCACHE_OPTS=""
++if command -v ccache &> /dev/null; then
++    CCACHE_OPTS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
++    log_info "Using ccache for compilation"
++fi
++
++emcmake cmake "${KICAD_DIR}" \
++    ${CCACHE_OPTS} \
++    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
++    -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
++    -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \
++    -DSYSROOT="${SYSROOT}" \
++    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
++    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1${DIAG_DEFINES} -I${SYSROOT}/include -I${STUBS_DIR} -include ${STUBS_DIR}/char_traits_uint16_workaround.h" \
++    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
++    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a${APP_STUB_LINK} ${STUBS_BUILD}/libnng_stub.a ${EMBIND_OBJ}" \
++    -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
++    -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
++    \
++    -DKICAD_BUILD_QA_TESTS=OFF \
++    -DKICAD_SPICE=OFF \
++    -DKICAD_USE_EGL=OFF \
++    -DKICAD_USE_BUNDLED_GLEW=ON \
++    -DKICAD_BUILD_3D_VIEWER_WASM=OFF \
++    -DKICAD_IPC_API=ON \
++    -DKICAD_USE_PCH=ON \
++    \
++    -DZSTD_ROOT="${SYSROOT}" \
++    -DZSTD_INCLUDE_DIR="${SYSROOT}/include" \
++    -DZSTD_LIBRARY="${SYSROOT}/lib/libzstd.a" \
++    -DGLM_INCLUDE_DIR="${SYSROOT}/include" \
++    -DGLM_VERSION="0.9.9.8" \
++    -DBOOST_ROOT="${SYSROOT}" \
++    -DBoost_INCLUDE_DIR="${SYSROOT}/include" \
++    -DBoost_LIBRARY_DIR="${SYSROOT}/lib" \
++    -DBoost_NO_SYSTEM_PATHS=ON \
++    -DBoost_NO_BOOST_CMAKE=ON \
++    -DFREETYPE_INCLUDE_DIR_ft2build="${SYSROOT}/include/freetype2" \
++    -DFREETYPE_INCLUDE_DIR_freetype2="${SYSROOT}/include/freetype2" \
++    -DFREETYPE_LIBRARY="${SYSROOT}/lib/libfreetype.a" \
++    -DHarfBuzz_INCLUDE_DIR="${SYSROOT}/include/harfbuzz" \
++    -DHarfBuzz_LIBRARY="${SYSROOT}/lib/libharfbuzz.a" \
++    -DOCC_INCLUDE_DIR="${SYSROOT}/include/opencascade" \
++    -DOCC_LIBRARY_DIR="${SYSROOT}/lib" \
++    -DProtobuf_INCLUDE_DIR="${SYSROOT}/include" \
++    -DProtobuf_LIBRARY="${SYSROOT}/lib/libprotobuf.a" \
++    -DProtobuf_LITE_LIBRARY="${SYSROOT}/lib/libprotobuf-lite.a" \
++    -DProtobuf_PROTOC_EXECUTABLE="${SYSROOT}/bin/protoc" \
++    -DODBC_CONFIG:STRING="stub-for-wasm" \
++    -DODBCLIB:STRING="" \
++    -DODBC_CFLAGS:STRING="" \
++    -DODBC_LINK_FLAGS:STRING="" \
++    -DODBC_LIBRARIES:STRING="" \
++    \
++    -DBUILD_GITHUB_PLUGIN=OFF \
++    -DKICAD_PCM=OFF \
++    \
++    -DHAVE_STRCASECMP=1 \
++    -DHAVE_STRNCASECMP=1
++
++# Step 7.1: Compile Embind bindings (after CMake so config.h exists)
++# Exposes KiCad objects to JavaScript for future Pyodide integration.
++# When no app-specific source exists, build an empty object so the linker line
++# referencing ${APP_NAME}_embind.o doesn't break.
++if [ -f "${EMBIND_SRC}" ]; then
++    log_info "Compiling Embind bindings (${APP_NAME})..."
++    # Use the same includes and flags that KiCad uses
++    KICAD_INCLUDES="-I${KICAD_BUILD} -I${KICAD_DIR}/include -I${KICAD_DIR}/${APP_NAME} -I${KICAD_DIR}/common"
++    KICAD_INCLUDES+=" -I${KICAD_DIR}/libs/core/include -I${KICAD_DIR}/libs/kimath/include -I${KICAD_DIR}/libs/kiplatform/include"
++    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/clipper2/Clipper2Lib/include"
++    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nlohmann_json"
++    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/dynamic_bitset"
++    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nanodbc"
++    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/picosha2"
++    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty"
++    KICAD_INCLUDES+=" -I${SYSROOT}/include"
++    # KiCad requires C++20 for concepts
++    em++ -std=c++20 -c ${EXTRA_FLAGS} ${WX_CXXFLAGS} ${KICAD_INCLUDES} "${EMBIND_SRC}" -o "${EMBIND_OBJ}"
++else
++    log_info "No embind source for ${APP_NAME} (expected at ${EMBIND_SRC}); using empty placeholder"
++    EMPTY_C="${STUBS_BUILD}/${APP_NAME}_embind_empty.c"
++    : > "${EMPTY_C}"
++    emcc -c "${EMPTY_C}" -o "${EMBIND_OBJ}"
++fi
++
++# Step 8: Build the app target
++log_info "Building ${APP_NAME}..."
++emmake make -j${JOBS} "${APP_NAME}"
++
++# Step 8.1: Build bitmap resources (images.tar.gz)
++# This creates the icon archive that KiCad loads at runtime
++log_info "Building bitmap resources..."
++emmake make bitmap_archive_build
++
++# Step 9: Create stamp file
++create_stamp "${KICAD_STAMP}"
++log_info "KiCad ${APP_NAME} build complete!"
++log_info "Output: ${KICAD_BUILD}/${APP_NAME}/${APP_NAME}.js"
+diff --git a/scripts/kicad/build-pcbnew.sh b/scripts/kicad/build-pcbnew.sh
+index fc1044f..4487c97 100755
+--- a/scripts/kicad/build-pcbnew.sh
++++ b/scripts/kicad/build-pcbnew.sh
+@@ -1,349 +1,7 @@
+ #!/bin/bash
+-# Build KiCad PCBnew for WebAssembly
+-# This builds the PCB editor as a standalone WASM application
+-#
+-# Usage:
+-#   ./scripts/kicad/build-pcbnew.sh [options]
+-#
+-# Options:
+-#   --full        Full clean rebuild (dependencies + KiCad)
+-#   --clean-kicad Clean only KiCad build directory (not deps)
+-#   --build-deps  Build dependencies (default: skip)
+-#   --debug       Build with debug symbols (default)
+-#   --release     Build optimized without debug symbols
+-#   -j N          Parallel compilation jobs (default: 1)
+-#
+-# Defaults (optimized for development):
+-#   - Incremental build (no clean)
+-#   - Skip dependencies
+-#   - ccache enabled for faster rebuilds
+-#
+-# Incremental Build System:
+-#   - wxWidgets: configure runs once, make handles file-level dependencies
+-#   - KiCad: CMake tracks dependencies, only recompiles changed files
+-#   - ccache: Caches compiled objects for faster rebuilds
++# Build KiCad PCBnew for WebAssembly.
++# Thin wrapper around build-kicad-target.sh — see that script for options.
+ 
+ set -e
+-
+ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+-source "${SCRIPT_DIR}/../common/env.sh"
+-source "${SCRIPT_DIR}/../common/versions.sh"
+-source "${SCRIPT_DIR}/../common/functions.sh"
+-
+-KICAD_DIR="${PROJECT_ROOT}/kicad"
+-KICAD_BUILD="${BUILD_ROOT}/kicad-pcbnew"
+-KICAD_STAMP="${BUILD_ROOT}/stamps/kicad-pcbnew.stamp"
+-WASM_LAYER="${PROJECT_ROOT}/wasm"
+-WX_BUILD="${BUILD_ROOT}/wxwidgets-universal"
+-
+-# Parse arguments - incremental build by default (optimized for development)
+-NO_CLEAN=1
+-FULL_CLEAN=0
+-SKIP_DEPS=1
+-DEBUG=0
+-DIAG_LIST=""
+-while [[ $# -gt 0 ]]; do
+-    case $1 in
+-        --full)
+-            FULL_CLEAN=1
+-            NO_CLEAN=0
+-            SKIP_DEPS=0
+-            shift
+-            ;;
+-        --clean-kicad)
+-            NO_CLEAN=0
+-            shift
+-            ;;
+-        --build-deps)
+-            SKIP_DEPS=0
+-            shift
+-            ;;
+-        --debug)
+-            DEBUG=1
+-            shift
+-            ;;
+-        --release)
+-            DEBUG_BUILD=0
+-            export DEBUG_BUILD
+-            shift
+-            ;;
+-        --diag=*)
+-            DIAG_LIST="${1#--diag=}"
+-            shift
+-            ;;
+-        --diag)
+-            DIAG_LIST="$2"
+-            shift 2
+-            ;;
+-        -j)
+-            export JOBS="$2"
+-            shift 2
+-            ;;
+-        -j*)
+-            export JOBS="${1#-j}"
+-            shift
+-            ;;
+-        *)
+-            shift
+-            ;;
+-    esac
+-done
+-
+-# Diagnostic preprocessor defines from --diag=<csv> (gal, coroutine, ctor, all).
+-# These gate the KI_DIAG_* macros in kicad/include/kicad_wasm_diag.h. Output goes
+-# to stdout ([KICAD_OUT] logs), never errors. Off by default.
+-DIAG_DEFINES=""
+-if [ -n "${DIAG_LIST}" ]; then
+-    IFS=',' read -ra _diag_cats <<< "${DIAG_LIST}"
+-    for _cat in "${_diag_cats[@]}"; do
+-        case "${_cat}" in
+-            gal)       DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_GAL=1" ;;
+-            coroutine) DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_COROUTINE=1" ;;
+-            ctor)      DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_CTOR=1" ;;
+-            all)       DIAG_DEFINES="${DIAG_DEFINES} -DKICAD_DIAG_GAL=1 -DKICAD_DIAG_COROUTINE=1 -DKICAD_DIAG_CTOR=1" ;;
+-            "")        ;;
+-            *)         log_warn "Unknown --diag category: '${_cat}' (valid: gal, coroutine, ctor, all)" ;;
+-        esac
+-    done
+-    log_info "Diagnostic logging enabled:${DIAG_DEFINES}"
+-fi
+-
+-log_info "Using ${JOBS} parallel jobs"
+-
+-# Step 1: Clean build directories
+-if [ $FULL_CLEAN -eq 1 ]; then
+-    log_info "Full clean: removing all stamps and build directories..."
+-    rm -rf "${STAMPS_DIR}"/*
+-    rm -rf "${BUILD_ROOT}/deps"/*
+-    rm -rf "${BUILD_ROOT}/wxwidgets-universal"
+-    rm -rf "${BUILD_ROOT}/stubs"
+-    rm -rf "${KICAD_BUILD}"
+-    rm -rf "${SYSROOT}"/*
+-elif [ $NO_CLEAN -eq 0 ]; then
+-    log_info "Cleaning KiCad PCBnew build directory..."
+-    rm -rf "${KICAD_BUILD}" "${KICAD_STAMP}"
+-else
+-    log_info "Incremental build (use --clean-kicad or --full to clean)"
+-fi
+-
+-# Step 2: Build dependencies
+-# Note: --with-occ for OpenCASCADE, but NOT ngspice since KICAD_SPICE=OFF
+-if [ $SKIP_DEPS -eq 0 ]; then
+-    log_info "Building dependencies..."
+-    "${SCRIPT_DIR}/../deps/build-all-deps.sh" --with-occ
+-else
+-    log_info "Skipping dependencies (use --build-deps or --full to build)"
+-fi
+-
+-# Note: We don't check the KiCad stamp here for incremental builds.
+-# CMake handles dependency tracking - it will detect changed source files
+-# and only recompile what's needed. The stamp is created at the end for
+-# scripts that want to know if KiCad was ever built successfully.
+-
+-# Step 4: Build wxWidgets (incremental - only recompiles changed files)
+-# The wxWidgets build script handles:
+-# - Skipping configure if already configured
+-# - make handles per-file dependency tracking
+-# - ccache handles compilation caching
+-log_info "Building wxWidgets..."
+-"${SCRIPT_DIR}/../build-wxuniversal-wasm.sh" --no-clean
+-
+-log_info "Building KiCad PCBnew ${KICAD_VERSION} for WASM..."
+-
+-# Step 5: Set build type
+-# Use environment DEBUG_BUILD if set, otherwise check local --debug flag
+-# -fexceptions is required because wxWidgets is built with exceptions enabled
+-# -matomics -mbulk-memory are required for shared memory (pthreads)
+-# NOTE: We use -O1 for debug builds because -O0 produces WASM with too many
+-# locals for V8/Chrome to compile (error: "local count too large").
+-# -O1 keeps debug info but optimizes enough to stay under V8's limits.
+-if [ "${DEBUG_BUILD:-0}" = "1" ] || [ $DEBUG -eq 1 ]; then
+-    BUILD_TYPE="Debug"
+-    EXTRA_FLAGS="-g -O1 -fexceptions -matomics -mbulk-memory"
+-    # -gseparate-dwarf puts debug info in a separate .debug.wasm file
+-    # This keeps the main WASM small (~200MB) while preserving full debug info
+-    # DevTools loads the debug file on-demand when debugging
+-    LINKER_DEBUG_FLAGS="-O1 -g -gseparate-dwarf -fexceptions"
+-    log_info "Building KiCad in DEBUG mode (separate DWARF for smaller main binary)"
+-else
+-    BUILD_TYPE="Release"
+-    EXTRA_FLAGS="-O2 -fexceptions -matomics -mbulk-memory"
+-    # -O0 at link time skips wasm-opt (which can OOM on large WASM files)
+-    # Compilation is still -O2 for optimized code, but we skip post-link wasm-opt
+-    LINKER_DEBUG_FLAGS="-O0 -fexceptions"
+-    log_info "Building KiCad in RELEASE mode (skipping wasm-opt due to memory limits)"
+-fi
+-
+-# Step 6: Create build directory
+-mkdir -p "${KICAD_BUILD}"
+-cd "${KICAD_BUILD}"
+-
+-# Step 6.1: Build stub libraries for missing symbols
+-STUBS_DIR="${PROJECT_ROOT}/wasm/stubs"
+-STUBS_BUILD="${BUILD_ROOT}/stubs"
+-mkdir -p "${STUBS_BUILD}"
+-
+-log_info "Building stub libraries..."
+-# Compile libgit2 stub
+-emcc -c "${STUBS_DIR}/libgit2_stub.c" -o "${STUBS_BUILD}/libgit2_stub.o"
+-emar rcs "${STUBS_BUILD}/libgit2_stub.a" "${STUBS_BUILD}/libgit2_stub.o"
+-
+-# Compile curl stub
+-emcc -c "${STUBS_DIR}/curl_stub.c" -o "${STUBS_BUILD}/curl_stub.o"
+-emar rcs "${STUBS_BUILD}/libcurl_stub.a" "${STUBS_BUILD}/curl_stub.o"
+-
+-# Note: GLU tesselator is now implemented in wasm/stubs/glu_wasm_impl.cpp
+-# It's compiled as part of the GAL library (requires KiCad headers)
+-
+-# Compile PCBnew scripting stub (requires wxWidgets headers)
+-WX_CXXFLAGS=$("${WX_BUILD}/wx-config" --cxxflags 2>/dev/null || echo "-I${WX_BUILD}/lib/wx/include/emscripten-unicode-static-3.2 -I${PROJECT_ROOT}/wxwidgets/include")
+-em++ -c ${WX_CXXFLAGS} "${STUBS_DIR}/pcbnew_scripting_stub.cpp" -o "${STUBS_BUILD}/pcbnew_scripting_stub.o"
+-emar rcs "${STUBS_BUILD}/libpcbnew_scripting_stub.a" "${STUBS_BUILD}/pcbnew_scripting_stub.o"
+-
+-# Compile NNG stub (IPC API requires NNG but sockets don't work in WASM)
+-emcc -c -I"${STUBS_DIR}" "${STUBS_DIR}/nng_stub.c" -o "${STUBS_BUILD}/nng_stub.o"
+-emar rcs "${STUBS_BUILD}/libnng_stub.a" "${STUBS_BUILD}/nng_stub.o"
+-
+-log_info "Stub libraries built"
+-
+-# Step 6.2: Replace Emscripten's wasm-opt with stub to bypass asyncify transformation
+-# This allows Emscripten to generate JS with Asyncify runtime, but we run the real
+-# wasm-opt --asyncify on the host where more RAM is available (needs 50GB+ for KiCad)
+-if [ -z "${EMSDK}" ]; then
+-    log_error "EMSDK environment variable is not set."
+-    exit 1
+-fi
+-EMSDK_WASM_OPT="${EMSDK}/upstream/bin/wasm-opt"
+-if [ -f "${EMSDK_WASM_OPT}" ] && [ ! -f "${EMSDK_WASM_OPT}.real" ]; then
+-    log_info "Backing up real wasm-opt..."
+-    mv "${EMSDK_WASM_OPT}" "${EMSDK_WASM_OPT}.real"
+-fi
+-# Always copy the latest stub (in case it was updated)
+-cp "${STUBS_DIR}/wasm-opt-stub.sh" "${EMSDK_WASM_OPT}"
+-chmod +x "${EMSDK_WASM_OPT}"
+-log_info "wasm-opt stub installed (asyncify will run on host)"
+-
+-# Step 6.3: Replace wasm-emscripten-finalize with stub (same pattern as wasm-opt)
+-# This tool also OOMs on large WASM with debug symbols, so we run it on the host
+-EMSDK_FINALIZE="${EMSDK}/upstream/bin/wasm-emscripten-finalize"
+-if [ -f "${EMSDK_FINALIZE}" ] && [ ! -f "${EMSDK_FINALIZE}.real" ]; then
+-    log_info "Backing up real wasm-emscripten-finalize..."
+-    mv "${EMSDK_FINALIZE}" "${EMSDK_FINALIZE}.real"
+-fi
+-# Always copy the latest stub (in case it was updated)
+-cp "${STUBS_DIR}/wasm-emscripten-finalize-stub.sh" "${EMSDK_FINALIZE}"
+-chmod +x "${EMSDK_FINALIZE}"
+-log_info "wasm-emscripten-finalize stub installed (finalize will run on host)"
+-
+-# Step 6.5: Verify WASM support is in KiCad fork
+-# The kicad submodule should already have WASM port detection and kiplatform support
+-KICAD_CMAKE="${KICAD_DIR}/CMakeLists.txt"
+-if ! grep -q "msw|qt|gtk|osx|wasm" "${KICAD_CMAKE}"; then
+-    log_error "KiCad fork is missing WASM port detection support."
+-    log_error "Please ensure the kicad submodule has WASM modifications."
+-    exit 1
+-fi
+-KIPLATFORM_CMAKE="${KICAD_DIR}/libs/kiplatform/CMakeLists.txt"
+-if ! grep -q "KICAD_WX_PORT STREQUAL wasm" "${KIPLATFORM_CMAKE}"; then
+-    log_error "KiCad fork is missing kiplatform WASM support."
+-    log_error "Please ensure the kicad submodule has WASM modifications."
+-    exit 1
+-fi
+-log_info "KiCad WASM support verified"
+-
+-# Step 7: Configure KiCad with CMake
+-# We use CMAKE_MODULE_PATH to inject our compatibility layer
+-log_info "Configuring KiCad with CMake..."
+-
+-# Use ccache if available (CMAKE_*_COMPILER_LAUNCHER is the proper CMake way)
+-CCACHE_OPTS=""
+-if command -v ccache &> /dev/null; then
+-    CCACHE_OPTS="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+-    log_info "Using ccache for compilation"
+-fi
+-
+-emcmake cmake "${KICAD_DIR}" \
+-    ${CCACHE_OPTS} \
+-    -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+-    -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
+-    -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \
+-    -DSYSROOT="${SYSROOT}" \
+-    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+-    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1${DIAG_DEFINES} -I${SYSROOT}/include -I${STUBS_DIR}" \
+-    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
+-    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a ${STUBS_BUILD}/libpcbnew_scripting_stub.a ${STUBS_BUILD}/libnng_stub.a ${STUBS_BUILD}/pcbnew_embind.o" \
+-    -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
+-    -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
+-    \
+-    -DKICAD_BUILD_QA_TESTS=OFF \
+-    -DKICAD_SPICE=OFF \
+-    -DKICAD_USE_EGL=OFF \
+-    -DKICAD_USE_BUNDLED_GLEW=ON \
+-    -DKICAD_BUILD_3D_VIEWER_WASM=OFF \
+-    -DKICAD_IPC_API=ON \
+-    \
+-    -DZSTD_ROOT="${SYSROOT}" \
+-    -DZSTD_INCLUDE_DIR="${SYSROOT}/include" \
+-    -DZSTD_LIBRARY="${SYSROOT}/lib/libzstd.a" \
+-    -DGLM_INCLUDE_DIR="${SYSROOT}/include" \
+-    -DGLM_VERSION="0.9.9.8" \
+-    -DBOOST_ROOT="${SYSROOT}" \
+-    -DBoost_INCLUDE_DIR="${SYSROOT}/include" \
+-    -DBoost_LIBRARY_DIR="${SYSROOT}/lib" \
+-    -DBoost_NO_SYSTEM_PATHS=ON \
+-    -DBoost_NO_BOOST_CMAKE=ON \
+-    -DFREETYPE_INCLUDE_DIR_ft2build="${SYSROOT}/include/freetype2" \
+-    -DFREETYPE_INCLUDE_DIR_freetype2="${SYSROOT}/include/freetype2" \
+-    -DFREETYPE_LIBRARY="${SYSROOT}/lib/libfreetype.a" \
+-    -DHarfBuzz_INCLUDE_DIR="${SYSROOT}/include/harfbuzz" \
+-    -DHarfBuzz_LIBRARY="${SYSROOT}/lib/libharfbuzz.a" \
+-    -DOCC_INCLUDE_DIR="${SYSROOT}/include/opencascade" \
+-    -DOCC_LIBRARY_DIR="${SYSROOT}/lib" \
+-    -DProtobuf_INCLUDE_DIR="${SYSROOT}/include" \
+-    -DProtobuf_LIBRARY="${SYSROOT}/lib/libprotobuf.a" \
+-    -DProtobuf_LITE_LIBRARY="${SYSROOT}/lib/libprotobuf-lite.a" \
+-    -DProtobuf_PROTOC_EXECUTABLE="${SYSROOT}/bin/protoc" \
+-    -DODBC_CONFIG:STRING="stub-for-wasm" \
+-    -DODBCLIB:STRING="" \
+-    -DODBC_CFLAGS:STRING="" \
+-    -DODBC_LINK_FLAGS:STRING="" \
+-    -DODBC_LIBRARIES:STRING="" \
+-    \
+-    -DBUILD_GITHUB_PLUGIN=OFF \
+-    -DKICAD_PCM=OFF \
+-    \
+-    -DHAVE_STRCASECMP=1 \
+-    -DHAVE_STRNCASECMP=1
+-
+-# Step 7.1: Compile Embind bindings (after CMake so config.h exists)
+-# Exposes KiCad objects to JavaScript for future Pyodide integration
+-EMBIND_SRC="${PROJECT_ROOT}/wasm/bindings/pcbnew_embind.cpp"
+-if [ -f "$EMBIND_SRC" ]; then
+-    log_info "Compiling Embind bindings..."
+-    # Use the same includes and flags that KiCad uses
+-    KICAD_INCLUDES="-I${KICAD_BUILD} -I${KICAD_DIR}/include -I${KICAD_DIR}/pcbnew -I${KICAD_DIR}/common"
+-    KICAD_INCLUDES+=" -I${KICAD_DIR}/libs/core/include -I${KICAD_DIR}/libs/kimath/include -I${KICAD_DIR}/libs/kiplatform/include"
+-    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/clipper2/Clipper2Lib/include"
+-    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nlohmann_json"
+-    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/dynamic_bitset"
+-    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nanodbc"
+-    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/picosha2"
+-    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty"
+-    KICAD_INCLUDES+=" -I${SYSROOT}/include"
+-    # KiCad requires C++20 for concepts
+-    em++ -std=c++20 -c ${EXTRA_FLAGS} ${WX_CXXFLAGS} ${KICAD_INCLUDES} "$EMBIND_SRC" -o "${STUBS_BUILD}/pcbnew_embind.o"
+-fi
+-
+-# Step 8: Build pcbnew target
+-log_info "Building pcbnew..."
+-emmake make -j${JOBS} pcbnew
+-
+-# Step 8.1: Build bitmap resources (images.tar.gz)
+-# This creates the icon archive that KiCad loads at runtime
+-log_info "Building bitmap resources..."
+-emmake make bitmap_archive_build
+-
+-# Step 9: Create stamp file
+-create_stamp "${KICAD_STAMP}"
+-log_info "KiCad PCBnew build complete!"
+-log_info "Output: ${KICAD_BUILD}/pcbnew/pcbnew.js"
++exec "${SCRIPT_DIR}/build-kicad-target.sh" pcbnew "$@"
+diff --git a/tests/apps/kicad/eeschema.html b/tests/apps/kicad/eeschema.html
+new file mode 100644
+index 0000000..399878d
+--- /dev/null
++++ b/tests/apps/kicad/eeschema.html
+@@ -0,0 +1,199 @@
++<!DOCTYPE html>
++<html lang="en-us">
++<head>
++  <meta charset="utf-8">
++  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
++  <title>KiCad Eeschema WASM</title>
++  <style>
++    .emscripten { padding-right: 0; margin-left: auto; margin-right: auto; display: block; }
++    div.emscripten { text-align: center; }
++    /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
++    canvas.emscripten { border: 0px none; }
++
++    .window {
++      position: absolute;
++      pointer-events: none;
++      z-index: 10;
++      background-color: black;
++      overflow: hidden;
++      width: 0;
++      height: 0;
++    }
++
++    .window-canvas {
++      position: absolute;
++      top: 0;
++      left: 0;
++      pointer-events: none;
++    }
++
++    #status {
++      position: fixed;
++      bottom: 10px;
++      left: 10px;
++      color: #fff;
++      font-family: monospace;
++      z-index: 1000;
++      background: rgba(0,0,0,0.7);
++      padding: 10px;
++      border-radius: 5px;
++    }
++
++    #progress {
++      width: 300px;
++      height: 20px;
++      background: #333;
++      margin-top: 5px;
++    }
++
++    #progress-bar {
++      height: 100%;
++      background: #4CAF50;
++      width: 0%;
++      transition: width 0.3s;
++    }
++  </style>
++</head>
++<body style="margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a1a2e;">
++  <div id="main-window" style="width: 100vw; height: 100vh; position: absolute; top: 0; left: 0;"></div>
++
++  <div id="status">
++    <div id="status-text">Initializing...</div>
++    <div id="progress"><div id="progress-bar"></div></div>
++  </div>
++
++  <div id="window-container"></div>
++
++  <script>
++    var mainWindow = document.getElementById('main-window');
++    var statusText = document.getElementById('status-text');
++    var progressBar = document.getElementById('progress-bar');
++
++    var showError = function(msg) {
++      console.error('[KICAD_ERROR] ' + msg);
++      statusText.textContent = 'Error: ' + msg;
++      statusText.style.color = 'red';
++    };
++
++    var createCanvas = function() {
++      var canvas = document.createElement('canvas');
++      canvas.id = 'canvas';
++      canvas.style.display = 'none';
++      // wx.js owns the backing-store size via setWindowRect(); keep the HTML
++      // shell responsible only for the CSS size.
++      var width = window.innerWidth;
++      var height = window.innerHeight;
++      canvas.style.width = width + 'px';
++      canvas.style.height = height + 'px';
++      canvas.oncontextmenu = function() { event.preventDefault(); };
++      canvas.addEventListener("webglcontextlost", function(e) {
++        showError('WebGL context lost. You will need to reload the page.');
++        e.preventDefault();
++      }, false);
++
++      mainWindow.appendChild(canvas);
++      Module.canvas = canvas;
++
++      console.log('[KICAD] preRun complete, canvas created: ' + width + 'x' + height);
++    };
++
++    var onRuntimeInitialized = function() {
++      console.log('[KICAD] Runtime initialized');
++      var canvas = Module.canvas;
++      canvas.style.display = 'block';
++      document.getElementById('status').style.display = 'none';
++    };
++
++    // Pre-fetched resource data (fetched before eeschema.js loads)
++    var resourceData = null;
++
++    // Start fetching images.tar.gz immediately (runs in parallel with WASM loading)
++    fetch('images.tar.gz')
++      .then(function(response) {
++        if (!response.ok) throw new Error('HTTP ' + response.status);
++        return response.arrayBuffer();
++      })
++      .then(function(buffer) {
++        resourceData = new Uint8Array(buffer);
++        console.log('[KICAD] Prefetched images.tar.gz (' + resourceData.length + ' bytes)');
++      })
++      .catch(function(err) {
++        console.warn('[KICAD] Could not prefetch images.tar.gz:', err.message);
++      });
++
++    // Write pre-fetched resources to FS (called in preRun after FS is available)
++    var writeResources = function() {
++      // Create directory structure matching KiCad's compiled-in KICAD_DATA path
++      // This path is baked in during CMake configuration
++      var resourcePath = '/workspace/build-wasm/sysroot/share/kicad/resources';
++      FS.mkdirTree(resourcePath);
++
++      // Write pre-fetched data if available
++      if (resourceData) {
++        FS.writeFile(resourcePath + '/images.tar.gz', resourceData);
++        console.log('[KICAD] Wrote images.tar.gz to ' + resourcePath);
++      } else {
++        console.warn('[KICAD] images.tar.gz not ready yet (WASM loaded faster than fetch)');
++      }
++    };
++
++    var Module = {
++      thisProgram: '/usr/bin/eeschema',  // Fake absolute path for argv[0] (KiCad DEBUG check)
++
++      preRun: [createCanvas, writeResources],
++      postRun: [],
++
++      print: function(text) {
++        if (arguments.length > 1)
++          text = Array.prototype.slice.call(arguments).join(' ');
++        console.log('[KICAD_OUT] ' + text);
++      },
++
++      printErr: function(text) {
++        if (arguments.length > 1)
++          text = Array.prototype.slice.call(arguments).join(' ');
++        console.error('[KICAD_ERR] ' + text);
++      },
++
++      setStatus: function(text) {
++        console.log('[KICAD_STATUS] ' + text);
++        statusText.textContent = text;
++
++        // Parse progress from status text
++        var match = text.match(/(\d+)\/(\d+)/);
++        if (match) {
++          var pct = (parseInt(match[1]) / parseInt(match[2])) * 100;
++          progressBar.style.width = pct + '%';
++        }
++      },
++
++      totalDependencies: 0,
++      monitorRunDependencies: function(left) {
++        this.totalDependencies = Math.max(this.totalDependencies, left);
++        Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
++      },
++
++      onRuntimeInitialized: onRuntimeInitialized,
++
++      // Required for locating .wasm and .worker.js files
++      locateFile: function(path) {
++        return path;
++      }
++    };
++
++    Module.setStatus('Downloading...');
++
++    window.onerror = function(msg, url, line) {
++      showError(msg + ' at ' + url + ':' + line);
++      Module.setStatus = function(text) {
++        if (text) Module.printErr('[post-exception status] ' + text);
++      };
++      return false;
++    };
++  </script>
++
++  <!-- wxWidgets WASM glue code (defines getConfigEntryLength, etc.) -->
++  <script src="wx.js"></script>
++  <script async src="eeschema.js"></script>
++</body>
++</html>
+diff --git a/tests/kicad/eeschema.spec.ts b/tests/kicad/eeschema.spec.ts
+new file mode 100644
+index 0000000..61474f3
+--- /dev/null
++++ b/tests/kicad/eeschema.spec.ts
+@@ -0,0 +1,492 @@
++import type { Page } from '@playwright/test';
++import { test, expect } from './fixtures';
++import { clickByLabel, clickByTooltip, findByTooltip } from '../e2e/utils/element-tracker';
++
++/**
++ * Eeschema (schematic editor) WASM E2E Tests
++ *
++ * Mirrors pcbnew.spec.ts. The wxWidgets setup wizard is shared infrastructure,
++ * so the wizard flow is identical. Editor-specific checks (Appearance pane,
++ * exact toolbar count, reference-image diff, etc.) are intentionally omitted
++ * here until the eeschema UI surface is empirically pinned down.
++ */
++
++type CanvasMetrics = {
++    dpr: number;
++    mainCanvas: null | {
++        width: number;
++        height: number;
++        rectWidth: number;
++        rectHeight: number;
++    };
++    glCanvas: null | {
++        id: string;
++        width: number;
++        height: number;
++        rectWidth: number;
++        rectHeight: number;
++        viewport: number[] | null;
++    };
++};
++
++type RegistryMetrics = {
++    elementStats: null | {
++        total: number;
++        byType: Record<string, number>;
++    };
++    renderedStats: null | {
++        total: number;
++        byType: Record<string, number>;
++    };
++    toolbars: Array<{
++        id: string;
++        typeName: string;
++        screenX: number;
++        screenY: number;
++        width: number;
++        height: number;
++        label: string;
++        name: string;
++    }>;
++};
++
++type DiffRegion = {
++    x: number;
++    y: number;
++    width: number;
++    height: number;
++};
++
++type ScreenshotDifference = {
++    actualWidth: number;
++    actualHeight: number;
++    diffPixels: number;
++    diffRatio: number;
++    meanChannelDiff: number;
++};
++
++async function compareScreenshots(
++    page: Page,
++    beforePng: Buffer,
++    afterPng: Buffer,
++    region: DiffRegion
++): Promise<ScreenshotDifference> {
++    return page.evaluate(async ({ beforeBase64, afterBase64, crop }) => {
++        const loadImage = async (base64: string): Promise<HTMLImageElement> => {
++            const image = new Image();
++            image.src = `data:image/png;base64,${base64}`;
++            await image.decode();
++            return image;
++        };
++
++        const [before, after] = await Promise.all([
++            loadImage(beforeBase64),
++            loadImage(afterBase64),
++        ]);
++
++        if (before.width !== after.width || before.height !== after.height) {
++            return {
++                actualWidth: after.width,
++                actualHeight: after.height,
++                diffPixels: Number.POSITIVE_INFINITY,
++                diffRatio: Number.POSITIVE_INFINITY,
++                meanChannelDiff: Number.POSITIVE_INFINITY,
++            };
++        }
++
++        const canvas = document.createElement('canvas');
++        canvas.width = crop.width;
++        canvas.height = crop.height;
++
++        const context = canvas.getContext('2d', { willReadFrequently: true });
++
++        if (!context) {
++            throw new Error('2D canvas context unavailable for screenshot comparison');
++        }
++
++        context.drawImage(before, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
++        const beforeData = context.getImageData(0, 0, canvas.width, canvas.height).data;
++
++        context.clearRect(0, 0, canvas.width, canvas.height);
++        context.drawImage(after, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
++        const afterData = context.getImageData(0, 0, canvas.width, canvas.height).data;
++
++        let diffPixels = 0;
++        let totalChannelDiff = 0;
++
++        for (let i = 0; i < beforeData.length; i += 4) {
++            const dr = Math.abs(beforeData[i] - afterData[i]);
++            const dg = Math.abs(beforeData[i + 1] - afterData[i + 1]);
++            const db = Math.abs(beforeData[i + 2] - afterData[i + 2]);
++            const da = Math.abs(beforeData[i + 3] - afterData[i + 3]);
++            const maxDiff = Math.max(dr, dg, db, da);
++
++            totalChannelDiff += dr + dg + db + da;
++
++            if (maxDiff > 16) {
++                diffPixels += 1;
++            }
++        }
++
++        return {
++            actualWidth: after.width,
++            actualHeight: after.height,
++            diffPixels,
++            diffRatio: diffPixels / (canvas.width * canvas.height),
++            meanChannelDiff: totalChannelDiff / beforeData.length,
++        };
++    }, {
++        beforeBase64: beforePng.toString('base64'),
++        afterBase64: afterPng.toString('base64'),
++        crop: region,
++    });
++}
++
++async function getCanvasMetrics(page: Page): Promise<CanvasMetrics> {
++    return page.evaluate(() => {
++        const dpr = window.devicePixelRatio || 1;
++        const mainCanvas = document.querySelector('#canvas') as HTMLCanvasElement | null;
++        const glCanvas =
++            Array.from(document.querySelectorAll('[id^="glcanvas-"]'))
++                .map((canvas) => canvas as HTMLCanvasElement)
++                .find((canvas) => {
++                    const rect = canvas.getBoundingClientRect();
++                    const style = window.getComputedStyle(canvas);
++                    return style.display !== 'none' && rect.width > 0 && rect.height > 0;
++                }) ??
++            document.querySelector('[id^="glcanvas-"]') as HTMLCanvasElement | null;
++
++        const mainRect = mainCanvas?.getBoundingClientRect();
++        const glRect = glCanvas?.getBoundingClientRect();
++        const gl =
++            glCanvas?.getContext('webgl2') ||
++            glCanvas?.getContext('webgl');
++        const viewport = gl ? Array.from(gl.getParameter(gl.VIEWPORT) as Int32Array | number[]) : null;
++
++        return {
++            dpr,
++            mainCanvas: mainCanvas && mainRect ? {
++                width: mainCanvas.width,
++                height: mainCanvas.height,
++                rectWidth: mainRect.width,
++                rectHeight: mainRect.height,
++            } : null,
++            glCanvas: glCanvas && glRect ? {
++                id: glCanvas.id,
++                width: glCanvas.width,
++                height: glCanvas.height,
++                rectWidth: glRect.width,
++                rectHeight: glRect.height,
++                viewport,
++            } : null,
++        };
++    });
++}
++
++async function getRegistryMetrics(page: Page): Promise<RegistryMetrics> {
++    return page.evaluate(() => {
++        const registry = window.wxElementRegistry;
++
++        if (!registry) {
++            return {
++                elementStats: null,
++                renderedStats: null,
++                toolbars: [],
++            };
++        }
++
++        const allElements = registry.findAll({ visible: true });
++        const toolbars = allElements
++            .filter((element) => /ToolBar/.test(element.typeName))
++            .map((element) => ({
++                id: element.id,
++                typeName: element.typeName,
++                screenX: element.screenX,
++                screenY: element.screenY,
++                width: element.width,
++                height: element.height,
++                label: element.label,
++                name: element.name,
++            }));
++
++        return {
++            elementStats: registry.getStats(),
++            renderedStats: registry.getRenderedStats ? registry.getRenderedStats() : null,
++            toolbars,
++        };
++    });
++}
++
++async function completeWizard(page: Page): Promise<void> {
++    await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
++    await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
++    await page.waitForTimeout(2000);
++
++    await page.screenshot({ path: 'test-results/eeschema-wizard-00-initial.png', scale: 'device' });
++
++    for (let i = 1; i <= 10; i++) {
++        let clicked = await clickByLabel(page, 'Next >');
++
++        if (!clicked) {
++            clicked = await clickByLabel(page, 'Finish');
++
++            if (clicked) {
++                await page.waitForTimeout(500);
++                await page.screenshot({
++                    path: `test-results/eeschema-wizard-${String(i).padStart(2, '0')}-finish.png`,
++                    scale: 'device'
++                });
++            }
++
++            break;
++        }
++
++        await page.waitForTimeout(500);
++        await page.screenshot({
++            path: `test-results/eeschema-wizard-${String(i).padStart(2, '0')}.png`,
++            scale: 'device'
++        });
++    }
++
++    await page.waitForTimeout(2000);
++}
++
++async function hideCursor(page: Page): Promise<void> {
++    await page.evaluate(() => {
++        document.documentElement.style.cursor = 'none';
++        document.body.style.cursor = 'none';
++    });
++}
++
++test.describe('Eeschema WASM', () => {
++    test.beforeEach(async ({ page }) => {
++        await page.goto('/kicad/eeschema.html');
++    });
++
++    test('click through setup wizard to load Eeschema', async ({ page }) => {
++        await completeWizard(page);
++        const metrics = await getCanvasMetrics(page);
++        const registryMetrics = await getRegistryMetrics(page);
++
++        // Headless Firefox runs at dpr=1; pcbnew's stricter `> 1` check assumes a
++        // Retina-aware run. The eeschema MVP just needs to verify dpr is sane.
++        expect(metrics.dpr).toBeGreaterThanOrEqual(1);
++        expect(metrics.mainCanvas).not.toBeNull();
++        expect(metrics.glCanvas).not.toBeNull();
++        expect(registryMetrics.toolbars.length).toBeGreaterThanOrEqual(2);
++
++        if (!metrics.mainCanvas || !metrics.glCanvas) {
++            throw new Error('KiCad canvases not initialized');
++        }
++
++        expect(Math.round(metrics.mainCanvas.rectWidth * metrics.dpr)).toBe(metrics.mainCanvas.width);
++        expect(Math.round(metrics.mainCanvas.rectHeight * metrics.dpr)).toBe(metrics.mainCanvas.height);
++        expect(metrics.glCanvas.rectWidth).toBeGreaterThan(800);
++        expect(metrics.glCanvas.rectHeight).toBeGreaterThan(500);
++        expect(Math.round(metrics.glCanvas.rectWidth * metrics.dpr)).toBe(metrics.glCanvas.width);
++        expect(Math.round(metrics.glCanvas.rectHeight * metrics.dpr)).toBe(metrics.glCanvas.height);
++
++        const viewport = metrics.glCanvas.viewport;
++        expect(viewport).not.toBeNull();
++
++        if (!viewport) {
++            throw new Error('WebGL viewport unavailable');
++        }
++
++        expect(viewport[2]).toBe(metrics.glCanvas.width);
++        expect(viewport[3]).toBe(metrics.glCanvas.height);
++
++        await hideCursor(page);
++
++        // Capture a CSS-scale screenshot for visual review; no reference image
++        // is wired up yet (eeschema's chrome differs enough from pcbnew that
++        // sharing pcbnew's baseline isn't viable). Add a dedicated baseline
++        // here once the layout is finalised.
++        await page.screenshot({
++            path: 'test-results/eeschema-loaded-css.png',
++            scale: 'css'
++        });
++        await page.screenshot({ path: 'test-results/eeschema-loaded.png', scale: 'device' });
++
++        const canvasCount = await page.locator('canvas').count();
++        expect(canvasCount).toBeGreaterThan(0);
++    });
++
++    test('select draw wires and draw on the schematic', async ({ page, testLogger }) => {
++        await completeWizard(page);
++        await hideCursor(page);
++
++        await page.evaluate(() => {
++            const canvases = Array.from(document.querySelectorAll('canvas')).map((canvas) => {
++                const rect = canvas.getBoundingClientRect();
++                const style = window.getComputedStyle(canvas);
++                return {
++                    id: canvas.id,
++                    className: canvas.className,
++                    display: style.display,
++                    visibility: style.visibility,
++                    width: canvas.width,
++                    height: canvas.height,
++                    rectX: rect.x,
++                    rectY: rect.y,
++                    rectWidth: rect.width,
++                    rectHeight: rect.height,
++                    shouldBeVisible: (canvas as HTMLCanvasElement).dataset?.shouldBeVisible ?? null,
++                };
++            });
++
++            console.log(`[TEST] canvas summary ${JSON.stringify(canvases)}`);
++
++            const registry = window.wxElementRegistry;
++            const topLevels = (registry?.findAll?.({}) ?? [])
++                .filter((item) => /Frame|Dialog|Wizard/.test(item.typeName))
++                .slice(0, 20)
++                .map((item) => ({
++                    id: item.id,
++                    typeName: item.typeName,
++                    label: item.label,
++                    name: item.name,
++                    visible: item.visible,
++                    enabled: item.enabled,
++                    screenX: item.screenX,
++                    screenY: item.screenY,
++                    width: item.width,
++                    height: item.height,
++                }));
++            const rendered = registry?.findAllRendered?.({}) ?? [];
++            const byType = rendered.reduce<Record<string, number>>((acc, item) => {
++                acc[item.elementType] = (acc[item.elementType] ?? 0) + 1;
++                return acc;
++            }, {});
++            const tools = rendered
++                .filter((item) => item.elementType === 'tool')
++                .slice(0, 20)
++                .map((item) => ({
++                    id: item.id,
++                    label: item.label,
++                    tooltip: item.tooltip,
++                    checked: item.checked,
++                    enabled: item.enabled,
++                }));
++
++            console.log(`[TEST] top-level summary ${JSON.stringify(topLevels)}`);
++            console.log(`[TEST] rendered summary ${JSON.stringify({ count: rendered.length, byType, tools })}`);
++        });
++
++        await page.waitForFunction(() => {
++            const registry = window.wxElementRegistry;
++            if (!registry?.findAllRendered) {
++                return false;
++            }
++
++            return registry.findAllRendered({ elementType: 'tool' })
++                .some((tool) => tool.tooltip?.includes('Draw Wires'));
++        }, null, { timeout: 15000 });
++
++        const drawWiresTool = await findByTooltip(page, 'Draw Wires', { elementType: 'tool' });
++        expect(drawWiresTool).not.toBeNull();
++
++        if (!drawWiresTool) {
++            throw new Error('Draw Wires tool not found in rendered element registry');
++        }
++
++        // The registry carries checked state via a " [checked]" label suffix
++        // appended by wxAuiToolBar::OnPaint on Emscripten — no schema change.
++        const isToolChecked = (t: { label?: string } | null | undefined) =>
++            (t?.label ?? '').includes('[checked]');
++
++        expect(drawWiresTool.enabled).toBe(true);
++        expect(isToolChecked(drawWiresTool)).toBe(false);
++        const baselineErrorCount = testLogger.errors.length;
++
++        await page.screenshot({
++            path: 'test-results/eeschema-draw-wires-00-before-tool-click.png',
++            scale: 'device'
++        });
++
++        expect(await clickByTooltip(page, 'Draw Wires', { elementType: 'tool' })).toBe(true);
++
++        await expect.poll(async () => {
++            const tool = await findByTooltip(page, 'Draw Wires', { elementType: 'tool' });
++            return isToolChecked(tool);
++        }, {
++            message: 'Draw Wires tool should stay selected after the click',
++            timeout: 5000,
++        }).toBe(true);
++
++        await page.mouse.move(640, 360);
++        await page.waitForTimeout(600);
++
++        const selectedDrawWiresTool = await findByTooltip(page, 'Draw Wires', { elementType: 'tool' });
++        expect(isToolChecked(selectedDrawWiresTool)).toBe(true);
++
++        const afterToolClick = await page.screenshot({
++            path: 'test-results/eeschema-draw-wires-01-after-click.png',
++            scale: 'device'
++        });
++
++        const glCanvasId = await page.evaluate(() => {
++            const glCanvas =
++                Array.from(document.querySelectorAll('[id^="glcanvas-"]'))
++                    .map((canvas) => canvas as HTMLCanvasElement)
++                    .find((canvas) => {
++                        const rect = canvas.getBoundingClientRect();
++                        const style = window.getComputedStyle(canvas);
++                        return style.display !== 'none' && rect.width > 0 && rect.height > 0;
++                    }) ??
++                document.querySelector('[id^="glcanvas-"]') as HTMLCanvasElement | null;
++
++            return glCanvas?.id ?? null;
++        });
++
++        expect(glCanvasId).not.toBeNull();
++
++        if (!glCanvasId) {
++            throw new Error('Visible GL canvas not found');
++        }
++
++        const glCanvasBox = await page.locator(`#${glCanvasId}`).boundingBox();
++        expect(glCanvasBox).not.toBeNull();
++
++        if (!glCanvasBox) {
++            throw new Error('GL canvas bounding box unavailable');
++        }
++
++        const startPoint = {
++            x: Math.round(glCanvasBox.x + glCanvasBox.width * 0.28),
++            y: Math.round(glCanvasBox.y + glCanvasBox.height * 0.36),
++        };
++        const endPoint = {
++            x: Math.round(glCanvasBox.x + glCanvasBox.width * 0.48),
++            y: Math.round(glCanvasBox.y + glCanvasBox.height * 0.47),
++        };
++
++        await page.mouse.click(startPoint.x, startPoint.y);
++        await page.waitForTimeout(250);
++        await page.mouse.click(endPoint.x, endPoint.y);
++        await page.waitForTimeout(750);
++
++        const afterDrawing = await page.screenshot({
++            path: 'test-results/eeschema-draw-wires-02-after-drawing.png',
++            scale: 'device'
++        });
++
++        const diffRegion: DiffRegion = {
++            x: Math.max(0, Math.min(startPoint.x, endPoint.x) - 24),
++            y: Math.max(0, Math.min(startPoint.y, endPoint.y) - 24),
++            width: Math.abs(endPoint.x - startPoint.x) + 48,
++            height: Math.abs(endPoint.y - startPoint.y) + 48,
++        };
++
++        const drawingDiff = await compareScreenshots(page, afterToolClick, afterDrawing, diffRegion);
++
++        expect(drawingDiff.diffPixels).toBeGreaterThan(120);
++        expect(drawingDiff.diffRatio).toBeGreaterThan(0.01);
++        expect(drawingDiff.meanChannelDiff).toBeGreaterThan(1);
++
++        const realErrors = testLogger.errors
++            .slice(baselineErrorCount)
++            .filter((error) => !error.includes('favicon') && !error.includes('uncaught exception: unwind'));
++        expect(realErrors).toEqual([]);
++    });
++});
+diff --git a/tests/package.json b/tests/package.json
+index 28601d0..a58c04d 100644
+--- a/tests/package.json
++++ b/tests/package.json
+@@ -13,6 +13,12 @@
+     "test:kicad:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed",
+     "test:kicad": "npm run test:kicad:firefox",
+     "test:kicad:headed": "npm run test:kicad:chrome",
++    "test:pcbnew:firefox": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=firefox kicad/pcbnew.spec.ts",
++    "test:pcbnew:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed kicad/pcbnew.spec.ts",
++    "test:eeschema:firefox": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=firefox kicad/eeschema.spec.ts",
++    "test:eeschema:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed kicad/eeschema.spec.ts",
++    "test:eeschema": "npm run test:eeschema:firefox",
++    "test:eeschema:headed": "npm run test:eeschema:chrome",
+     "test:coroutine:firefox": "playwright test --config=playwright-coroutine.config.ts --project=firefox",
+     "test:coroutine:chrome": "playwright test --config=playwright-coroutine.config.ts --project=chromium --headed"
+   },
+diff --git a/tests/scripts/setup-kicad-wasm.sh b/tests/scripts/setup-kicad-wasm.sh
+index 1ffaba2..ab95af0 100755
+--- a/tests/scripts/setup-kicad-wasm.sh
++++ b/tests/scripts/setup-kicad-wasm.sh
+@@ -3,6 +3,8 @@
+ #
+ # Priority: Use local output/ directory (populated by docker/build.sh)
+ # Fallback: Copy from Docker volume directly
++#
++# Copies whichever editors are present (pcbnew, eeschema).
+ 
+ set -e
+ 
+@@ -13,32 +15,46 @@ OUTPUT_DIR="$PROJECT_ROOT/output"
+ 
+ mkdir -p "$KICAD_TEST"
+ 
+-# Check if output directory has the build files
+-if [ -f "$OUTPUT_DIR/pcbnew.js" ] && [ -f "$OUTPUT_DIR/pcbnew.wasm" ]; then
+-    echo "Copying KiCad WASM files from output directory..."
+-    cp "$OUTPUT_DIR/pcbnew.js" "$KICAD_TEST/"
+-    cp "$OUTPUT_DIR/pcbnew.wasm" "$KICAD_TEST/"
+-    # Source map for debug symbols (optional)
+-    cp "$OUTPUT_DIR/pcbnew.wasm.map" "$KICAD_TEST/" 2>/dev/null || true
+-    # Worker file for pthreads (optional)
+-    cp "$OUTPUT_DIR/pcbnew.worker.js" "$KICAD_TEST/" 2>/dev/null || true
+-    # Bitmap resources for KiCad icons (optional)
+-    cp "$OUTPUT_DIR/images.tar.gz" "$KICAD_TEST/" 2>/dev/null || true
+-else
+-    echo "Output directory not found, copying from Docker build..."
+-    docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
+-      kicad-wasm-builder:/workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.js "$KICAD_TEST/"
+-    docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
+-      kicad-wasm-builder:/workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.wasm "$KICAD_TEST/"
+-    # Source map for debug symbols (optional)
+-    docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
+-      kicad-wasm-builder:/workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.wasm.map "$KICAD_TEST/" 2>/dev/null || true
+-    # Worker file for pthreads (optional)
+-    docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
+-      kicad-wasm-builder:/workspace/build-wasm/kicad-pcbnew/pcbnew/pcbnew.worker.js "$KICAD_TEST/" 2>/dev/null || true
+-    # Bitmap resources for KiCad icons (optional)
+-    docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
+-      kicad-wasm-builder:/workspace/build-wasm/kicad-pcbnew/resources/images.tar.gz "$KICAD_TEST/" 2>/dev/null || true
++# Copy one editor's artifacts (js, wasm, optional debug/map/worker). Returns 0
++# if the editor was present, 1 if neither output/ nor the docker volume has it.
++copy_app() {
++    local app="$1"
++
++    if [ -f "$OUTPUT_DIR/${app}.js" ] && [ -f "$OUTPUT_DIR/${app}.wasm" ]; then
++        echo "Copying ${app} WASM files from output directory..."
++        cp "$OUTPUT_DIR/${app}.js" "$KICAD_TEST/"
++        cp "$OUTPUT_DIR/${app}.wasm" "$KICAD_TEST/"
++        cp "$OUTPUT_DIR/${app}.wasm.map" "$KICAD_TEST/" 2>/dev/null || true
++        cp "$OUTPUT_DIR/${app}.worker.js" "$KICAD_TEST/" 2>/dev/null || true
++        cp "$OUTPUT_DIR/images.tar.gz" "$KICAD_TEST/" 2>/dev/null || true
++        return 0
++    fi
++
++    echo "Output ${app} not found locally, trying Docker volume..."
++    if docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
++         kicad-wasm-builder:/workspace/build-wasm/kicad-${app}/${app}/${app}.js "$KICAD_TEST/" 2>/dev/null \
++       && docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
++         kicad-wasm-builder:/workspace/build-wasm/kicad-${app}/${app}/${app}.wasm "$KICAD_TEST/" 2>/dev/null; then
++        docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
++            kicad-wasm-builder:/workspace/build-wasm/kicad-${app}/${app}/${app}.wasm.map "$KICAD_TEST/" 2>/dev/null || true
++        docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
++            kicad-wasm-builder:/workspace/build-wasm/kicad-${app}/${app}/${app}.worker.js "$KICAD_TEST/" 2>/dev/null || true
++        docker compose -f "$PROJECT_ROOT/docker/docker-compose.yml" cp \
++            kicad-wasm-builder:/workspace/build-wasm/kicad-${app}/resources/images.tar.gz "$KICAD_TEST/" 2>/dev/null || true
++        return 0
++    fi
++
++    echo "  (no ${app} artifacts found — skipping)"
++    return 1
++}
++
++found_any=0
++copy_app pcbnew && found_any=1
++copy_app eeschema && found_any=1
++
++if [ "$found_any" -eq 0 ]; then
++    echo "Error: neither pcbnew nor eeschema artifacts found in output/ or docker volume" >&2
++    exit 1
+ fi
+ 
+ # wxWidgets WASM JavaScript glue code (defines JS functions called from WASM)
+diff --git a/wasm/cmake/Findngspice.cmake b/wasm/cmake/Findngspice.cmake
+index 49c0123..a275d1a 100644
+--- a/wasm/cmake/Findngspice.cmake
++++ b/wasm/cmake/Findngspice.cmake
+@@ -3,14 +3,16 @@
+ # We provide stub values so CMake configuration succeeds
+ 
+ if(EMSCRIPTEN OR NOT KICAD_SPICE)
+-    message(STATUS "ngspice not available for WASM build (SPICE disabled)")
++    message(STATUS "ngspice not available for WASM build (using header stub)")
+ 
+     # Set variables to indicate ngspice is "found" but disabled
+     set(ngspice_FOUND TRUE)
+     set(NGSPICE_FOUND TRUE)
+ 
+-    # Provide empty values
+-    set(NGSPICE_INCLUDE_DIR "")
++    # Point at our header-only stub at wasm/stubs/ngspice/sharedspice.h so
++    # eeschema's sim/ngspice.{h,cpp} can compile. The library link line stays
++    # empty — the simulator frame is never instantiated in WASM.
++    set(NGSPICE_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../stubs")
+     set(NGSPICE_LIBRARY "")
+     set(NGSPICE_LIBRARIES "")
+ 
+diff --git a/wasm/stubs/char_traits_uint16_workaround.h b/wasm/stubs/char_traits_uint16_workaround.h
+new file mode 100644
+index 0000000..2483938
+--- /dev/null
++++ b/wasm/stubs/char_traits_uint16_workaround.h
+@@ -0,0 +1,111 @@
++/*
++ * libc++ workaround: provide std::char_traits<unsigned short> for WASM builds.
++ *
++ * KiCad's third-party Altium parser uses
++ *     typedef std::basic_string<uint16_t> utf16string;
++ * (kicad/thirdparty/compoundfilereader/compoundfilereader.h:264).
++ *
++ * Modern libc++ (the version bundled with current Emscripten) pulls
++ * <__format/parser_std_format_spec.h> via <vector>, which triggers implicit
++ * instantiation of char_traits<unsigned short>. The standard only specializes
++ * char_traits for char / wchar_t / char8_t / char16_t / char32_t, so the
++ * uint16_t (== unsigned short) usage now fails to compile.
++ *
++ * We force-include this header into every translation unit via the build
++ * script's CMAKE_CXX_FLAGS so the specialization is visible before any code
++ * that needs it. Specializing std::char_traits for non-standard types is
++ * technically undefined per the standard but is the established workaround
++ * historically supported by libc++/libstdc++.
++ */
++
++#ifndef KICAD_WASM_CHAR_TRAITS_UINT16_WORKAROUND_H
++#define KICAD_WASM_CHAR_TRAITS_UINT16_WORKAROUND_H
++
++#ifdef __cplusplus
++#ifdef __EMSCRIPTEN__
++
++#include <cstddef>
++#include <cstring>
++#include <cwchar>
++#include <ios>
++
++namespace std {
++
++template<>
++struct char_traits<unsigned short>
++{
++    using char_type  = unsigned short;
++    using int_type   = int;
++    using off_type   = streamoff;
++    using pos_type   = fpos<mbstate_t>;
++    using state_type = mbstate_t;
++
++    static constexpr void assign( char_type& a, const char_type& b ) noexcept { a = b; }
++    static constexpr bool eq( char_type a, char_type b ) noexcept { return a == b; }
++    static constexpr bool lt( char_type a, char_type b ) noexcept { return a < b; }
++
++    static int compare( const char_type* s1, const char_type* s2, size_t n )
++    {
++        for( size_t i = 0; i < n; ++i )
++        {
++            if( s1[i] < s2[i] ) return -1;
++            if( s1[i] > s2[i] ) return 1;
++        }
++        return 0;
++    }
++
++    static size_t length( const char_type* s )
++    {
++        size_t i = 0;
++        while( s[i] != 0 ) ++i;
++        return i;
++    }
++
++    static const char_type* find( const char_type* s, size_t n, const char_type& a )
++    {
++        for( size_t i = 0; i < n; ++i )
++            if( s[i] == a ) return s + i;
++        return nullptr;
++    }
++
++    static char_type* move( char_type* s1, const char_type* s2, size_t n )
++    {
++        return static_cast<char_type*>( memmove( s1, s2, n * sizeof( char_type ) ) );
++    }
++
++    static char_type* copy( char_type* s1, const char_type* s2, size_t n )
++    {
++        return static_cast<char_type*>( memcpy( s1, s2, n * sizeof( char_type ) ) );
++    }
++
++    static char_type* assign( char_type* s, size_t n, char_type a )
++    {
++        for( size_t i = 0; i < n; ++i ) s[i] = a;
++        return s;
++    }
++
++    static constexpr int_type not_eof( int_type c ) noexcept
++    {
++        return c == eof() ? static_cast<int_type>( 0 ) : c;
++    }
++
++    static constexpr char_type to_char_type( int_type c ) noexcept
++    {
++        return static_cast<char_type>( c );
++    }
++
++    static constexpr int_type to_int_type( char_type c ) noexcept
++    {
++        return static_cast<int_type>( c );
++    }
++
++    static constexpr bool eq_int_type( int_type a, int_type b ) noexcept { return a == b; }
++    static constexpr int_type eof() noexcept { return static_cast<int_type>( -1 ); }
++};
++
++} // namespace std
++
++#endif // __EMSCRIPTEN__
++#endif // __cplusplus
++
++#endif // KICAD_WASM_CHAR_TRAITS_UINT16_WORKAROUND_H
+diff --git a/wasm/stubs/eeschema_frame_stub.cpp b/wasm/stubs/eeschema_frame_stub.cpp
+new file mode 100644
+index 0000000..1683f99
+--- /dev/null
++++ b/wasm/stubs/eeschema_frame_stub.cpp
+@@ -0,0 +1,15 @@
++/*
++ * Eeschema frame stubs for KiCad WASM build.
++ *
++ * Mirror of pcb_frame_stub.cpp. Populate as linker errors surface during the
++ * first eeschema-wasm build. Methods that need to be stubbed are typically:
++ *   - Scripting helpers (LoadSchematic / SaveSchematic) when KICAD_SCRIPTING=OFF
++ *   - Action-plugin glue (no plugins in WASM)
++ *   - Filesystem-watcher hooks when wxUSE_FSWATCHER=0
++ *
++ * Leave this file empty until the linker complains; the build script skips
++ * compiling it when it has zero bytes.
++ */
++
++#ifdef __EMSCRIPTEN__
++#endif
+diff --git a/wasm/stubs/eeschema_ngspice_data_stubs.cpp b/wasm/stubs/eeschema_ngspice_data_stubs.cpp
+new file mode 100644
+index 0000000..a8e5c7c
+--- /dev/null
++++ b/wasm/stubs/eeschema_ngspice_data_stubs.cpp
+@@ -0,0 +1,28 @@
++/*
++ * Empty replacements for the four largest ngspice model data initializers.
++ *
++ * Each of sim_model_ngspice_data_{bsim4,b3soi,b4soi,hsim}.cpp defines a
++ * single function (addBSIM4/addB3SOI/addB4SOI/addHSIM) that pushes hundreds
++ * of entries into NGSPICE_MODEL_INFO_MAP::modelInfos[...]. Once compiled to
++ * WASM these functions exceed the V8/SpiderMonkey limit on locals per
++ * function ("too many locals"), so Firefox refuses to instantiate the
++ * resulting module.
++ *
++ * The simulator UI is never reachable in the WASM build (FRAME_SIMULATOR
++ * fails to instantiate via the ngspice header stub at
++ * wasm/stubs/ngspice/sharedspice.h), so leaving these tables empty is safe.
++ *
++ * eeschema/CMakeLists.txt excludes the original four sources from
++ * EESCHEMA_SIM_SRCS for EMSCRIPTEN and adds this file instead.
++ */
++
++#ifdef __EMSCRIPTEN__
++
++#include <sim/sim_model_ngspice.h>
++
++void NGSPICE_MODEL_INFO_MAP::addBSIM4() {}
++void NGSPICE_MODEL_INFO_MAP::addB3SOI() {}
++void NGSPICE_MODEL_INFO_MAP::addB4SOI() {}
++void NGSPICE_MODEL_INFO_MAP::addHSIM()  {}
++
++#endif // __EMSCRIPTEN__
+diff --git a/wasm/stubs/ngspice/sharedspice.h b/wasm/stubs/ngspice/sharedspice.h
+new file mode 100644
+index 0000000..5002383
+--- /dev/null
++++ b/wasm/stubs/ngspice/sharedspice.h
+@@ -0,0 +1,55 @@
++/*
++ * Minimal stub of ngspice's sharedspice.h for KiCad WASM builds.
++ *
++ * Only the type names referenced by kicad/eeschema/sim/ngspice.{h,cpp} need
++ * to exist. The eeschema sim layer compiles but the simulator frame is never
++ * instantiated in WASM (FRAME_SIMULATOR's try/catch in IFACE::CreateKiWindow
++ * catches the init failure and returns nullptr).
++ *
++ * We intentionally do NOT define NGSPICE_PACKAGE_VERSION so that ngspice.h's
++ * fallback `typedef bool NG_BOOL;` (line 46) provides the boolean type.
++ */
++
++#ifndef KICAD_WASM_NGSPICE_SHAREDSPICE_STUB_H
++#define KICAD_WASM_NGSPICE_SHAREDSPICE_STUB_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++typedef struct ngcomplex {
++    double cx_real;
++    double cx_imag;
++} ngcomplex_t;
++
++struct vector_info {
++    char*        v_name;
++    int          v_type;
++    short        v_flags;
++    double*      v_realdata;
++    ngcomplex_t* v_compdata;
++    int          v_length;
++};
++
++typedef struct vector_info* pvector_info;
++
++/* Opaque payload types for callbacks we never wire up (SendData/SendInitData). */
++typedef struct vecvaluesall* pvecvaluesall;
++typedef struct vecinfoall*   pvecinfoall;
++
++/*
++ * Function types (not pointers). ngspice.h references them as `SendChar*` etc.,
++ * so the trailing star in the typedef site makes the pointer.
++ */
++typedef int (SendChar)(char*, int, void*);
++typedef int (SendStat)(char*, int, void*);
++typedef int (ControlledExit)(int, bool, bool, int, void*);
++typedef int (SendData)(pvecvaluesall, int, int, void*);
++typedef int (SendInitData)(pvecinfoall, int, void*);
++typedef int (BGThreadRunning)(bool, int, void*);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* KICAD_WASM_NGSPICE_SHAREDSPICE_STUB_H */

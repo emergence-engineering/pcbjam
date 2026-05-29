@@ -3,14 +3,16 @@
 # We provide stub values so CMake configuration succeeds
 
 if(EMSCRIPTEN OR NOT KICAD_SPICE)
-    message(STATUS "ngspice not available for WASM build (SPICE disabled)")
+    message(STATUS "ngspice not available for WASM build (using header stub)")
 
     # Set variables to indicate ngspice is "found" but disabled
     set(ngspice_FOUND TRUE)
     set(NGSPICE_FOUND TRUE)
 
-    # Provide empty values
-    set(NGSPICE_INCLUDE_DIR "")
+    # Point at our header-only stub at wasm/stubs/ngspice/sharedspice.h so
+    # eeschema's sim/ngspice.{h,cpp} can compile. The library link line stays
+    # empty — the simulator frame is never instantiated in WASM.
+    set(NGSPICE_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/../stubs")
     set(NGSPICE_LIBRARY "")
     set(NGSPICE_LIBRARIES "")
 
