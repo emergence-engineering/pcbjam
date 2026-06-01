@@ -2,7 +2,7 @@
 # Sourced library. Single source of truth for the 3-repo layout.
 # Usage: source "$(dirname "$0")/repos.sh"
 
-ROOT_DIR="/Users/torcsi/dev/kicad-wasm"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 REPOS=(root kicad wxwidgets)
 

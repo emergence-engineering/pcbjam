@@ -13,7 +13,7 @@ Optional positional message string. If omitted, ask the user for a message via `
 
 ## Steps
 
-1. **Status snapshot.** Run `bash /Users/torcsi/dev/kicad-wasm/scripts/git-workflow/repo-status.sh` to see which repos have changes.
+1. **Status snapshot.** Run `bash scripts/git-workflow/repo-status.sh` to see which repos have changes.
 
 2. **Show per-repo diff overview to the user first** (before any commit). For each repo, run:
    - `git -C <path> status --short`

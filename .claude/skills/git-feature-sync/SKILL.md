@@ -19,9 +19,9 @@ So after the user resolves a conflict manually + runs `git rebase --continue` in
 
 ## Steps
 
-1. **Fetch every origin FIRST.** Run `bash /Users/torcsi/dev/kicad-wasm/scripts/git-workflow/for-each-repo.sh fetch origin`. This is mandatory on every sync and must happen *before* the status snapshot. `repo-status.sh` derives `up_to_date_with_main` from the local `origin/<main>` ref **without fetching** — so without this step the work plan (step 4) can wrongly mark a repo "up to date" and skip a needed rebase when its origin has moved. (This is the bug that let a stale sync report "all 3 up to date" while `origin/wasm-port` had actually advanced.)
+1. **Fetch every origin FIRST.** Run `bash scripts/git-workflow/for-each-repo.sh fetch origin`. This is mandatory on every sync and must happen *before* the status snapshot. `repo-status.sh` derives `up_to_date_with_main` from the local `origin/<main>` ref **without fetching** — so without this step the work plan (step 4) can wrongly mark a repo "up to date" and skip a needed rebase when its origin has moved. (This is the bug that let a stale sync report "all 3 up to date" while `origin/wasm-port` had actually advanced.)
 
-2. **Get status snapshot.** Run `bash /Users/torcsi/dev/kicad-wasm/scripts/git-workflow/repo-status.sh` and parse the per-repo JSON. Because step 1 just fetched, `up_to_date_with_main` now reflects true remote state.
+2. **Get status snapshot.** Run `bash scripts/git-workflow/repo-status.sh` and parse the per-repo JSON. Because step 1 just fetched, `up_to_date_with_main` now reflects true remote state.
 
 3. **Pre-flight checks.**
    - If any repo has `rebase_in_progress: true`, STOP. Tell the user which repo, and that they need to resolve (`git -C <repo> rebase --continue` after `git add`-ing resolved files) or abort (`git -C <repo> rebase --abort`) before sync can proceed.
@@ -56,7 +56,7 @@ When a rebase fails mid-flight in repo X, list the repos in the plan, what's bee
 >
 > **To resolve manually:**
 > ```
-> cd /Users/torcsi/dev/kicad-wasm/kicad
+> cd kicad   # from the project root
 > # edit each conflicted file, resolve <<<<<<< markers
 > git add eeschema/foo.cpp common/bar.cpp
 > git rebase --continue
@@ -64,7 +64,7 @@ When a rebase fails mid-flight in repo X, list the repos in the plan, what's bee
 >
 > Then re-run `/git-feature-sync` — kicad will be detected as already rebased and it will proceed with wxwidgets.
 >
-> To roll back kicad only: `cd /Users/torcsi/dev/kicad-wasm/kicad && git rebase --abort`. Note: already-rebased repos (root in this case) **stay rebased** — they are not rolled back.
+> To roll back kicad only: `git -C kicad rebase --abort`. Note: already-rebased repos (root in this case) **stay rebased** — they are not rolled back.
 
 Get the conflicted-files list from `git -C <path> diff --name-only --diff-filter=U`.
 

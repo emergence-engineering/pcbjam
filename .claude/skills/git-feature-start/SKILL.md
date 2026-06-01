@@ -20,9 +20,9 @@ If the user invoked the skill without a branch name, ask for one via `AskUserQue
 
 ## Steps
 
-1. **Pre-flight: assert all 3 repos are clean.** Run `bash /Users/torcsi/dev/kicad-wasm/scripts/git-workflow/assert-clean.sh`. If it exits non-zero, STOP and tell the user which repos are dirty and that they need to commit, stash, or discard before starting a new feature.
+1. **Pre-flight: assert all 3 repos are clean.** Run `bash scripts/git-workflow/assert-clean.sh`. If it exits non-zero, STOP and tell the user which repos are dirty and that they need to commit, stash, or discard before starting a new feature.
 
-2. **Pre-flight: check no repo is already on a non-main branch.** Run `bash /Users/torcsi/dev/kicad-wasm/scripts/git-workflow/repo-status.sh` and inspect each line's `branch` field. If any repo's `branch` is not its `main` (or is empty meaning detached HEAD), STOP and tell the user. Suggest: `/git-feature-sync` if they're already mid-feature, or manually checkout the main in that repo first. Do NOT silently switch off in-progress work.
+2. **Pre-flight: check no repo is already on a non-main branch.** Run `bash scripts/git-workflow/repo-status.sh` and inspect each line's `branch` field. If any repo's `branch` is not its `main` (or is empty meaning detached HEAD), STOP and tell the user. Suggest: `/git-feature-sync` if they're already mid-feature, or manually checkout the main in that repo first. Do NOT silently switch off in-progress work.
 
 3. **For each repo** in order [root, kicad, wxwidgets], run these commands. Echo what you're about to do in chat before each repo.
    - `git -C <path> fetch origin`
