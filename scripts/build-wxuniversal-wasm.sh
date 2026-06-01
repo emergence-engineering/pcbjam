@@ -6,6 +6,8 @@ source "$(dirname "$0")/common/logging.sh"
 
 # Source common environment (sets up local emsdk)
 source "$(dirname "$0")/common/env.sh"
+# Build-progress markers (parsed by scripts/build-monitor.sh).
+source "$(dirname "$0")/common/stages.sh"
 # This builds the GUI-enabled wxWidgets needed for KiCad
 #
 # Prerequisites:
@@ -98,6 +100,7 @@ if [ $NEEDS_CONFIGURE -eq 1 ]; then
     # --without-libtiff          Avoid external dependencies
     # --disable-xlocale          Browser environment handles locale
 
+    kw_stage wxwidgets-configure
     echo ""
     echo "=== Configuring ==="
 
@@ -162,6 +165,7 @@ if [ $NEEDS_CONFIGURE -eq 1 ]; then
 fi
 
 # Build wxWidgets
+kw_stage wxwidgets-compile
 echo ""
 echo "=== Building wxWidgets (using ${JOBS} parallel jobs) ==="
 emmake make -j${JOBS}

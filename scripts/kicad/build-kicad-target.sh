@@ -54,6 +54,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../common/env.sh"
 source "${SCRIPT_DIR}/../common/versions.sh"
 source "${SCRIPT_DIR}/../common/functions.sh"
+source "${SCRIPT_DIR}/../common/stages.sh"
 
 KICAD_DIR="${PROJECT_ROOT}/kicad"
 KICAD_BUILD="${BUILD_ROOT}/kicad-${APP_NAME}"
@@ -155,6 +156,7 @@ fi
 # Step 2: Build dependencies
 # Note: --with-occ for OpenCASCADE, but NOT ngspice since KICAD_SPICE=OFF
 if [ $SKIP_DEPS -eq 0 ]; then
+    kw_stage deps
     log_info "Building dependencies..."
     "${SCRIPT_DIR}/../deps/build-all-deps.sh" --with-occ
 else
@@ -167,6 +169,7 @@ fi
 # scripts that want to know if KiCad was ever built successfully.
 
 # Step 4: Build wxWidgets (incremental - only recompiles changed files)
+kw_stage wxwidgets
 log_info "Building wxWidgets..."
 "${SCRIPT_DIR}/../build-wxuniversal-wasm.sh" --no-clean
 
@@ -208,6 +211,7 @@ STUBS_DIR="${PROJECT_ROOT}/wasm/stubs"
 STUBS_BUILD="${BUILD_ROOT}/stubs"
 mkdir -p "${STUBS_BUILD}"
 
+kw_stage kicad-stubs
 log_info "Building stub libraries..."
 # Compile libgit2 stub
 emcc -c "${STUBS_DIR}/libgit2_stub.c" -o "${STUBS_BUILD}/libgit2_stub.o"
@@ -303,6 +307,7 @@ EMBIND_SRC="${PROJECT_ROOT}/wasm/bindings/${APP_NAME}_embind.cpp"
 
 # Step 7: Configure KiCad with CMake
 # We use CMAKE_MODULE_PATH to inject our compatibility layer
+kw_stage kicad-configure
 log_info "Configuring KiCad with CMake..."
 
 # Use ccache if available (CMAKE_*_COMPILER_LAUNCHER is the proper CMake way)
@@ -392,11 +397,13 @@ else
 fi
 
 # Step 8: Build the app target
+kw_stage kicad-compile
 log_info "Building ${APP_NAME} (CMake target: ${KICAD_TARGET})..."
 emmake make -j${JOBS} "${KICAD_TARGET}"
 
 # Step 8.1: Build bitmap resources (images.tar.gz)
 # This creates the icon archive that KiCad loads at runtime
+kw_stage kicad-bitmaps
 log_info "Building bitmap resources..."
 emmake make bitmap_archive_build
 

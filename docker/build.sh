@@ -20,12 +20,29 @@
 #
 # Binaryen is downloaded automatically - no prerequisites needed.
 
+# Auto-launch the live progress dashboard in this terminal (handled by logging.sh,
+# which owns the TTY before it re-execs us with output redirected). Set KICAD_NO_MONITOR=1
+# to disable. MUST be set before sourcing logging.sh — that's where the dashboard is
+# launched, in the pre-re-exec process.
+export KICAD_MONITOR=1
+
 # Redirect all output to a log file (re-execs script with redirection).
 # MUST be sourced before arg parsing — the re-exec relies on the original
 # "$@", so any shifts before this point would strip args from the re-exec.
 source "$(dirname "$0")/../scripts/common/logging.sh"
 
+# Build-progress markers (parsed by scripts/build-monitor.sh).
+source "$(dirname "$0")/../scripts/common/stages.sh"
+
 set -e
+
+# Emit a completion/failure marker no matter how the build ends, so the monitor
+# can stop on a clean "done" or show an aborted state instead of hanging.
+trap '_rc=$?; if [ $_rc -eq 0 ]; then kw_done; else kw_fail $_rc; fi' EXIT
+# On Ctrl-C, mark the build aborted so the final dashboard frame shows failed
+# (not a stale "running" state). The EXIT trap above also fires; the monitor reads
+# the last marker, so the duplicate is harmless.
+trap 'kw_fail 130; exit 130' INT TERM
 
 cd "$(dirname "$0")/.."
 
@@ -79,6 +96,7 @@ docker compose -f docker/docker-compose.yml up -d
 # Use --checksum to only transfer files with different CONTENT, not timestamps.
 # This avoids the timestamp mismatch cycle that caused full rebuilds every time.
 # Transferred files get current container time, so make detects them correctly.
+kw_stage container-sync
 echo "Syncing source code to container..."
 # rsync into the macOS-backed volume intermittently hits transient VirtioFS glitches:
 # temp-file rename failures (exit 23) or vanished-source files (exit 24, harmless).
@@ -121,12 +139,16 @@ kicad_subdir_for() {
 }
 
 # Build one app: compile in container, then run host-side post-processing.
+# Args: <app> [index] [total] — index/total drive the monitor's app counter.
 build_app() {
     local app="$1"
+    local index="${2:-1}"
+    local total="${3:-1}"
     local subdir
     subdir=$(kicad_subdir_for "$app")
+    kw_app "$app" "$index" "$total"
     echo ""
-    echo "=== Building ${app} ==="
+    echo "=== Building ${app} (${index}/${total}) ==="
 
     # Run build inside the container.
     # -e EMSDK=/emsdk: `docker compose exec` bypasses the entrypoint that sources
@@ -137,6 +159,7 @@ build_app() {
 
     # Copy output to host-accessible directory.
     # ${app}.wasm.debug.wasm contains DWARF debug info (when built with -gseparate-dwarf).
+    kw_stage copy-output
     echo "Copying ${app} build output to ./output/..."
     docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
         bash -c "mkdir -p /workspace/output && \
@@ -146,22 +169,25 @@ build_app() {
             cp /workspace/build-wasm/wxwidgets/build/wasm/wx.js /workspace/output/ 2>/dev/null || true"
 
     # Inject dynCall shims (fixes "dynCall_* is not defined" errors in Emscripten 4.x)
+    kw_stage dyncall-shims
     ./scripts/common/inject-dyncall-shims.sh "output/${app}.js"
 
     # Apply wasm-emscripten-finalize on host (skipped in Docker due to memory limits)
+    kw_stage finalize
     ./scripts/common/apply-finalize.sh "output/${app}.wasm" "output/${app}.wasm"
 
     # Apply asyncify transformation on host
+    kw_stage asyncify
     ./scripts/common/apply-asyncify.sh "output/${app}.wasm" "output/${app}.wasm"
 }
 
 if [[ "${APP_NAME}" == "all" ]]; then
-    build_app pcbnew
-    build_app eeschema
-    build_app calculator
-    build_app pl_editor
+    build_app pcbnew 1 4
+    build_app eeschema 2 4
+    build_app calculator 3 4
+    build_app pl_editor 4 4
 else
-    build_app "${APP_NAME}"
+    build_app "${APP_NAME}" 1 1
 fi
 
 echo ""
