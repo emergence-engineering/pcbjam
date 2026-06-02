@@ -23,6 +23,10 @@
     "test:calculator:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed kicad/calculator.spec.ts",
     "test:calculator": "npm run test:calculator:firefox",
     "test:calculator:headed": "npm run test:calculator:chrome",
+    "test:symbol_editor:firefox": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=firefox kicad/symbol_editor.spec.ts",
+    "test:symbol_editor:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed kicad/symbol_editor.spec.ts",
+    "test:symbol_editor": "npm run test:symbol_editor:firefox",
+    "test:symbol_editor:headed": "npm run test:symbol_editor:chrome",
     "test:coroutine:firefox": "playwright test --config=playwright-coroutine.config.ts --project=firefox",
     "test:coroutine:chrome": "playwright test --config=playwright-coroutine.config.ts --project=chromium --headed"
   },

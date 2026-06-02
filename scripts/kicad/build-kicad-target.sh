@@ -31,21 +31,37 @@
 set -e
 
 if [ -z "$1" ]; then
-    echo "Error: missing <app> argument (pcbnew | eeschema | calculator | pl_editor)" >&2
+    echo "Error: missing <app> argument (pcbnew | eeschema | calculator | pl_editor | symbol_editor)" >&2
     exit 1
 fi
 APP_NAME="$1"
 shift
 
+# KICAD_TARGET: the CMake/make target name.
+# KICAD_SUBDIR: the source/build subdirectory the target's artifacts land in.
+# Most apps share all three names; the exceptions:
+#   - calculator:    target+subdir are both pcb_calculator (OUTPUT_NAME=calculator)
+#   - pl_editor:     subdir is pagelayout_editor (upstream source dir name)
+#   - symbol_editor: served by the eeschema kiface, so it builds in eeschema/
 case "$APP_NAME" in
-    pcbnew|eeschema|pl_editor)
+    pcbnew|eeschema)
         KICAD_TARGET="$APP_NAME"
+        KICAD_SUBDIR="$APP_NAME"
+        ;;
+    pl_editor)
+        KICAD_TARGET="pl_editor"
+        KICAD_SUBDIR="pagelayout_editor"
         ;;
     calculator)
         KICAD_TARGET="pcb_calculator"
+        KICAD_SUBDIR="pcb_calculator"
+        ;;
+    symbol_editor)
+        KICAD_TARGET="symbol_editor"
+        KICAD_SUBDIR="eeschema"
         ;;
     *)
-        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor)" >&2
+        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor | symbol_editor)" >&2
         exit 1
         ;;
 esac
@@ -378,7 +394,7 @@ emcmake cmake "${KICAD_DIR}" \
 if [ -f "${EMBIND_SRC}" ]; then
     log_info "Compiling Embind bindings (${APP_NAME})..."
     # Use the same includes and flags that KiCad uses
-    KICAD_INCLUDES="-I${KICAD_BUILD} -I${KICAD_DIR}/include -I${KICAD_DIR}/${KICAD_TARGET} -I${KICAD_DIR}/common"
+    KICAD_INCLUDES="-I${KICAD_BUILD} -I${KICAD_DIR}/include -I${KICAD_DIR}/${KICAD_SUBDIR} -I${KICAD_DIR}/common"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/libs/core/include -I${KICAD_DIR}/libs/kimath/include -I${KICAD_DIR}/libs/kiplatform/include"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/clipper2/Clipper2Lib/include"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nlohmann_json"
@@ -410,4 +426,4 @@ emmake make bitmap_archive_build
 # Step 9: Create stamp file
 create_stamp "${KICAD_STAMP}"
 log_info "KiCad ${APP_NAME} build complete!"
-log_info "Output: ${KICAD_BUILD}/${KICAD_TARGET}/${APP_NAME}.js"
+log_info "Output: ${KICAD_BUILD}/${KICAD_SUBDIR}/${APP_NAME}.js"

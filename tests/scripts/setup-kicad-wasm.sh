@@ -21,9 +21,10 @@ mkdir -p "$KICAD_TEST"
 # source lives under pagelayout_editor/.
 kicad_subdir_for() {
     case "$1" in
-        calculator) echo "pcb_calculator" ;;
-        pl_editor)  echo "pagelayout_editor" ;;
-        *)          echo "$1" ;;
+        calculator)    echo "pcb_calculator" ;;
+        pl_editor)     echo "pagelayout_editor" ;;
+        symbol_editor) echo "eeschema" ;;
+        *)             echo "$1" ;;
     esac
 }
 
@@ -63,13 +64,14 @@ copy_app() {
 }
 
 found_any=0
-copy_app pcbnew     && found_any=1
-copy_app eeschema   && found_any=1
-copy_app calculator && found_any=1
-copy_app pl_editor  && found_any=1
+copy_app pcbnew        && found_any=1
+copy_app eeschema      && found_any=1
+copy_app calculator    && found_any=1
+copy_app pl_editor     && found_any=1
+copy_app symbol_editor && found_any=1
 
 if [ "$found_any" -eq 0 ]; then
-    echo "Error: no pcbnew/eeschema/calculator/pl_editor artifacts found in output/ or docker volume" >&2
+    echo "Error: no pcbnew/eeschema/calculator/pl_editor/symbol_editor artifacts found in output/ or docker volume" >&2
     exit 1
 fi
 

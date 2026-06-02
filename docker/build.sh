@@ -6,10 +6,12 @@
 #   ./docker/build.sh <app> [args...]
 #
 # Apps:
-#   pcbnew       PCB editor
-#   eeschema     schematic editor
-#   calculator   PCB calculator
-#   all          build pcbnew, eeschema, calculator sequentially
+#   pcbnew         PCB editor
+#   eeschema       schematic editor
+#   calculator     PCB calculator
+#   pl_editor      drawing-sheet editor
+#   symbol_editor  symbol editor (eeschema kiface, FRAME_SCH_SYMBOL_EDITOR)
+#   all            build all of the above sequentially
 #
 # Any extra args are forwarded to scripts/kicad/build-<app>.sh (e.g. -j 8,
 # --full, --release, --diag=gal).
@@ -46,7 +48,7 @@ trap 'kw_fail 130; exit 130' INT TERM
 
 cd "$(dirname "$0")/.."
 
-VALID_APPS="pcbnew | eeschema | calculator | pl_editor | all"
+VALID_APPS="pcbnew | eeschema | calculator | pl_editor | symbol_editor | all"
 
 usage() {
     echo "Usage: ./docker/build.sh <app> [args...]" >&2
@@ -69,7 +71,7 @@ APP_NAME="$1"
 shift
 
 case "$APP_NAME" in
-    pcbnew|eeschema|calculator|pl_editor|all) ;;
+    pcbnew|eeschema|calculator|pl_editor|symbol_editor|all) ;;
     *)
         echo "Error: unknown app '$APP_NAME' (expected: ${VALID_APPS})" >&2
         usage
@@ -132,9 +134,10 @@ fi
 # but lives under the pcb_calculator/ subtree.
 kicad_subdir_for() {
     case "$1" in
-        calculator) echo "pcb_calculator" ;;
-        pl_editor)  echo "pagelayout_editor" ;;
-        *)          echo "$1" ;;
+        calculator)    echo "pcb_calculator" ;;
+        pl_editor)     echo "pagelayout_editor" ;;
+        symbol_editor) echo "eeschema" ;;
+        *)             echo "$1" ;;
     esac
 }
 
@@ -182,10 +185,11 @@ build_app() {
 }
 
 if [[ "${APP_NAME}" == "all" ]]; then
-    build_app pcbnew 1 4
-    build_app eeschema 2 4
-    build_app calculator 3 4
-    build_app pl_editor 4 4
+    build_app pcbnew 1 5
+    build_app eeschema 2 5
+    build_app calculator 3 5
+    build_app pl_editor 4 5
+    build_app symbol_editor 5 5
 else
     build_app "${APP_NAME}" 1 1
 fi
