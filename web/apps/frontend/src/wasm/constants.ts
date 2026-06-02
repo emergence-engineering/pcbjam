@@ -27,15 +27,18 @@ export const TOOL_ARGV0: Record<Tool, string> = {
 };
 
 /**
- * Tools whose standalone entry (single_top.cpp) runs the first-run setup wizard
- * on launch. That wizard's modal loop crashes Asyncify in our ephemeral MEMFS,
- * so for these we seed a default KiCad config before main() to suppress it.
- * Mirrors which harness HTMLs include `seedKicadConfig` in preRun (eeschema only).
+ * Every standalone tool here boots through common/single_top.cpp, which runs
+ * STARTWIZARD::CheckAndRun() — the first-run "KiCad Setup" wizard. It shows
+ * whenever any provider (SETTINGS / LIBRARIES / PRIVACY) reports
+ * NeedsUserInput(), which is always true on our ephemeral MEMFS with no config,
+ * and its modal loop crashes Asyncify. So for all of them we seed a default
+ * KiCad config before main() (kicad_common.json privacy flags + the lib-tables
+ * the providers check) so NeedsUserInput() is false and the wizard is skipped.
  */
 export const TOOL_NEEDS_CONFIG_SEED: Record<Tool, boolean> = {
-  pcbnew: false,
+  pcbnew: true,
   eeschema: true,
-  calculator: false,
+  calculator: true,
 };
 
 /** KiCad user settings dir for this build (PATHS::GetUserSettingsPath()). */
