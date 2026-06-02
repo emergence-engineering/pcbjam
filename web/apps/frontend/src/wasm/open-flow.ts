@@ -1,6 +1,6 @@
 /**
- * Drive the tool (running in a same-origin iframe `win`) to open a file already
- * written into its MEMFS.
+ * Drive the tool (running in `win` — the top-level window) to open a file
+ * already written into its MEMFS.
  *
  * Two strategies, tried in order:
  *   1. Programmatic hook — `win.Module.kicadOpenFile(path)` if the build exposes
@@ -48,7 +48,7 @@ function canvasOf(win: ToolWindow): HTMLCanvasElement | null {
   return (win.Module?.canvas as HTMLCanvasElement) ?? null;
 }
 
-/** Dispatch a full pointer+mouse click at page coordinates on the iframe canvas. */
+/** Dispatch a full pointer+mouse click at page coordinates on the tool canvas. */
 function clickAt(win: ToolWindow, x: number, y: number): void {
   const el = canvasOf(win);
   if (!el) return;

@@ -66,10 +66,15 @@ them at `/wasm` (same origin). `VITE_WASM_ASSET_BASE_URL` defaults to `/wasm`.
 - If the tool won't load, the target dir is probably empty — run
   `tests/scripts/setup-kicad-wasm.sh` to populate `tests/apps/kicad/`.
 
-The tool view (`WasmTool.tsx`) loads the **actual harness** (`/wasm/<tool>.html`,
-the same page the e2e tests use) in a same-origin iframe, then injects the
-project tree into its MEMFS and drives File→Open — reusing the proven loader
-rather than re-implementing the Emscripten bootstrap.
+The tool view (`WasmTool.tsx` + `src/wasm/boot.ts`) boots the tool **directly in
+the React document** — no iframe. It replicates the proven harness HTML
+(`tests/apps/kicad/<tool>.html`): builds the same global Emscripten `Module`
+config and preRun steps (create canvas, write `images.tar.gz`, seed config), then
+injects the same `wx.js` + `<tool>.js` artifacts into the page. It then syncs the
+project tree into MEMFS and drives File→Open. The build is non-modularized
+(global `Module`/`FS`) and pthread-based, so only **one** tool runs per page load;
+switching tools requires a full navigation. `locateFile` resolves the wasm and
+the pthread worker against `<base>` so they load regardless of the SPA route.
 
 **prod**: point `VITE_WASM_ASSET_BASE_URL` at a CDN URL — but that origin must
 itself satisfy the same-origin / COEP constraints (e.g. served under the app's

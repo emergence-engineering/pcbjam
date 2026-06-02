@@ -9,9 +9,10 @@ const queryClient = new QueryClient({
 });
 
 // NOTE: deliberately NOT wrapped in <React.StrictMode>. StrictMode double-mounts
-// components in dev, which tears down and recreates the WasmTool iframe and thus
-// instantiates a 175–338 MB KiCad wasm twice — enough to OOM the tab. The tool
-// view must instantiate exactly once per navigation.
+// components in dev, which would re-run WasmTool's boot effect and try to
+// instantiate a 175–338 MB KiCad wasm twice — enough to OOM the tab (and the
+// runtime is process-global anyway; see src/wasm/boot.ts). The tool view must
+// instantiate exactly once per navigation.
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <BrowserRouter>

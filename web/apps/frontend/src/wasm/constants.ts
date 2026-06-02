@@ -15,12 +15,31 @@ export const MEMFS_PROJECTS_DIR = `/home/kicad/documents/kicad/${KICAD_VERSION_D
 export const RESOURCE_PATH =
   "/workspace/build-wasm/sysroot/share/kicad/resources";
 
-/** argv[0] each tool's DEBUG check expects (see tests/apps/kicad/pcbnew.html). */
+/**
+ * argv[0] each tool's DEBUG check expects. These MUST match the values the
+ * proven harness HTMLs set as `Module.thisProgram` (tests/apps/kicad/<tool>.html)
+ * — notably the calculator binary is `pcb_calculator`, not `calculator`.
+ */
 export const TOOL_ARGV0: Record<Tool, string> = {
   pcbnew: "/usr/bin/pcbnew",
   eeschema: "/usr/bin/eeschema",
-  calculator: "/usr/bin/calculator",
+  calculator: "/usr/bin/pcb_calculator",
 };
+
+/**
+ * Tools whose standalone entry (single_top.cpp) runs the first-run setup wizard
+ * on launch. That wizard's modal loop crashes Asyncify in our ephemeral MEMFS,
+ * so for these we seed a default KiCad config before main() to suppress it.
+ * Mirrors which harness HTMLs include `seedKicadConfig` in preRun (eeschema only).
+ */
+export const TOOL_NEEDS_CONFIG_SEED: Record<Tool, boolean> = {
+  pcbnew: false,
+  eeschema: true,
+  calculator: false,
+};
+
+/** KiCad user settings dir for this build (PATHS::GetUserSettingsPath()). */
+export const KICAD_CONFIG_DIR = `/home/kicad/.config/kicad/kicad/${KICAD_VERSION_DIR}`;
 
 export function memfsProjectDir(slug: string): string {
   return `${MEMFS_PROJECTS_DIR}/${slug}`;

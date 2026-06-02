@@ -46,8 +46,9 @@ declare global {
     wxElementRegistry?: WxElementRegistry;
   }
 
-  // A real browsing-context window (iframe.contentWindow): the Window interface
-  // PLUS the global declarations (console, PointerEvent, document, …) that live
-  // on `typeof globalThis`, not on the bare Window interface.
+  // The browsing-context window the tool runs in — now the top-level `window`
+  // (the WASM boots in-document, not in an iframe). The Window interface PLUS the
+  // global declarations (console, PointerEvent, document, …) that live on
+  // `typeof globalThis`, not on the bare Window interface.
   type ToolWindow = Window & typeof globalThis;
 }

@@ -3,13 +3,15 @@ import type { ProjectFile, Tool } from "@kicad-web/contract";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchFileBytes } from "@/lib/api";
 import { WASM_ASSET_BASE_URL } from "@/lib/config";
-import { driveProjectIntoTool, hookIframeConsole } from "@/wasm/kicad-runner";
+import { bootKicadTool } from "@/wasm/boot";
+import { driveProjectIntoTool } from "@/wasm/kicad-runner";
 
 /**
- * Boots a KiCad tool by loading the proven harness HTML (/wasm/<tool>.html, the
- * same file the e2e tests use) in a same-origin iframe, then injects the project
- * tree into its MEMFS and drives File→Open. Same-origin is required: KiCad WASM
- * refuses to load its glue/wasm from a different origin under COEP.
+ * Boots a KiCad tool directly in this React document (no iframe): builds the
+ * Emscripten `Module` config, injects the proven harness scripts (wx.js +
+ * <tool>.js, the same artifacts the e2e tests use) into the page, then syncs the
+ * project tree into MEMFS and drives File→Open. See src/wasm/boot.ts for why the
+ * runtime is single-instance per page load.
  */
 export function WasmTool({
   tool,
@@ -22,54 +24,62 @@ export function WasmTool({
   files: ProjectFile[];
   targetPath?: string;
 }) {
-  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const containerRef = React.useRef<HTMLDivElement>(null);
   const startedRef = React.useRef(false);
   const [status, setStatus] = React.useState("Loading tool…");
   const [logs, setLogs] = React.useState<string[]>([]);
   const [showLog, setShowLog] = React.useState(false);
 
   const base = WASM_ASSET_BASE_URL.replace(/\/$/, "");
-  const src = `${base}/${tool}.html`;
 
-  const onLoad = () => {
+  React.useEffect(() => {
+    // Guard re-entry: the WASM runtime is process-global and must boot exactly
+    // once (see boot.ts). StrictMode is disabled app-wide for the same reason.
     if (startedRef.current) return;
     startedRef.current = true;
-    const win = iframeRef.current?.contentWindow as
-      | ToolWindow
-      | null
-      | undefined;
-    if (!win) {
-      setStatus("Error: iframe has no window");
+
+    const container = containerRef.current;
+    if (!container) {
+      setStatus("Error: tool container not mounted");
       return;
     }
+
     const append = (msg: string) =>
       setLogs((prev) => [...prev.slice(-800), msg]);
-    hookIframeConsole(win, append);
+    const win = window as ToolWindow;
 
-    void driveProjectIntoTool(win, {
-      tool,
-      slug,
-      files,
-      targetPath,
-      fetchBytes: (relPath) => fetchFileBytes(slug, relPath),
-      log: append,
-      onStatus: setStatus,
-    }).catch((err) => {
-      append(`[fatal] ${String(err)}`);
-      setStatus(`Error: ${String(err)}`);
-    });
-  };
+    void (async () => {
+      try {
+        await bootKicadTool({ tool, base, container, log: append, onStatus: setStatus });
+        await driveProjectIntoTool(win, {
+          tool,
+          slug,
+          files,
+          targetPath,
+          fetchBytes: (relPath) => fetchFileBytes(slug, relPath),
+          log: append,
+          onStatus: setStatus,
+        });
+      } catch (err) {
+        append(`[fatal] ${String(err)}`);
+        setStatus(`Error: ${String(err)}`);
+      }
+    })();
+    // Boot is one-shot per mount; deps intentionally exclude files/targetPath so
+    // they don't retrigger a (rejected) second boot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, slug, base]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#1a1a2e]">
-      <iframe
-        ref={iframeRef}
-        src={src}
-        title={`${tool} (${slug})`}
-        onLoad={onLoad}
-        className="absolute inset-0 h-full w-full border-0"
-        allow="cross-origin-isolated; fullscreen"
-      />
+      {/*
+        wx.js addresses the DOM by id: #main-window is its top-level (id=0)
+        window — it owns #canvas (created in boot's preRun) — and #window-container
+        parents every child window. Both ids must exist before the runtime boots,
+        mirroring the harness HTML (tests/apps/kicad/<tool>.html).
+      */}
+      <div ref={containerRef} id="main-window" className="absolute inset-0 h-full w-full" />
+      <div id="window-container" />
 
       {status && (
         <div className="pointer-events-none absolute left-3 top-3 z-20 rounded bg-black/70 px-3 py-2 font-mono text-xs text-white">

@@ -29,32 +29,13 @@ async function waitFor<T>(
   }
 }
 
-/**
- * Forward the iframe's console (where the harness routes Module.print/printErr
- * and KiCad logs) into our on-page log panel, preserving the original output.
- */
-export function hookIframeConsole(win: ToolWindow, log: (msg: string) => void): void {
-  const wrap = (level: "log" | "info" | "warn" | "error") => {
-    const orig = win.console[level].bind(win.console);
-    win.console[level] = (...args: unknown[]) => {
-      try {
-        log(args.map((a) => (typeof a === "string" ? a : String(a))).join(" "));
-      } catch {
-        /* ignore logging errors */
-      }
-      orig(...args);
-    };
-  };
-  (["log", "info", "warn", "error"] as const).forEach(wrap);
-}
-
 function getFS(win: ToolWindow): EmscriptenFS {
   const fs = win.FS ?? win.Module?.FS;
-  if (!fs) throw new Error("Emscripten FS not available in iframe");
+  if (!fs) throw new Error("Emscripten FS not available");
   return fs as EmscriptenFS;
 }
 
-/** Mirror the whole project tree into the iframe's MEMFS (sync-whole-tree). */
+/** Mirror the whole project tree into the tool's MEMFS (sync-whole-tree). */
 async function syncProjectToMemfs(win: ToolWindow, opts: DriveOptions): Promise<void> {
   const fs = getFS(win);
   fs.mkdirTree(memfsProjectDir(opts.slug));
@@ -69,9 +50,9 @@ async function syncProjectToMemfs(win: ToolWindow, opts: DriveOptions): Promise<
 }
 
 /**
- * Drive a project into an already-booting tool harness (loaded in a same-origin
- * iframe at /wasm/<tool>.html). Waits for the Emscripten FS, syncs the project
- * tree into MEMFS, then auto-opens the target file.
+ * Drive a project into an already-booting tool runtime (booted into `win` by
+ * bootKicadTool — the top-level window). Waits for the Emscripten FS, syncs the
+ * project tree into MEMFS, then auto-opens the target file.
  */
 export async function driveProjectIntoTool(
   win: ToolWindow,
