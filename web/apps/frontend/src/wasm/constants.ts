@@ -26,6 +26,7 @@ export const TOOL_ARGV0: Record<Tool, string> = {
   calculator: "/usr/bin/pcb_calculator",
   pl_editor: "/usr/bin/pl_editor",
   symbol_editor: "/usr/bin/symbol_editor",
+  gerbview: "/usr/bin/gerbview",
 };
 
 /**
@@ -43,6 +44,7 @@ export const TOOL_NEEDS_CONFIG_SEED: Record<Tool, boolean> = {
   calculator: true,
   pl_editor: true,
   symbol_editor: true,
+  gerbview: true,
 };
 
 /** KiCad user settings dir for this build (PATHS::GetUserSettingsPath()). */

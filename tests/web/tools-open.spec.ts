@@ -26,6 +26,7 @@ const CASES: Record<string, ToolCase> = {
   pl_editor: { route: 'pl_editor/demo.kicad_wks', titleRe: /demo — Drawing Sheet Editor/i, fileless: false },
   calculator: { route: 'calculator/', titleRe: /Calculator Tools/i, fileless: true },
   symbol_editor: { route: 'symbol_editor/', titleRe: /Symbol Editor/i, fileless: true },
+  gerbview: { route: 'gerbview/', titleRe: /Gerber Viewer/i, fileless: true },
 };
 
 /** Console text that must never appear (wizard-crash + URL-regex modal markers). */

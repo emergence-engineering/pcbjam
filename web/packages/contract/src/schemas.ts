@@ -7,6 +7,7 @@ export const TOOLS = [
   "calculator",
   "pl_editor",
   "symbol_editor",
+  "gerbview",
 ] as const;
 export const toolSchema = z.enum(TOOLS);
 export type Tool = z.infer<typeof toolSchema>;
@@ -18,6 +19,7 @@ export const TOOL_LABELS: Record<Tool, string> = {
   calculator: "PCB Calculator",
   pl_editor: "Drawing Sheet Editor",
   symbol_editor: "Symbol Editor",
+  gerbview: "Gerber Viewer",
 };
 
 /** Default file-extension → tool mapping (the explicit URL segment always wins). */
@@ -31,10 +33,13 @@ export const EXTENSION_TOOL: Record<string, Tool> = {
  * Tools that do not take a file (booted standalone). The calculator has no file
  * concept; the symbol editor opens libraries through its own UI (its frame does
  * not implement OpenProjectFiles), so we boot it standalone rather than auto-open.
+ * The gerber viewer likewise opens gerber/drill files through its own File→Open
+ * UI — projects carry no gerber files to auto-open — so it boots standalone too.
  */
 export const FILELESS_TOOLS: ReadonlySet<Tool> = new Set<Tool>([
   "calculator",
   "symbol_editor",
+  "gerbview",
 ]);
 
 export const projectSlugSchema = z
