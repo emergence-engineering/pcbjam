@@ -8,10 +8,8 @@ import { driveProjectIntoTool } from "@/wasm/kicad-runner";
 import type { CollabWindow } from "@/wasm/collab";
 import { clog, cwarn } from "@/wasm/collab/debug";
 
-// Tools with a *fully working* collab bridge. eeschema's bridge exists (read/emit work)
-// but its apply traps on SCH_ITEM::Move outside a tool coroutine (features/yjs-bridge
-// 0003 follow-up), so it stays gated off to avoid crashing a peer tab.
-const COLLAB_TOOLS = new Set<Tool>(["pl_editor"]);
+// Tools with a working collab bridge (kicadCollabSnapshot/Apply embind exports).
+const COLLAB_TOOLS = new Set<Tool>(["pl_editor", "eeschema"]);
 
 /**
  * Opt-in collaborative editing (features/yjs-bridge). Enabled when the URL carries

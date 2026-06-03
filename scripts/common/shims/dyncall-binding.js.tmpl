@@ -4,9 +4,22 @@
 //
 // Binds the bare name to the REAL asyncify-instrumented wasm export
 // (wasmExports["dynCall_<sig>"], present because the build links -sDYNCALLS=1).
-// Falls back to getWasmTableEntry only if no such export exists.
+// Falls back to getWasmTableEntry if no such export exists, OR if the instrumented
+// trampoline traps with "indirect call signature mismatch": post-asyncify+O2 the
+// trampoline can call_indirect with a stale type for some table indices even though
+// the table entry itself is valid (hit by programmatic editor edits, e.g. eeschema
+// SCH_ITEM::Move via invoke_vii — see features/yjs-bridge/0003). The direct
+// getWasmTableEntry call uses the correct per-entry signature and succeeds. Only the
+// mismatch trap is caught; the Asyncify unwind sentinel and real exceptions re-throw,
+// so instrumentation/unwind still work for every normal indirect call.
 function dynCall_@SIG@(@ARGS@) {
   var f = (typeof wasmExports !== 'undefined') && wasmExports["dynCall_@SIG@"];
-  if (f) return f(@ARGS@);
+  if (f) {
+    try { return f(@ARGS@); }
+    catch (_dce) {
+      if (!(_dce instanceof WebAssembly.RuntimeError) || !/signature mismatch/.test(_dce.message))
+        throw _dce;
+    }
+  }
   return getWasmTableEntry(index)(@CALLARGS@);
 }

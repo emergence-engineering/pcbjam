@@ -19,10 +19,13 @@
 #include <wx/window.h>
 #include <nlohmann/json.hpp>
 #include <kiid.h>
+#include <layer_ids.h>
 #include <schematic.h>
 #include <sch_edit_frame.h>
 #include <sch_commit.h>
 #include <sch_item.h>
+#include <sch_line.h>
+#include <sch_junction.h>
 #include <sch_screen.h>
 #include <sch_sheet_path.h>
 
@@ -78,12 +81,53 @@ SCH_EDIT_FRAME* schFrame()
 json itemToJson( SCH_ITEM* aItem )
 {
     VECTOR2I p = aItem->GetPosition();
-    return json{
+    json     j = {
         { "id", toUtf8( aItem->m_Uuid.AsString() ) },
         { "type", toUtf8( aItem->GetClass() ) },
-        { "x", p.x },   // internal units (nm); integral, so no quantization needed
+        { "x", p.x },   // internal units; integral, so no quantization needed
         { "y", p.y },
     };
+
+    // Per-type fields needed to reconstruct the item on `added` (0003 converters).
+    // Hand-mapped for the wire-editing types; other types sync position-only (move) and
+    // are skipped on `added` (logged) until their converters are added.
+    if( aItem->Type() == SCH_LINE_T )
+    {
+        auto* line = static_cast<SCH_LINE*>( aItem );
+        j["sx"]    = line->GetStartPoint().x;
+        j["sy"]    = line->GetStartPoint().y;
+        j["ex"]    = line->GetEndPoint().x;
+        j["ey"]    = line->GetEndPoint().y;
+        j["layer"] = (int) line->GetLayer();
+    }
+
+    return j;
+}
+
+// Construct a new SCH_ITEM from a delta item (for `added`), with the delta's uuid
+// (m_Uuid is const → const_cast, exactly as the s-expr parser does). Returns nullptr for
+// types without a converter yet.
+SCH_ITEM* makeItem( const json& j )
+{
+    std::string type = j.value( "type", "" );
+    SCH_ITEM*   item = nullptr;
+
+    if( type == "SCH_LINE" )
+    {
+        int   layer = j.value( "layer", (int) LAYER_NOTES );
+        auto* line  = new SCH_LINE( VECTOR2I( j.value( "sx", 0 ), j.value( "sy", 0 ) ), layer );
+        line->SetEndPoint( VECTOR2I( j.value( "ex", 0 ), j.value( "ey", 0 ) ) );
+        item = line;
+    }
+    else if( type == "SCH_JUNCTION" )
+    {
+        item = new SCH_JUNCTION( VECTOR2I( j.value( "x", 0 ), j.value( "y", 0 ) ) );
+    }
+
+    if( item )
+        const_cast<KIID&>( item->m_Uuid ) = KIID( wxString::FromUTF8( j.value( "id", "" ).c_str() ) );
+
+    return item;
 }
 
 // Full current model as an array of item json, deduped by uuid across the hierarchy.
@@ -197,11 +241,10 @@ SCHEMATIC* ensureBridge()
 
 namespace {
 
-// The actual model mutation. Must run inside a KiCad tool coroutine — calling editor
-// write ops (notably SCH_ITEM::Move) outside one traps with "indirect call signature
-// mismatch" (the Asyncify+fiber+exception-trampoline machinery; see
-// memory/eeschema-collab-asyncify-apply / 0003). Routing apply through the tool
-// framework is the open follow-up; reads (GetPosition) and Clone/Modify already work.
+// The actual model mutation, via SCH_COMMIT so connectivity/ERC recompute as for a UI
+// edit. (Editor write ops like SCH_ITEM::Move are called through invoke_vii, whose
+// asyncify-instrumented dynCall trampoline traps on a stale type — fixed at the JS shim
+// layer in scripts/common/shims/dyncall-binding.js.tmpl; see 0003.)
 void doApply( SCH_EDIT_FRAME* aFrame, const json& aDelta )
 {
     SCHEMATIC& sch = aFrame->Schematic();
@@ -232,7 +275,14 @@ void doApply( SCH_EDIT_FRAME* aFrame, const json& aDelta )
         {
             commit.Modify( item, path.LastScreen() );
 
-            if( j.contains( "x" ) && j.contains( "y" ) )
+            if( item->Type() == SCH_LINE_T && j.contains( "sx" ) )
+            {
+                // Wires reshape (endpoints move independently), so set both points.
+                auto* line = static_cast<SCH_LINE*>( item );
+                line->SetStartPoint( VECTOR2I( j["sx"].get<int>(), j["sy"].get<int>() ) );
+                line->SetEndPoint( VECTOR2I( j["ex"].get<int>(), j["ey"].get<int>() ) );
+            }
+            else if( j.contains( "x" ) && j.contains( "y" ) )
             {
                 VECTOR2I newPos( j["x"].get<int>(), j["y"].get<int>() );
                 item->Move( newPos - item->GetPosition() );
@@ -242,13 +292,39 @@ void doApply( SCH_EDIT_FRAME* aFrame, const json& aDelta )
         }
     }
 
-    // TODO(0003 follow-up): `added` requires constructing the right SCH_ITEM subclass
-    // per KICAD_T from JSON (no per-item blob path in eeschema — §serialization note).
+    for( const json& j : aDelta.value( "added", json::array() ) )
+    {
+        KIID id( wxString::FromUTF8( j.value( "id", "" ).c_str() ) );
+
+        if( sch.ResolveItem( id, nullptr, /*allowNull*/ true ) )
+            continue;                       // already present (our own echo)
+
+        if( SCH_ITEM* item = makeItem( j ) )
+        {
+            commit.Add( item, aFrame->GetScreen() );
+            staged = true;
+        }
+        else
+        {
+            EM_ASM( { console.log( "[collab] eeschema apply: no converter for added type " + UTF8ToString( $0 ) ); },
+                    j.value( "type", "?" ).c_str() );
+        }
+    }
 
     if( staged )
         commit.Push( wxT( "Collaborative edit" ) );
 
     s_applyingRemote = false;
+}
+
+// Test/PoC move (the SCH_COMMIT body for kicadCollabTestMoveFirst, deferred via CallAfter).
+void collabTestMove( SCH_EDIT_FRAME* aFrame, SCH_ITEM* aItem, SCH_SCREEN* aScreen, int aDx,
+                     int aDy )
+{
+    SCH_COMMIT commit( aFrame );
+    commit.Modify( aItem, aScreen );
+    aItem->Move( VECTOR2I( aDx, aDy ) );
+    commit.Push( wxT( "Collab test move" ) );
 }
 
 } // namespace
@@ -275,6 +351,7 @@ void kicadCollabApply( std::string aJson )
     if( !fr )
         return;
 
+    // Defer to the editor's main-loop context so SCH_COMMIT runs like a normal edit.
     fr->CallAfter( [fr, delta]() { doApply( fr, delta ); } );
 }
 
@@ -312,13 +389,7 @@ std::string kicadCollabTestMoveFirst( int aDx, int aDy )
 
         for( SCH_ITEM* item : screen->Items() )
         {
-            // Defer the SCH_COMMIT to the main loop (same Asyncify reason as apply).
-            fr->CallAfter( [fr, item, screen, aDx, aDy]() {
-                SCH_COMMIT commit( fr );
-                commit.Modify( item, screen );
-                item->Move( VECTOR2I( aDx, aDy ) );
-                commit.Push( wxT( "Collab test move" ) );
-            } );
+            fr->CallAfter( [fr, item, screen, aDx, aDy]() { collabTestMove( fr, item, screen, aDx, aDy ); } );
             return toUtf8( item->m_Uuid.AsString() );
         }
     }

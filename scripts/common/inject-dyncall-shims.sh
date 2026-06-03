@@ -1,5 +1,6 @@
 #!/bin/bash
-# Post-process Emscripten-generated pcbnew.js for KiCad WASM.
+# Post-process the Emscripten-generated <app>.js for KiCad WASM (pcbnew, eeschema,
+# pl_editor, calculator, …).
 #
 # The actual JavaScript that gets injected lives in readable, standalone files in
 # scripts/common/shims/ (not inline heredocs):
