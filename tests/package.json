@@ -29,6 +29,10 @@
     "test:symbol_editor:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed kicad/symbol_editor.spec.ts",
     "test:symbol_editor": "npm run test:symbol_editor:firefox",
     "test:symbol_editor:headed": "npm run test:symbol_editor:chrome",
+    "test:gerbview:firefox": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=firefox kicad/gerbview.spec.ts",
+    "test:gerbview:chrome": "npm run setup:kicad && playwright test --config=playwright-kicad.config.ts --project=chromium --headed kicad/gerbview.spec.ts",
+    "test:gerbview": "npm run test:gerbview:firefox",
+    "test:gerbview:headed": "npm run test:gerbview:chrome",
     "test:coroutine:firefox": "playwright test --config=playwright-coroutine.config.ts --project=firefox",
     "test:coroutine:chrome": "playwright test --config=playwright-coroutine.config.ts --project=chromium --headed"
   },

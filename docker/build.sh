@@ -11,6 +11,7 @@
 #   calculator     PCB calculator
 #   pl_editor      drawing-sheet editor
 #   symbol_editor  symbol editor (eeschema kiface, FRAME_SCH_SYMBOL_EDITOR)
+#   gerbview       Gerber viewer
 #   all            build all of the above sequentially
 #
 # Any extra args are forwarded to scripts/kicad/build-<app>.sh (e.g. -j 8,
@@ -48,7 +49,7 @@ trap 'kw_fail 130; exit 130' INT TERM
 
 cd "$(dirname "$0")/.."
 
-VALID_APPS="pcbnew | eeschema | calculator | pl_editor | symbol_editor | all"
+VALID_APPS="pcbnew | eeschema | calculator | pl_editor | symbol_editor | gerbview | all"
 
 usage() {
     echo "Usage: ./docker/build.sh <app> [args...]" >&2
@@ -71,7 +72,7 @@ APP_NAME="$1"
 shift
 
 case "$APP_NAME" in
-    pcbnew|eeschema|calculator|pl_editor|symbol_editor|all) ;;
+    pcbnew|eeschema|calculator|pl_editor|symbol_editor|gerbview|all) ;;
     *)
         echo "Error: unknown app '$APP_NAME' (expected: ${VALID_APPS})" >&2
         usage
@@ -187,11 +188,12 @@ build_app() {
 }
 
 if [[ "${APP_NAME}" == "all" ]]; then
-    build_app pcbnew 1 5
-    build_app eeschema 2 5
-    build_app calculator 3 5
-    build_app pl_editor 4 5
-    build_app symbol_editor 5 5
+    build_app pcbnew 1 6
+    build_app eeschema 2 6
+    build_app calculator 3 6
+    build_app pl_editor 4 6
+    build_app symbol_editor 5 6
+    build_app gerbview 6 6
 else
     build_app "${APP_NAME}" 1 1
 fi

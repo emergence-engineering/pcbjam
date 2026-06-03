@@ -84,9 +84,10 @@ copy_app eeschema      && found_any=1
 copy_app calculator    && found_any=1
 copy_app pl_editor     && found_any=1
 copy_app symbol_editor && found_any=1
+copy_app gerbview      && found_any=1
 
 if [ "$found_any" -eq 0 ]; then
-    echo "Error: no pcbnew/eeschema/calculator/pl_editor/symbol_editor artifacts found in output/ or docker volume" >&2
+    echo "Error: no pcbnew/eeschema/calculator/pl_editor/symbol_editor/gerbview artifacts found in output/ or docker volume" >&2
     exit 1
 fi
 

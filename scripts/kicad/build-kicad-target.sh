@@ -31,7 +31,7 @@
 set -e
 
 if [ -z "$1" ]; then
-    echo "Error: missing <app> argument (pcbnew | eeschema | calculator | pl_editor | symbol_editor)" >&2
+    echo "Error: missing <app> argument (pcbnew | eeschema | calculator | pl_editor | symbol_editor | gerbview)" >&2
     exit 1
 fi
 APP_NAME="$1"
@@ -44,7 +44,7 @@ shift
 #   - pl_editor:     subdir is pagelayout_editor (upstream source dir name)
 #   - symbol_editor: served by the eeschema kiface, so it builds in eeschema/
 case "$APP_NAME" in
-    pcbnew|eeschema)
+    pcbnew|eeschema|gerbview)
         KICAD_TARGET="$APP_NAME"
         KICAD_SUBDIR="$APP_NAME"
         ;;
@@ -61,7 +61,7 @@ case "$APP_NAME" in
         KICAD_SUBDIR="eeschema"
         ;;
     *)
-        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor | symbol_editor)" >&2
+        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor | symbol_editor | gerbview)" >&2
         exit 1
         ;;
 esac
