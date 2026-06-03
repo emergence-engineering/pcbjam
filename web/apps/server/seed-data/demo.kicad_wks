@@ -1,0 +1,9 @@
+(page_layout
+  (setup (textsize 1.5 1.5)(linewidth 0.15)(textlinewidth 0.15)
+    (left_margin 10)(right_margin 10)(top_margin 10)(bottom_margin 10))
+  (rect (name border:Rect) (start 0 0 ltcorner) (end 0 0 rbcorner) (comment "page border"))
+  (rect (name titleblock:Rect) (start 110 34) (end 2 2) (comment "title block frame"))
+  (tbtext "KiCad WASM — Dummy Test Drawing Sheet" (name title) (pos 100 22) (font (size 2.5 2.5) (bold)))
+  (tbtext "pl_editor web smoke test" (name subtitle) (pos 100 14) (font (size 1.5 1.5)))
+  (tbtext "Sheet: %S / %N" (name sheetnum) (pos 100 6) (font (size 1.3 1.3)))
+)
