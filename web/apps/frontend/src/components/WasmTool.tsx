@@ -5,6 +5,62 @@ import { fetchFileBytes } from "@/lib/api";
 import { WASM_ASSET_BASE_URL } from "@/lib/config";
 import { bootKicadTool } from "@/wasm/boot";
 import { driveProjectIntoTool } from "@/wasm/kicad-runner";
+import type { CollabWindow } from "@/wasm/collab";
+import { clog, cwarn } from "@/wasm/collab/debug";
+
+/**
+ * Opt-in collaborative editing (features/yjs-bridge). Enabled when the URL carries
+ * `?collab=1` and the tool is pl_editor (the only tool with the collab bridge so far).
+ * Open the same project URL in two tabs with `?collab=1` to edit together: the channel
+ * is keyed to project+file, so both tabs share one Y.Doc over BroadcastChannel. Edits
+ * in the editor (add/move text, lines, …) fire OnModify → the differ → the peer tab.
+ */
+async function maybeStartCollab(
+  win: ToolWindow,
+  opts: {
+    tool: Tool;
+    slug: string;
+    targetPath?: string;
+    log: (m: string) => void;
+    onStatus: (t: string) => void;
+  },
+): Promise<void> {
+  const enabled = new URLSearchParams(win.location.search).get("collab");
+  const mod = win.Module;
+  clog("maybeStartCollab gate:", {
+    collabParam: enabled,
+    tool: opts.tool,
+    hasModule: !!mod,
+    hasSnapshot: typeof mod?.kicadCollabSnapshot,
+    hasApply: typeof mod?.kicadCollabApply,
+    url: win.location.href,
+  });
+
+  if (!enabled || enabled === "0" || enabled === "false") {
+    clog("disabled (no ?collab=1) — skipping");
+    return;
+  }
+  if (opts.tool !== "pl_editor") {
+    clog(`tool is ${opts.tool}, not pl_editor — skipping`);
+    return;
+  }
+  if (typeof mod?.kicadCollabSnapshot !== "function") {
+    cwarn(
+      "BRIDGE NOT PRESENT: Module.kicadCollabSnapshot is",
+      typeof mod?.kicadCollabSnapshot,
+      "— the loaded pl_editor.wasm predates the collab bridge. Rebuild + `npm run setup:kicad` and restart the dev server.",
+    );
+    return;
+  }
+
+  const { startCollab } = await import("@/wasm/collab");
+  const channel = `kicad-collab:${opts.slug}:${opts.targetPath ?? ""}`;
+  clog("starting on channel", channel);
+  await startCollab(mod, win as unknown as CollabWindow, { channel });
+  opts.log(`[collab] connected on ${channel}`);
+  opts.onStatus("Collab: connected");
+  clog("connected ✓ — edit in one tab, watch the other");
+}
 
 /**
  * Boots a KiCad tool directly in this React document (no iframe): builds the
@@ -60,6 +116,7 @@ export function WasmTool({
           log: append,
           onStatus: setStatus,
         });
+        await maybeStartCollab(win, { tool, slug, targetPath, log: append, onStatus: setStatus });
       } catch (err) {
         append(`[fatal] ${String(err)}`);
         setStatus(`Error: ${String(err)}`);
