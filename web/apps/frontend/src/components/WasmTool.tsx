@@ -8,12 +8,17 @@ import { driveProjectIntoTool } from "@/wasm/kicad-runner";
 import type { CollabWindow } from "@/wasm/collab";
 import { clog, cwarn } from "@/wasm/collab/debug";
 
+// Tools with a *fully working* collab bridge. eeschema's bridge exists (read/emit work)
+// but its apply traps on SCH_ITEM::Move outside a tool coroutine (features/yjs-bridge
+// 0003 follow-up), so it stays gated off to avoid crashing a peer tab.
+const COLLAB_TOOLS = new Set<Tool>(["pl_editor"]);
+
 /**
  * Opt-in collaborative editing (features/yjs-bridge). Enabled when the URL carries
- * `?collab=1` and the tool is pl_editor (the only tool with the collab bridge so far).
- * Open the same project URL in two tabs with `?collab=1` to edit together: the channel
- * is keyed to project+file, so both tabs share one Y.Doc over BroadcastChannel. Edits
- * in the editor (add/move text, lines, …) fire OnModify → the differ → the peer tab.
+ * `?collab=1` and the tool has the collab bridge. Open the same project URL in two tabs
+ * with `?collab=1` to edit together: the channel is keyed to project+file, so both tabs
+ * share one Y.Doc over BroadcastChannel. Editor edits (add/move items) fire the tool's
+ * change hook → the bridge → the peer tab.
  */
 async function maybeStartCollab(
   win: ToolWindow,
@@ -40,15 +45,15 @@ async function maybeStartCollab(
     clog("disabled (no ?collab=1) — skipping");
     return;
   }
-  if (opts.tool !== "pl_editor") {
-    clog(`tool is ${opts.tool}, not pl_editor — skipping`);
+  if (!COLLAB_TOOLS.has(opts.tool)) {
+    clog(`tool ${opts.tool} has no collab bridge — skipping`);
     return;
   }
   if (typeof mod?.kicadCollabSnapshot !== "function") {
     cwarn(
       "BRIDGE NOT PRESENT: Module.kicadCollabSnapshot is",
       typeof mod?.kicadCollabSnapshot,
-      "— the loaded pl_editor.wasm predates the collab bridge. Rebuild + `npm run setup:kicad` and restart the dev server.",
+      `— the loaded ${opts.tool}.wasm predates the collab bridge. Rebuild + \`npm run setup:kicad\` and restart the dev server.`,
     );
     return;
   }

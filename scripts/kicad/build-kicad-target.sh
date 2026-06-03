@@ -398,6 +398,9 @@ if [ -f "${EMBIND_SRC}" ]; then
     KICAD_INCLUDES+=" -I${KICAD_DIR}/libs/core/include -I${KICAD_DIR}/libs/kimath/include -I${KICAD_DIR}/libs/kiplatform/include"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/clipper2/Clipper2Lib/include"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nlohmann_json"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/expected/include"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/rtree"
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/fmt"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/dynamic_bitset"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nanodbc"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/picosha2"
@@ -415,6 +418,18 @@ fi
 # Step 8: Build the app target
 kw_stage kicad-compile
 log_info "Building ${APP_NAME} (CMake target: ${KICAD_TARGET})..."
+
+# The embind object (step 7.1) is injected via linker flags, NOT tracked as a CMake/
+# make dependency — so when ONLY <app>_embind.cpp changes, make sees no changed source,
+# skips the link, and the new bindings silently vanish from the binary. Force a relink
+# whenever the freshly-compiled embind object is newer than the linked output.
+LINK_OUT_JS="${KICAD_BUILD}/${KICAD_SUBDIR}/${APP_NAME}.js"
+LINK_OUT_WASM="${KICAD_BUILD}/${KICAD_SUBDIR}/${APP_NAME}.wasm"
+if [ -f "${EMBIND_OBJ}" ] && [ -f "${LINK_OUT_JS}" ] && [ "${EMBIND_OBJ}" -nt "${LINK_OUT_JS}" ]; then
+    log_info "Embind object newer than ${APP_NAME}.js — forcing relink to pick up new bindings"
+    rm -f "${LINK_OUT_JS}" "${LINK_OUT_WASM}"
+fi
+
 emmake make -j${JOBS} "${KICAD_TARGET}"
 
 # Step 8.1: Build bitmap resources (images.tar.gz)
