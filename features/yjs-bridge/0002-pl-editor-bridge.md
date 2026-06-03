@@ -104,14 +104,30 @@ On **apply**, a blob item is reconstructed by parsing its `sexpr` back into a `D
 **Commit 1 — interface/identity:** `KIID m_Uuid` on `DS_DATA_ITEM` + `(uuid)`
 keyword/parse(backfill)/save via `FormatUuid`. Build once; verify a `.kicad_wks` round-trips
 uuids and a legacy file is backfilled on save.
-**Commit 2 — bridge + converters (all 5 types) + tests:**
-1. `common/drawing_sheet/ds_collab_bridge.{h,cpp}` (`#ifdef __EMSCRIPTEN__`): the snapshot-differ
-   `ChangeSource` (cache + diff, emit on `OnModify`), `kicadCollabApply` per-item-by-uuid
-   (incl. blob parse-one for poly/bitmap), `s_applyingRemote` guard.
-2. Web: `yjs` + `BroadcastChannel` provider; the generic reconciler (general §4) + `WasmTool`
-   wiring; optional Zod guard. Two-tab demo.
-3. Verify: insert/move text & line & rect in tab A → mirrors in tab B and back; poly/bitmap
-   round-trip via blob; selection survives remote apply (uuid re-select); e2e + screenshots.
+**Commit 2 — bridge + converters (all 5 types) + tests:** *(done 2026-06-03)*
+
+> **Placement update (as built):** the bridge does **not** live in
+> `common/drawing_sheet/ds_collab_bridge.{h,cpp}` (kicad fork). To honor CLAUDE.md
+> ("fix in the wasm layer / keep the fork close to upstream") the entire
+> differ/apply/emit was implemented in the **wasm layer**,
+> `wasm/bindings/pl_editor_embind.cpp` (root repo), using only public
+> `DS_DATA_MODEL`/`DS_DATA_ITEM` API. **Fork footprint = one file, +15 lines:** an
+> `extern "C" void kicadCollabOnModify()` call wired into `PL_EDITOR_FRAME::OnModify()`.
+> Same architecture as below; only the file location differs.
+
+1. Bridge (`wasm/bindings/pl_editor_embind.cpp`): the snapshot-differ `ChangeSource`
+   (cache + diff, emit on `OnModify` via `EM_ASM`), `kicadCollabApply` per-item-by-uuid
+   (scalars by field; poly/bitmap via `SetPageLayout`-append blob), `s_applyingRemote`
+   guard, plus `kicadCollabSnapshot()` (seed/baseline) and a `kicadCollabTestAddText()`
+   PoC local-edit hook.
+2. Web: `yjs` + `BroadcastChannel` provider; the generic reconciler (general §4) under
+   `web/apps/frontend/src/wasm/collab/`. CRDT = uuid-keyed `Y.Map` of per-item `Y.Map`
+   (refinement of "Y.Array<Y.Map>" — better for id-stable items). `WasmTool` wiring +
+   Zod guard deferred.
+3. Verified by `tests/kicad/pl_editor-collab.spec.ts`: single-page C++ contract
+   (snapshot / apply changed+removed+added / echo-suppression) + two-tab BroadcastChannel
+   A↔B text propagation through the real reconciler. Selection re-acquire-by-uuid and
+   screenshots deferred.
 
 ## Risks specific to pl_editor
 - Carries the **format-change divergence** (general §9) — the only tool that does.
