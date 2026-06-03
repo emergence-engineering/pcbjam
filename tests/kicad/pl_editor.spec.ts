@@ -70,10 +70,14 @@ test.describe('pl_editor WASM', () => {
         expect(canvasCount).toBeGreaterThan(0);
     });
 
-    test('wizard completes and leaves the editor in a clean state', async ({ page, testLogger }) => {
+    test('first-run wizard is skipped by the seeded config (none appears)', async ({ page, testLogger }) => {
+        // The harness seeds a default KiCad config in preRun (like the web app's
+        // boot.ts), so STARTWIZARD::CheckAndRun() finds NeedsUserInput()==false and
+        // never opens the modal wizard. completeWizard() therefore finds nothing to
+        // click and the editor comes straight up. Assert no wizard/dialog is ever
+        // visible — the inverse of the old "click through the wizard" flow.
         await completeWizard(page);
 
-        // After the wizard, no wxDialog/wxWizard should still be visible.
         const blockingDialogs = await page.evaluate(() => {
             const registry = window.wxElementRegistry;
             if (!registry) return -1;
@@ -82,10 +86,10 @@ test.describe('pl_editor WASM', () => {
                     /^wxDialog|Wizard/.test(el.typeName))
                 .length;
         });
-        expect(blockingDialogs, 'no blocking dialog/wizard visible after completeWizard()').toBe(0);
-        expect(hasAbort(testLogger), 'no WASM abort during wizard').toBe(false);
+        expect(blockingDialogs, 'no setup wizard/dialog should be visible (seed skipped it)').toBe(0);
+        expect(hasAbort(testLogger), 'no WASM abort during launch').toBe(false);
 
-        await page.screenshot({ path: 'test-results/pl_editor-02-post-wizard.png', scale: 'device' });
+        await page.screenshot({ path: 'test-results/pl_editor-02-no-wizard.png', scale: 'device' });
     });
 
     test('File menu exposes Open... and Save As...', async ({ page, testLogger }) => {
