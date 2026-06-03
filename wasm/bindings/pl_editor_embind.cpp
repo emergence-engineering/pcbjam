@@ -13,6 +13,7 @@
 #include <wx/app.h>
 #include <wx/string.h>
 #include <wx/window.h>
+#include <drawing_sheet/ds_data_model.h>
 
 using namespace emscripten;
 
@@ -37,8 +38,20 @@ bool kicadOpenFile( std::string path )
             std::vector<wxString>( 1, wxString::FromUTF8( path.c_str() ) ) );
 }
 
+// Programmatically save the in-memory drawing sheet to a .kicad_wks file, without
+// driving the Save As dialog. pl_editor edits the process-wide singleton
+// DS_DATA_MODEL::GetTheInstance(), so this serializes exactly what the editor has
+// loaded — letting a test read the file back from MEMFS and assert the (uuid …)
+// round-trip / backfill. (Also a building block for the collab bridge's later
+// materialize-to-file path.)
+void kicadSaveDrawingSheet( std::string path )
+{
+    DS_DATA_MODEL::GetTheInstance().Save( wxString::FromUTF8( path.c_str() ) );
+}
+
 EMSCRIPTEN_BINDINGS(pl_editor) {
     // Programmatic file open (preferred over UI automation from the web app).
     function("kicadOpenFile", &kicadOpenFile);
+    function("kicadSaveDrawingSheet", &kicadSaveDrawingSheet);
 }
 #endif
