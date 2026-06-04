@@ -26,6 +26,9 @@
 #include <sch_item.h>
 #include <sch_line.h>
 #include <sch_junction.h>
+#include <sch_no_connect.h>
+#include <sch_text.h>
+#include <sch_label.h>
 #include <sch_screen.h>
 #include <sch_sheet_path.h>
 
@@ -101,6 +104,12 @@ json itemToJson( SCH_ITEM* aItem )
         j["layer"] = (int) line->GetLayer();
     }
 
+    if( EDA_TEXT* txt = dynamic_cast<EDA_TEXT*>( aItem ) )
+        j["text"] = toUtf8( txt->GetText() );
+
+    if( SCH_LABEL_BASE* lbl = dynamic_cast<SCH_LABEL_BASE*>( aItem ) )
+        j["shape"] = (int) lbl->GetShape();
+
     return j;
 }
 
@@ -122,6 +131,29 @@ SCH_ITEM* makeItem( const json& j )
     else if( type == "SCH_JUNCTION" )
     {
         item = new SCH_JUNCTION( VECTOR2I( j.value( "x", 0 ), j.value( "y", 0 ) ) );
+    }
+    else if( type == "SCH_NO_CONNECT" )
+    {
+        item = new SCH_NO_CONNECT( VECTOR2I( j.value( "x", 0 ), j.value( "y", 0 ) ) );
+    }
+    else if( type == "SCH_TEXT" )
+    {
+        item = new SCH_TEXT( VECTOR2I( j.value( "x", 0 ), j.value( "y", 0 ) ),
+                             wxString::FromUTF8( j.value( "text", "" ).c_str() ) );
+    }
+    else if( type == "SCH_LABEL" || type == "SCH_GLOBALLABEL" || type == "SCH_HIERLABEL" )
+    {
+        VECTOR2I pos( j.value( "x", 0 ), j.value( "y", 0 ) );
+        wxString text = wxString::FromUTF8( j.value( "text", "" ).c_str() );
+
+        SCH_LABEL_BASE* lbl = ( type == "SCH_LABEL" )         ? (SCH_LABEL_BASE*) new SCH_LABEL( pos, text )
+                              : ( type == "SCH_GLOBALLABEL" ) ? (SCH_LABEL_BASE*) new SCH_GLOBALLABEL( pos, text )
+                                                             : (SCH_LABEL_BASE*) new SCH_HIERLABEL( pos, text );
+
+        if( j.contains( "shape" ) )
+            lbl->SetShape( (LABEL_FLAG_SHAPE) j["shape"].get<int>() );
+
+        item = lbl;
     }
 
     if( item )
