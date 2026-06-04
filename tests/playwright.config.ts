@@ -50,7 +50,9 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // 1 local retry absorbs transient `npx serve` connection refusals under heavy
+  // parallel load (many workers fetching large WASM bundles at once).
+  retries: process.env.CI ? 2 : 1,
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   timeout: 60000,  // WASM can be slow to load

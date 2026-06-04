@@ -767,13 +767,50 @@ export async function clickTab(
   page: Page,
   label: string
 ): Promise<boolean> {
-  const tab = await findTab(page, label);
-  if (!tab) {
-    console.warn(`Tab "${label}" not found`);
-    return false;
+  // Clicking a tab too fast (e.g. immediately after a burst of mouse events)
+  // can be dropped before the notebook processes the page change. Re-click and
+  // verify the selection actually switched, retrying a few times.
+  const maxAttempts = 4;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const tab = await findTab(page, label);
+    if (!tab) {
+      console.warn(`Tab "${label}" not found`);
+      return false;
+    }
+
+    // Already selected (e.g. a previous attempt registered late) -> done.
+    const selectedBefore = await findSelectedTab(page);
+    if (selectedBefore?.label === label) return true;
+
+    await page.mouse.click(tab.centerX, tab.centerY);
+
+    // Poll until the registry reports this tab as the selected one.
+    const switched = await page
+      .waitForFunction(
+        (expected) => {
+          const registry = (window as any).wxElementRegistry;
+          if (!registry || !registry.findAllRendered) return false;
+          return registry
+            .findAllRendered({ label: undefined })
+            .some(
+              (e: any) =>
+                e.elementType === 'tab' &&
+                e.subType === 'selected' &&
+                e.label === expected
+            );
+        },
+        label,
+        { timeout: 1000 }
+      )
+      .then(() => true)
+      .catch(() => false);
+
+    if (switched) return true;
+    await page.waitForTimeout(200);
   }
-  await page.mouse.click(tab.centerX, tab.centerY);
-  return true;
+
+  console.warn(`Tab "${label}" did not become selected after ${maxAttempts} attempts`);
+  return false;
 }
 
 /**

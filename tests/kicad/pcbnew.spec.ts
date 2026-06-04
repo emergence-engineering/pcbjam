@@ -392,7 +392,12 @@ test.describe('PCBnew WASM', () => {
         const metrics = await getCanvasMetrics(page);
         const registryMetrics = await getRegistryMetrics(page);
 
-        expect(metrics.dpr).toBeGreaterThan(1);
+        // Headless Firefox runs at dpr=1, so a strict `> 1` check can never pass
+        // there (it assumes a Retina-aware/headed run). eeschema.spec.ts already
+        // relaxed the same assertion for this reason. The hi-dpi *scaling*
+        // invariant is still validated below via
+        // `round(rectWidth * dpr) === canvas.width`, which holds at any dpr.
+        expect(metrics.dpr).toBeGreaterThanOrEqual(1);
         expect(metrics.mainCanvas).not.toBeNull();
         expect(metrics.glCanvas).not.toBeNull();
         expect(registryMetrics.toolbars.length).toBeGreaterThanOrEqual(4);
@@ -607,9 +612,24 @@ test.describe('PCBnew WASM', () => {
             y: Math.round(glCanvasBox.y + glCanvasBox.height * 0.47),
         };
 
-        await page.mouse.click(startPoint.x, startPoint.y);
-        await page.waitForTimeout(250);
-        await page.mouse.click(endPoint.x, endPoint.y);
+        // Place the two line vertices with an explicit, settled motion before
+        // each button press. KiCad's GAL updates the active tool's world-space
+        // cursor from the asyncified pointer-move handler; a bare
+        // `mouse.click()` (move+down+up with no dwell) fires the button before
+        // that handler has run, so the vertex lands at a stale position or is
+        // dropped entirely and no segment is committed. A short dwell after each
+        // move lets the position propagate — matching a human's click cadence,
+        // which is why the tool works when driven by hand. (eeschema's
+        // draw-wires path happens to tolerate the bare click; pcbnew does not.)
+        await page.mouse.move(startPoint.x, startPoint.y);
+        await page.waitForTimeout(350);
+        await page.mouse.down();
+        await page.mouse.up();
+        await page.waitForTimeout(350);
+        await page.mouse.move(endPoint.x, endPoint.y);
+        await page.waitForTimeout(350);
+        await page.mouse.down();
+        await page.mouse.up();
         await page.waitForTimeout(750);
 
         const afterDrawing = await page.screenshot({

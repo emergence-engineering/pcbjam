@@ -61,4 +61,5 @@ output/
 *.d
 /tests/.test-port-coroutine
 .playwright-mcp
+.claude/worktrees/
 

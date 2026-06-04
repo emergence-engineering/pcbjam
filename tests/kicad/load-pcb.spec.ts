@@ -134,26 +134,15 @@ function runLoadPcbTest(demo: DemoCfg): void {
             scale: 'device',
         });
 
-        // ── Click the file row in the filelist control. ────────────────
-        const filelistBox = await page.evaluate(() => {
-            const registry = window.wxElementRegistry;
-            if (!registry) return null;
-            const filelist = registry.findAll({ visible: true })
-                .find((el) => el.typeName === 'wxFileListCtrl' || el.name === 'filelist');
-            return filelist ? {
-                x: filelist.screenX,
-                y: filelist.screenY,
-                width: filelist.width,
-                height: filelist.height,
-            } : null;
-        });
-        expect(filelistBox, 'wxFileListCtrl should be visible').not.toBeNull();
-        if (!filelistBox) throw new Error('filelist not found');
-
-        await page.mouse.click(filelistBox.x + 24, filelistBox.y + 32);
-        await page.waitForTimeout(300);
-
-        // ── Focus the filename text input and press Enter to accept. ──
+        // ── Focus the filename text field, type the name, accept. ──────
+        //    The Open dialog gives default keyboard focus to the file LIST,
+        //    where keystrokes act as type-ahead (and Enter on the highlighted
+        //    ".." row navigates up) rather than filename entry. So we must click
+        //    the wxTextCtrl to focus it first, located via the element registry
+        //    rather than a fixed pixel offset. No filelist row click is needed —
+        //    the earlier version's extra row + offset clicks were what left focus
+        //    off the field, so the typed name never registered, the field stayed
+        //    empty, and Enter was a no-op (the board never loaded).
         const filenameInput = await page.evaluate(() => {
             const registry = window.wxElementRegistry;
             if (!registry) return null;
@@ -165,10 +154,9 @@ function runLoadPcbTest(demo: DemoCfg): void {
         if (!filenameInput) throw new Error('filename text input not found');
 
         await page.mouse.click(filenameInput.x, filenameInput.y);
-        await page.waitForTimeout(150);
-        await page.keyboard.press('Control+a');
+        await page.waitForTimeout(200);
         await page.keyboard.type(pcbFilename);
-        await page.waitForTimeout(150);
+        await page.waitForTimeout(300);
         await page.keyboard.press('Enter');
 
         // ── Wait for the load to complete (no dialogs visible). The

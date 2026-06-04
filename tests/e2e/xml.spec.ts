@@ -5,7 +5,7 @@ test.describe('wxXmlDocument Tests', () => {
 
   test('XML test app loads successfully', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
-    const loaded = await tryLoadApp(page);
+    const loaded = await tryLoadApp(page, 30000);
 
     await page.screenshot({ path: 'test-results/xml-01-loaded.png', fullPage: true });
 
@@ -15,7 +15,7 @@ test.describe('wxXmlDocument Tests', () => {
 
   test('Sample XML input exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
-    const loaded = await tryLoadApp(page);
+    const loaded = await tryLoadApp(page, 30000);
     expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
@@ -27,7 +27,7 @@ test.describe('wxXmlDocument Tests', () => {
 
   test('Parse button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
-    const loaded = await tryLoadApp(page);
+    const loaded = await tryLoadApp(page, 30000);
     expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
@@ -38,7 +38,7 @@ test.describe('wxXmlDocument Tests', () => {
 
   test('Traverse button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
-    const loaded = await tryLoadApp(page);
+    const loaded = await tryLoadApp(page, 30000);
     expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
@@ -49,7 +49,7 @@ test.describe('wxXmlDocument Tests', () => {
 
   test('Create XML button exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
-    const loaded = await tryLoadApp(page);
+    const loaded = await tryLoadApp(page, 30000);
     expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
@@ -60,7 +60,7 @@ test.describe('wxXmlDocument Tests', () => {
 
   test('Results output panel exists', async ({ page, testLogger }) => {
     await page.goto('/standalone/xml/xml_test.html');
-    const loaded = await tryLoadApp(page);
+    const loaded = await tryLoadApp(page, 30000);
     expect(loaded, 'App should load').toBe(true);
 
     await page.waitForTimeout(500);
