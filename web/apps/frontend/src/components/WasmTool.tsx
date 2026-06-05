@@ -9,7 +9,7 @@ import type { CollabWindow } from "@/wasm/collab";
 import { clog, cwarn } from "@/wasm/collab/debug";
 
 // Tools with a working collab bridge (kicadCollabSnapshot/Apply embind exports).
-const COLLAB_TOOLS = new Set<Tool>(["pl_editor", "eeschema"]);
+const COLLAB_TOOLS = new Set<Tool>(["pl_editor", "eeschema", "pcbnew"]);
 
 /**
  * Opt-in collaborative editing (features/yjs-bridge). Enabled when the URL carries
