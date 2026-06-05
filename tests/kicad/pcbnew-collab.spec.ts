@@ -21,6 +21,11 @@ import { test, expect } from "./fixtures";
 
 const SEG1 = "44444444-0000-0000-0000-000000000001";
 const SEG2 = "44444444-0000-0000-0000-000000000002";
+// A footprint and two of its TEXT children (a silkscreen Reference field + a user fp_text), each
+// with a stable uuid so the test can move them independently of the footprint — the bug 1 case.
+const FP1 = "66666666-0000-0000-0000-000000000001";
+const FP1_REF = "66666666-0000-0000-0000-0000000000aa"; // Reference field (PCB_FIELD, F.SilkS)
+const FP1_TXT = "66666666-0000-0000-0000-0000000000cc"; // user fp_text (PCB_TEXT, F.SilkS)
 const SAMPLE_PCB = `(kicad_pcb
 \t(version 20241229)
 \t(generator "pcbnew")
@@ -32,10 +37,35 @@ const SAMPLE_PCB = `(kicad_pcb
 \t(layers
 \t\t(0 "F.Cu" signal)
 \t\t(2 "B.Cu" signal)
+\t\t(37 "F.SilkS" user)
 \t\t(25 "Edge.Cuts" user)
 \t)
 \t(setup)
 \t(net 0 "")
+\t(footprint "TestLib:R"
+\t\t(layer "F.Cu")
+\t\t(uuid "${FP1}")
+\t\t(at 100 100)
+\t\t(attr smd)
+\t\t(property "Reference" "R1"
+\t\t\t(at 0 -4.2 0)
+\t\t\t(layer "F.SilkS")
+\t\t\t(uuid "${FP1_REF}")
+\t\t\t(effects (font (size 1 1) (thickness 0.15)))
+\t\t)
+\t\t(property "Value" "R"
+\t\t\t(at 0 4.6 0)
+\t\t\t(layer "F.Fab")
+\t\t\t(uuid "66666666-0000-0000-0000-0000000000bb")
+\t\t\t(effects (font (size 1 1) (thickness 0.15)))
+\t\t)
+\t\t(fp_text user "HELLO"
+\t\t\t(at 0 0 0)
+\t\t\t(layer "F.SilkS")
+\t\t\t(uuid "${FP1_TXT}")
+\t\t\t(effects (font (size 1 1) (thickness 0.15)))
+\t\t)
+\t)
 \t(segment (start 50.8 50.8) (end 101.6 50.8) (width 0.2) (layer "F.Cu") (net 0) (uuid "${SEG1}"))
 \t(segment (start 50.8 76.2) (end 101.6 76.2) (width 0.2) (layer "F.Cu") (net 0) (uuid "${SEG2}"))
 )
@@ -117,6 +147,14 @@ test.describe("pcbnew collab bridge — single page", () => {
     expect(byId.has(SEG1)).toBe(true);
     expect(byId.get(SEG1)!.type).toBe("PCB_TRACK");
     expect(byId.get(SEG1)!.x).toBe(50_800_000); // 50.8mm × 1e6 IU (nm)
+    // The footprint AND its text children are emitted individually by uuid (bug 1 fix) — that's
+    // what lets a silkscreen text move sync without the footprint moving.
+    expect(byId.has(FP1), "footprint present").toBe(true);
+    expect(byId.get(FP1)!.type).toBe("FOOTPRINT");
+    expect(byId.has(FP1_REF), "footprint Reference field present").toBe(true);
+    expect(byId.get(FP1_REF)!.type).toBe("PCB_FIELD");
+    expect(byId.has(FP1_TXT), "footprint user fp_text present").toBe(true);
+    expect(byId.get(FP1_TXT)!.type).toBe("PCB_TEXT");
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
 
@@ -205,6 +243,46 @@ test.describe("pcbnew collab bridge — single page", () => {
 
     const echoes = await page.evaluate(() => (window as unknown as { __echo: string[] }).__echo);
     expect(echoes, "apply() must not echo a local onDelta").toHaveLength(0);
+    expect(hasAbort(testLogger), "no WASM abort").toBe(false);
+  });
+
+  // Bug 1: a footprint's silkscreen text (a child item) can be moved independently of its
+  // footprint. apply resolves the child by uuid (BOARD::ResolveItem sees footprint children) and
+  // commits a Modify — which BOARD_COMMIT::undoLevelItem rolls up to the parent footprint — then
+  // SetPosition. The footprint itself does NOT move. Covers both the Reference field (PCB_FIELD)
+  // and a user fp_text (PCB_TEXT).
+  test("apply moves a footprint's silkscreen text child by uuid (footprint stays put)", async ({
+    page,
+    testLogger,
+  }) => {
+    await bootAndOpen(page, "fptext");
+
+    const fpBefore = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), FP1);
+
+    for (const childId of [FP1_REF, FP1_TXT]) {
+      const before = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), childId);
+      expect(before, `child ${childId} resolvable`).not.toBe("");
+      const [cx, cy] = before.split(",").map(Number);
+      const ny = cy + 3_000_000; // +3mm in Y
+
+      await page.evaluate(
+        ({ id, cx, ny }) =>
+          window.Module.kicadCollabApply(
+            JSON.stringify({ changed: [{ id, x: cx, y: ny }], added: [], removed: [] }),
+          ),
+        { id: childId, cx, ny },
+      );
+      await expect
+        .poll(() => page.evaluate((id) => window.Module.kicadCollabGetPos(id), childId), {
+          timeout: 10000,
+          intervals: [200],
+        })
+        .toBe(`${cx},${ny}`);
+    }
+
+    // The footprint origin must be unchanged — only the child text moved.
+    const fpAfter = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), FP1);
+    expect(fpAfter, "footprint did not move").toBe(fpBefore);
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
 });

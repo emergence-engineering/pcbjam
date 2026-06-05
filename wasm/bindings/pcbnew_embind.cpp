@@ -18,8 +18,11 @@
 #include <footprint.h>
 #include <pad.h>
 #include <pcb_track.h>
+#include <pcb_field.h>
+#include <pcb_text.h>
 #include <pcb_group.h>
 #include <zone.h>
+#include <eda_text.h>
 #include <pcb_edit_frame.h>
 #include <kiway_player.h>
 #include <kiway.h>
@@ -99,14 +102,36 @@ bool isTrackType( KICAD_T t )
     return t == PCB_TRACE_T || t == PCB_ARC_T || t == PCB_VIA_T;
 }
 
-// Iterate every TOP-LEVEL board item (tracks, footprints, drawings, zones, groups). Footprint
-// child items (pads, fp text) are intentionally NOT visited individually — they move with their
-// parent footprint, so the bridge syncs the footprint as a unit (its uuid in m_itemByIdCache).
+// Iterate every board item the bridge syncs: the top-level items (tracks, footprints, drawings,
+// zones, groups) PLUS each footprint's TEXT children (fields = reference/value/user, and graphic
+// PCB_TEXT). The text children are visited by their OWN uuid because a silkscreen reference/value
+// can be moved *independently* of its footprint (the footprint origin doesn't change, so syncing
+// the footprint as a unit would miss it). Pads and footprint graphic shapes are NOT visited — they
+// move only with the footprint. All these uuids live in BOARD::m_itemByIdCache, so apply resolves
+// them directly. On a whole-footprint move the children also re-appear in the diff (their absolute
+// positions changed); that's redundant but convergent, since apply uses absolute SetPosition.
 template <typename Fn>
 void forEachTopItem( BOARD& aBoard, Fn&& aFn )
 {
     for( PCB_TRACK* t : aBoard.Tracks() )       aFn( static_cast<BOARD_ITEM*>( t ) );
-    for( FOOTPRINT* f : aBoard.Footprints() )   aFn( static_cast<BOARD_ITEM*>( f ) );
+
+    for( FOOTPRINT* f : aBoard.Footprints() )
+    {
+        aFn( static_cast<BOARD_ITEM*>( f ) );
+
+        for( PCB_FIELD* fld : f->GetFields() )
+        {
+            if( fld )
+                aFn( static_cast<BOARD_ITEM*>( fld ) );
+        }
+
+        for( BOARD_ITEM* g : f->GraphicalItems() )
+        {
+            if( g->Type() == PCB_TEXT_T )
+                aFn( g );
+        }
+    }
+
     for( BOARD_ITEM* d : aBoard.Drawings() )    aFn( d );
     for( ZONE* z : aBoard.Zones() )             aFn( static_cast<BOARD_ITEM*>( z ) );
     for( PCB_GROUP* g : aBoard.Groups() )       aFn( static_cast<BOARD_ITEM*>( g ) );
@@ -137,6 +162,11 @@ json itemToJson( BOARD_ITEM* aItem )
         j["ey"]    = tr->GetEnd().y;
         j["width"] = tr->GetWidth();
     }
+
+    // Text items (incl. footprint fields / graphic text): carry the string so a move diff is
+    // legible and a future text `added` can reconstruct. Position-only sync uses x/y above.
+    if( EDA_TEXT* txt = dynamic_cast<EDA_TEXT*>( aItem ) )
+        j["text"] = toUtf8( txt->GetText() );
 
     return j;
 }
@@ -350,6 +380,13 @@ void doApply( PCB_EDIT_FRAME* aFrame, const json& aDelta )
 
         if( BOARD_ITEM* item = board->ResolveItem( id, /*allowNullptr*/ true ) )
         {
+            // A footprint text child appears in `removed` when its whole footprint was deleted
+            // (it vanished from the sender's snapshot). Removing the footprint cascades to its
+            // children, so don't also remove the child here — that would double-remove. (A rare
+            // child-only delete with the footprint kept is therefore not synced; acceptable.)
+            if( item->GetParentFootprint() )
+                continue;
+
             commit.Remove( item );
             staged = true;
         }
@@ -396,7 +433,11 @@ void doApply( PCB_EDIT_FRAME* aFrame, const json& aDelta )
     s_applyingRemote = false;
 }
 
-// Test/PoC move (the BOARD_COMMIT body for kicadCollabTestMoveFirst, deferred via CallAfter).
+// Test/PoC move (the BOARD_COMMIT body for kicadCollabTestMoveFirst). Run inside a COROUTINE by
+// the caller: `BOARD_ITEM::Move` is virtual, and dispatched off the app main stack (a bare
+// CallAfter) it hits the asyncify call_indirect mis-dispatch and silently NO-OPS — the commit
+// dirties the board but the item doesn't move. On the fiber stack (where native tool edits and
+// doApply run) it dispatches correctly. (Same lesson as eeschema's devirtualized move.)
 void collabTestMove( PCB_EDIT_FRAME* aFrame, BOARD_ITEM* aItem, int aDx, int aDy )
 {
     BOARD_COMMIT commit( aFrame );
@@ -482,7 +523,17 @@ std::string kicadCollabTestMoveFirst( int aDx, int aDy )
                             return;
 
                         movedId = toUtf8( item->m_Uuid.AsString() );
-                        fr->CallAfter( [fr, item, aDx, aDy]() { collabTestMove( fr, item, aDx, aDy ); } );
+                        // Run on the app main stack (CallAfter) AND inside a COROUTINE fiber, so
+                        // the virtual Move() dispatches instead of no-opping — same wrapping as
+                        // kicadCollabApply's doApply.
+                        fr->CallAfter( [fr, item, aDx, aDy]() {
+                            COROUTINE<int, int> cor( [fr, item, aDx, aDy]( int ) -> int
+                                                     {
+                                                         collabTestMove( fr, item, aDx, aDy );
+                                                         return 0;
+                                                     } );
+                            cor.Call( 0 );
+                        } );
                     } );
 
     return movedId;
