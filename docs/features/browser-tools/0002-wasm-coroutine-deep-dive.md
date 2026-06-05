@@ -93,7 +93,7 @@ release_fcontext(ctx);                   // Free a context
 
 On native: ~20 lines of assembly per platform (x86, ARM, etc.) that saves/loads CPU registers. On WASM: impossible natively, must be emulated.
 
-**libcontext is NOT a separate repo.** It's a directory inside KiCad (`kicad/thirdparty/libcontext/`). Our kicad submodule points to our fork (`VV-EE/kicad-source-mirror.git`), so we already own it. No additional forking needed.
+**libcontext is NOT a separate repo.** It's a directory inside KiCad (`kicad/thirdparty/libcontext/`). Our kicad submodule points to our fork (`emergence-engineering/kicad-source-mirror.git`), so we already own it. No additional forking needed.
 
 ### The Full Stack of Abstractions
 

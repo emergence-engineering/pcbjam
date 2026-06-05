@@ -1,8 +1,8 @@
 [submodule "kicad"]
 	path = kicad
-	url = git@github.com:VV-EE/kicad-source-mirror.git
+	url = git@github.com:emergence-engineering/kicad-source-mirror.git
 	branch = wasm-port
 [submodule "wxwidgets"]
 	path = wxwidgets
-	url = git@github.com:VV-EE/wxWidgets.git
+	url = git@github.com:emergence-engineering/wxWidgets.git
 	branch = wasm-port
