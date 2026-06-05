@@ -1,0 +1,98 @@
+# Cold build of all KiCad WASM apps (with deps) + full e2e suites, on Ubicloud.
+#
+# Runs on Ubicloud's managed GitHub Actions runners. Premium runners (AMD Ryzen 9
+# 7950X3D, ~2x faster) are enabled at the ACCOUNT level in the Ubicloud Console
+# (GitHub Runners -> Settings -> Enable Premium Runners); jobs on the
+# `ubicloud-standard-*` labels below are then auto-routed to the premium fleet with
+# no change needed here.
+#
+# One-time setup required:
+#   The kicad/wxwidgets submodules are private SSH repos in the VV-EE org, which the
+#   default GITHUB_TOKEN cannot read. Add a repo secret `SUBMODULES_TOKEN` (a PAT with
+#   read access to VV-EE/kicad-source-mirror and VV-EE/wxWidgets); actions/checkout
+#   rewrites the SSH submodule URLs to token-authenticated HTTPS.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubicloud-standard-16
+    timeout-minutes: 240          # cold --build-deps dominates; + wx build + both suites
+    env:
+      # Stream build-script output straight to the Actions log instead of redirecting
+      # it to logs/<script>/<ts>.log (see scripts/common/logging.sh). Nothing consumes
+      # KICAD_LOG_FILE, so this is safe and gives live, greppable CI output.
+      KICAD_LOG_NESTED: "1"
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN }}
+
+      - name: Show disk space
+        run: df -h
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # 1) Cold build every KiCad WASM app + all dependencies (Docker; longest step).
+      #    Output lands in ./output/.
+      - name: Build KiCad WASM (all, --build-deps)
+        run: ./docker/build.sh all --build-deps
+
+      # 2) Host-side wxWidgets build that produces the wxWidgets test apps consumed by
+      #    `npm run test` (NOT produced by docker/build.sh). Auto-installs emsdk.
+      - name: Build wxWidgets (wxUniversal WASM)
+        run: ./scripts/build-wxuniversal-wasm.sh
+
+      - name: Build wxWidgets test apps
+        run: ./scripts/build-wasm-test.sh
+
+      # 3) Test deps + browsers (firefox for KiCad headless, chromium for wxWidgets).
+      - name: Install test deps
+        working-directory: tests
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: tests
+        run: npx playwright install --with-deps firefox chromium
+
+      # 4) Stage KiCad artifacts from ./output into tests/apps/kicad.
+      - name: Setup KiCad WASM for tests
+        working-directory: tests
+        run: npm run setup:kicad
+
+      # 5) Both e2e suites. GitHub sets CI=true automatically -> workers:1, retries,
+      #    fresh per-run web server (see playwright configs).
+      - name: wxWidgets e2e (npm run test)
+        working-directory: tests
+        run: npm run test
+
+      - name: KiCad e2e (npm run test:kicad)
+        working-directory: tests
+        run: npm run test:kicad
+
+      # 6) Always capture logs/screenshots for post-mortem.
+      - name: Upload test logs & results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            tests/logs/**
+            tests/test-results/**
+            tests/playwright-report/**
+            logs/**
+          if-no-files-found: ignore
