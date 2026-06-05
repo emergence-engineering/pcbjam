@@ -237,8 +237,8 @@ emar rcs "${STUBS_BUILD}/libgit2_stub.a" "${STUBS_BUILD}/libgit2_stub.o"
 emcc -c "${STUBS_DIR}/curl_stub.c" -o "${STUBS_BUILD}/curl_stub.o"
 emar rcs "${STUBS_BUILD}/libcurl_stub.a" "${STUBS_BUILD}/curl_stub.o"
 
-# Note: GLU tesselator is now implemented in wasm/stubs/glu_wasm_impl.cpp
-# It's compiled as part of the GAL library (requires KiCad headers)
+# Note: the GLU tesselator is provided by kicad/libs/kimath/glu_tess/glu_tess_impl.cpp,
+# compiled as part of the GAL library (requires KiCad headers).
 
 # Compile NNG stub (IPC API requires NNG but sockets don't work in WASM)
 emcc -c -I"${STUBS_DIR}" "${STUBS_DIR}/nng_stub.c" -o "${STUBS_BUILD}/nng_stub.o"
