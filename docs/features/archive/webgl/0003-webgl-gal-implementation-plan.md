@@ -1,5 +1,7 @@
 # WebGL GAL Port - Implementation Complete
 
+> **ARCHIVED / HISTORICAL** — the WebGL-GAL backend described here was implemented (see `kicad/common/gal/webgl/`). Live test docs: [`tests/gal-regression/README.md`](../../../../tests/gal-regression/README.md). Kept for design rationale.
+
 ## Status: ALL PHASES COMPLETE ✅
 
 **Branch:** `webgl` (21+ commits)

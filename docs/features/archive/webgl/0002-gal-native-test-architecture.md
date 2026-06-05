@@ -1,5 +1,7 @@
 # GAL Native Test Harness Architecture
 
+> **ARCHIVED / HISTORICAL** — the WebGL-GAL backend described here was implemented (see `kicad/common/gal/webgl/`). Live test docs: [`tests/gal-regression/README.md`](../../../../tests/gal-regression/README.md). Kept for design rationale.
+
 ## Overview
 
 The GAL native test harness is a standalone macOS application that compiles KiCad's actual `OPENGL_GAL` rendering engine against system wxWidgets. It generates baseline PNG screenshots for visual regression testing of WebGL rendering in the WASM build.

@@ -148,7 +148,7 @@ The `emscripten_fiber_swap` mechanism handles this correctly because the fiber J
 
 ### The `setTimeout(wakeUp, 0)` Pattern
 
-When Asyncify.wakeUp() is called while compiled code is still on the JS call stack, it corrupts state. The fix is always to defer: `setTimeout(wakeUp, 0)` ensures the previous operation has fully unwound before starting the next rewind. Our modal dialog code uses `setTimeout(0)` twice (double-deferred) for this reason — documented in `learning.md`.
+When Asyncify.wakeUp() is called while compiled code is still on the JS call stack, it corrupts state. The fix is always to defer: `setTimeout(wakeUp, 0)` ensures the previous operation has fully unwound before starting the next rewind. Our modal dialog code uses `setTimeout(0)` twice (double-deferred) for this reason — documented in `../debugging/learning.md`.
 
 **Sources**: [emscripten #16291](https://github.com/emscripten-core/emscripten/issues/16291), [emscripten #18412](https://github.com/emscripten-core/emscripten/issues/18412), [emscripten #10515](https://github.com/emscripten-core/emscripten/issues/10515)
 

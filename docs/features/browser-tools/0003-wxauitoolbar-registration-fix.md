@@ -2,7 +2,7 @@
 
 ## Context
 
-The nested Asyncify collision bug (see `0002-wasm-coroutine-deep-dive.md` and `research/threading_1.md`) is fixed. KiCad WASM now loads through the startup wizard without crashing, and the full PCBnew UI renders — menus, left drawing-tool sidebar with Line/Circle/Rectangle icons, layer panel, PCB canvas — all visible.
+The nested Asyncify collision bug (see `0002-wasm-coroutine-deep-dive.md` and `../../research/threading_1.md`) is fixed. KiCad WASM now loads through the startup wizard without crashing, and the full PCBnew UI renders — menus, left drawing-tool sidebar with Line/Circle/Rectangle icons, layer panel, PCB canvas — all visible.
 
 But tools still don't work end-to-end:
 

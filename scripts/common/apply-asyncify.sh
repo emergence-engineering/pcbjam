@@ -65,7 +65,7 @@ echo ""
 echo "Running wasm-opt -O2 on the asyncified wasm..."
 echo "  Purpose: shrink asyncify-instrumented functions back under V8's"
 echo "  per-function locals limit (otherwise large coroutine-entry and"
-echo "  similar functions silently stall in Chrome's V8). See DEBUG.md §7"
+echo "  similar functions silently stall in Chrome's V8). See docs/debugging/DEBUG.md §7"
 echo "  and memory/bundle-size-asyncify-optimization.md."
 echo "  This pass also takes several minutes and ~10-15 GB RAM."
 

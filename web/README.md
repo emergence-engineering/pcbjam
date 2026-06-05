@@ -7,7 +7,7 @@ WASM tools (pcbnew / eeschema / calculator) by URL:
 /p/<project>/<tool>/<file-path>      e.g. /p/project5/pcbnew/nyak.kicad_pcb
 ```
 
-Design + decisions: [`../features/web-init/0001-web-app-spec.md`](../features/web-init/0001-web-app-spec.md).
+Design + decisions: [`../docs/features/web-init/0001-web-app-spec.md`](../docs/features/web-init/0001-web-app-spec.md).
 
 ## Stack
 

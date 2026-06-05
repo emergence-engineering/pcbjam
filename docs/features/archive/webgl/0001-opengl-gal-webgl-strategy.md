@@ -1,5 +1,7 @@
 # OpenGL, GAL, and WebGL Strategy for KiCad WASM
 
+> **ARCHIVED / HISTORICAL** — the WebGL-GAL backend described here was implemented (see `kicad/common/gal/webgl/`, ~22.5k lines). Live test docs: [`tests/gal-regression/README.md`](../../../../tests/gal-regression/README.md). Kept for design rationale.
+
 ## Summary
 
 This document analyzes KiCad's graphics architecture and evaluates strategies for WebGL rendering in the WASM build.

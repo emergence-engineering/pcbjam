@@ -1,5 +1,7 @@
 # KiCad IPC API - WASM Fork Changes
 
+> **ARCHIVED — open cleanup TODO, not yet actioned.** Describes `#ifdef KICAD_IPC_API` guards added to ~18 KiCad source files that could be reverted to reduce fork diff. Archiving this doc does **not** perform the revert — that remains a separate task.
+
 ## Overview
 
 We added `#ifdef KICAD_IPC_API` guards to 18 KiCad source files. These guards wrap:

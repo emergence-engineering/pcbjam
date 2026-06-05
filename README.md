@@ -64,13 +64,12 @@ kicad-wasm/
 
 ## Feature Branches
 
-Each feature branch has a folder in `features/<branch-name>/` containing:
-- Documentation and research notes
-- `root.patch` - changes to main repo
-- `kicad.patch` - changes to KiCad fork
-- `wxwidgets.patch` - changes to wxWidgets fork
+Curated design docs and research notes for each feature live in
+[`docs/features/<branch-name>/`](docs/features/) (committed).
 
-Generate patches: `./scripts/create-feature-patches.sh [branch-name]`
+`./scripts/create-feature-patches.sh [branch-name]` generates per-branch patches
+(`root.patch`, `kicad.patch`, `wxwidgets.patch`) into a local `features/<branch-name>/`
+scratch dir. That dir is gitignored — the patches are local history, not committed.
 
 ## Two Build Workflows
 
@@ -91,7 +90,7 @@ cd tests && npm install && npm run test:kicad
 
 Output: `output/pcbnew.js`, `output/pcbnew.wasm`
 
-See [build.md](build.md) for detailed build documentation.
+See [docs/build.md](docs/build.md) for detailed build documentation.
 
 ### 2. wxWidgets Test Apps (Local)
 
@@ -152,8 +151,11 @@ See [tests/README.md](tests/README.md) for test documentation.
 
 ## Documentation
 
-- [Build System](build.md) - Docker build details
+See **[docs/README.md](docs/README.md)** for the full documentation map. Highlights:
+
+- [Build System](docs/build.md) - Docker build details
 - [Docker README](docker/README.md) - Container setup
+- [Debugging Guide](docs/debugging/DEBUG.md) - Asyncify/WASM debugging
 - [Tests README](tests/README.md) - Test infrastructure
 
 ## License

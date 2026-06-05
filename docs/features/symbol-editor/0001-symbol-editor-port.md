@@ -34,7 +34,7 @@ verbatim.
   mirroring the eeschema/pcbnew static-link pattern.
 - **`kicad/eeschema/eeschema.cpp`** — `IFACE::CreateKiWindow`'s `FRAME_SCH_SYMBOL_EDITOR`
   case was stubbed to `return nullptr` on `__EMSCRIPTEN__` during the eeschema MVP
-  (see `features/schematic/0001-eeschema-iface-stubs.md`). That stub is now removed so
+  (see `../schematic/0001-eeschema-iface-stubs.md`). That stub is now removed so
   the frame is constructed in WASM like the native build. This was THE blocker: with the
   stub, `Kiway.Player(FRAME_SCH_SYMBOL_EDITOR)` returned null, `single_top`'s `OnInit`
   bailed, and the app sat idle with a blank canvas (no abort, no error).
