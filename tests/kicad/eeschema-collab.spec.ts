@@ -112,6 +112,7 @@ test.describe("eeschema collab bridge — single page", () => {
   // takes effect. (Earlier this was skipped on the belief Push no-ops headless; that predated
   // the dyncall-shim fix — apply now works here. Rendering still needs the real app.)
   const TEXT_ID = "33333333-0000-0000-0000-000000000001";
+  const RECT_ID = "33333333-0000-0000-0000-000000000002";
 
   test("apply moves/removes/adds by uuid, no echo", async ({ page, testLogger }) => {
     await bootAndOpen(page, "apply");
@@ -161,9 +162,7 @@ test.describe("eeschema collab bridge — single page", () => {
       })
       .toBe("");
 
-    // added: a graphic text reconstructs by uuid. (SCH_SHAPE / SCH_SYMBOL `added` are deferred —
-    // committing a newly-constructed shape/symbol traps via the asyncify invoke_* mis-dispatch
-    // in SCH_COMMIT::Push from the programmatic apply context; see features/yjs-bridge/0006.)
+    // added: a graphic text reconstructs by uuid.
     await page.evaluate(
       (textId) =>
         window.Module.kicadCollabApply(
@@ -178,6 +177,40 @@ test.describe("eeschema collab bridge — single page", () => {
     await expect
       .poll(
         async () => (await page.evaluate(() => window.Module.kicadCollabSnapshot())).includes(TEXT_ID),
+        { timeout: 10000, intervals: [250] },
+      )
+      .toBe(true);
+
+    // added: a SCH_SHAPE (rectangle). Committing a newly-constructed shape used to trap in
+    // SCH_COMMIT::Push's CHT_ADD (GAL view->Add of a new shape → asyncify invoke_viii
+    // mis-dispatch) when doApply ran off a fiber stack; doApply now runs inside a COROUTINE, so
+    // the add dispatches like a native draw. stype 1 = SHAPE_T::RECTANGLE, fill 1 = NO_FILL.
+    await page.evaluate(
+      (rectId) =>
+        window.Module.kicadCollabApply(
+          JSON.stringify({
+            changed: [],
+            removed: [],
+            added: [
+              {
+                id: rectId,
+                type: "SCH_SHAPE",
+                stype: 1,
+                sx: 700000,
+                sy: 700000,
+                ex: 900000,
+                ey: 850000,
+                width: 0,
+                fill: 1,
+              },
+            ],
+          }),
+        ),
+      RECT_ID,
+    );
+    await expect
+      .poll(
+        async () => (await page.evaluate(() => window.Module.kicadCollabSnapshot())).includes(RECT_ID),
         { timeout: 10000, intervals: [250] },
       )
       .toBe(true);

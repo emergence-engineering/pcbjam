@@ -37,6 +37,7 @@
 #include <sch_screen.h>
 #include <sch_sheet_path.h>
 #include <schematic_settings.h>
+#include <tool/coroutine.h>
 
 using namespace emscripten;
 using json = nlohmann::json;
@@ -202,17 +203,46 @@ SCH_ITEM* makeItem( const json& j )
 
         item = lbl;
     }
-    // SCH_SHAPE `added` reconstruction is DEFERRED (returns nullptr → logged "no converter").
-    // A constructed shape builds fine, but committing a *new* one traps in SCH_COMMIT::Push's
-    // CHT_ADD path (the GAL view->Add of a new SCH_SHAPE) with a wasm "memory access out of
-    // bounds". The identical view->Add succeeds when the shape is loaded from file and when an
-    // existing shape is MOVED (CHT_MODIFY) — so this is the asyncify indirect-call (invoke_viii)
-    // mis-dispatch class: a SCH_SHAPE add-path virtual that mis-dispatches only from the
-    // programmatic CallAfter/apply context (same family as the original SCH_ITEM::Move trap,
-    // 0003). The dyncall shim only catches the "signature mismatch" variant, and this trap
-    // fires inside the wrong function so it can't be safely retried. itemToJson still emits the
-    // shape geometry (forward-compatible + drives `changed`/move); only `added` is skipped.
-    // Same blocker as SCH_SYMBOL add — see features/yjs-bridge/0006.
+    else if( type == "SCH_SHAPE" )
+    {
+        // Reconstruct from the geometry itemToJson emits. Committing a *new* SCH_SHAPE used to
+        // trap in SCH_COMMIT::Push's CHT_ADD path (GAL view->Add → an asyncify invoke_viii
+        // mis-dispatch, "memory access out of bounds") because doApply ran off a fiber stack;
+        // doApply now runs inside a COROUTINE (kicadCollabApply) so the add dispatches correctly,
+        // exactly as a native draw does. (0006/0007.)  NB FILL_T::NO_FILL == 1, not 0.
+        SHAPE_T st    = (SHAPE_T) j.value( "stype", (int) SHAPE_T::RECTANGLE );
+        int     layer = j.value( "layer", (int) LAYER_NOTES );
+        int     width = j.value( "width", 0 );
+        FILL_T  fill  = (FILL_T) j.value( "fill", (int) FILL_T::NO_FILL );
+
+        auto* shp = new SCH_SHAPE( st, (SCH_LAYER_ID) layer, width, fill );
+
+        // Rectangle: two corners. Circle: start = center, end = a point on the radius. Both are
+        // fully defined by start+end (what itemToJson emits via GetStart()/GetEnd()).
+        shp->SetStart( VECTOR2I( j.value( "sx", 0 ), j.value( "sy", 0 ) ) );
+        shp->SetEnd( VECTOR2I( j.value( "ex", 0 ), j.value( "ey", 0 ) ) );
+
+        if( st == SHAPE_T::ARC && j.contains( "cx" ) )
+        {
+            shp->SetCenterX( j["cx"].get<int>() );
+            shp->SetCenterY( j["cy"].get<int>() );
+        }
+        else if( st == SHAPE_T::BEZIER )
+        {
+            if( j.contains( "c1x" ) )
+                shp->SetBezierC1( VECTOR2I( j["c1x"].get<int>(), j["c1y"].get<int>() ) );
+            if( j.contains( "c2x" ) )
+                shp->SetBezierC2( VECTOR2I( j["c2x"].get<int>(), j["c2y"].get<int>() ) );
+        }
+
+        if( SCH_EDIT_FRAME* fr = schFrame() )
+            shp->SetParent( &fr->Schematic() );
+
+        item = shp;
+    }
+    // SCH_SYMBOL `added` is still deferred (needs the s-expr clipboard-blob emit + LoadContent
+    // reconstruction; symbol PLACEMENT is also natively blocked until symbol libraries are
+    // bundled — see features/yjs-bridge tasks). Symbol move/position already syncs via `changed`.
 
     if( item )
         const_cast<KIID&>( item->m_Uuid ) = KIID( wxString::FromUTF8( j.value( "id", "" ).c_str() ) );
@@ -493,8 +523,22 @@ void kicadCollabApply( std::string aJson )
     if( !fr )
         return;
 
-    // Defer to the editor's main-loop context so SCH_COMMIT runs like a normal edit.
-    fr->CallAfter( [fr, delta]() { doApply( fr, delta ); } );
+    // Defer to the editor's main-loop context so SCH_COMMIT runs like a normal edit, AND run the
+    // mutation inside a COROUTINE so it executes on a libcontext fiber stack — the exact context
+    // KiCad tool actions (native draws/edits) run in. SCH_COMMIT::Push's CHT_ADD of a *new*
+    // SCH_SHAPE/SCH_SYMBOL dispatches GAL virtuals (view->Add → ViewGetLayers) through asyncify-
+    // instrumented invoke_*; off the fiber stack those mis-dispatch and trap inside KiCad core
+    // ("memory access out of bounds" / "table index out of bounds"), which the bridge can't
+    // devirtualize. On the fiber stack they dispatch correctly. CallAfter runs on the app main
+    // stack (ProcessPendingEvents), which is where COROUTINE::Call must be invoked from. (0007.)
+    fr->CallAfter( [fr, delta]() {
+        COROUTINE<int, int> cor( [fr, delta]( int ) -> int
+                                 {
+                                     doApply( fr, delta );
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
 }
 
 

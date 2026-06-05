@@ -52,3 +52,36 @@
     margin: 0;
   }
 }
+
+/*
+ * wxWidgets WASM child-window styling.
+ *
+ * The wx.js runtime glue (createWindow/setWindowRect) creates a `.window`
+ * <div> (+ `.window-canvas`) per top-level window — every KiCad dialog
+ * (text properties, symbol chooser, power chooser, …) is one of these,
+ * appended to #window-container. setWindowRect positions it via inline
+ * left/top, which only take effect when the element is `position: absolute`.
+ *
+ * The standalone test harness HTML ships these rules; the React shell
+ * (WasmTool.tsx) did not — so dialogs computed `position: static`, ignored
+ * their left/top, and rendered jammed in the top-left corner with the OK
+ * button clipped off-screen. These rules (mirrored from the test harness)
+ * restore correct centered positioning. Input is routed through the main
+ * #canvas, so the window layers are pointer-events: none.
+ */
+.window {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  background-color: black;
+  overflow: hidden;
+  width: 0;
+  height: 0;
+}
+
+.window-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}

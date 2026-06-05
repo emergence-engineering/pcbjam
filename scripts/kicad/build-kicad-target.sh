@@ -405,6 +405,8 @@ if [ -f "${EMBIND_SRC}" ]; then
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/nanodbc"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/picosha2"
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty"
+    # libcontext.h lives one level deeper; tool/coroutine.h does #include <libcontext.h>
+    KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/libcontext"
     KICAD_INCLUDES+=" -I${SYSROOT}/include"
     # KiCad requires C++20 for concepts
     em++ -std=c++20 -c ${EXTRA_FLAGS} ${WX_CXXFLAGS} ${KICAD_INCLUDES} "${EMBIND_SRC}" -o "${EMBIND_OBJ}"
