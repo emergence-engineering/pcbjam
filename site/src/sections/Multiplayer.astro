@@ -1,23 +1,22 @@
 ---
 import SectionBand from '../components/SectionBand.astro';
 import DemoVideo from '../components/DemoVideo.astro';
-import Icon from '../components/Icon.astro';
 
 const subpoints = [
   {
-    icon: 'icons/collab.svg',
     title: 'Live cursors & presence',
     body: 'See who’s here and where they’re working.',
+    comingSoon: true,
   },
   {
-    icon: 'icons/yjs.svg',
     title: 'Conflict-free editing',
-    body: 'CRDT sync (Yjs) merges everyone’s edits — no overwrite wars.',
+    body: 'CRDT sync merges everyone’s edits — no overwrite wars.',
+    comingSoon: false,
   },
   {
-    icon: 'icons/message.svg',
     title: 'Pin a comment to a pad',
     body: 'Review and resolve right on the canvas.',
+    comingSoon: true,
   },
 ];
 ---
@@ -44,11 +43,11 @@ const subpoints = [
     {
       subpoints.map((s) => (
         <li class="subpoint">
-          <Icon name={s.icon} mode="img" size="1.6rem" alt="" />
-          <div>
-            <strong>{s.title}</strong>
-            <p class="muted">{s.body}</p>
-          </div>
+          <strong class="subpoint-title">
+            {s.title}
+            {s.comingSoon && <span class="badge">Coming soon</span>}
+          </strong>
+          <p class="muted">{s.body}</p>
         </li>
       ))
     }
@@ -68,13 +67,29 @@ const subpoints = [
     grid-template-columns: repeat(3, 1fr);
   }
   .subpoint {
+    padding-top: 0.85rem;
+    border-top: 2px solid var(--accent);
+  }
+  .subpoint-title {
     display: flex;
-    gap: 0.75rem;
-    align-items: flex-start;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
   }
   .subpoint p {
-    margin: 0.2rem 0 0;
+    margin: 0.3rem 0 0;
     font-size: 0.95rem;
+  }
+  .badge {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--signal-400);
+    border: 1px solid color-mix(in srgb, var(--signal-400) 50%, transparent);
+    border-radius: var(--radius-full, 9999px);
+    padding: 0.1rem 0.5rem;
   }
   @media (max-width: 760px) {
     .subpoints {

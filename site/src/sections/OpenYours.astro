@@ -1,7 +1,6 @@
 ---
 import SectionBand from '../components/SectionBand.astro';
 import Chip from '../components/Chip.astro';
-import Icon from '../components/Icon.astro';
 
 const chips = [
   'Open .kicad_pcb / .kicad_sch',
@@ -12,40 +11,28 @@ const chips = [
 ---
 
 <SectionBand id="open" labelledby="open-h2">
-  <div class="open-grid">
-    <div class="section-head open-copy">
-      <span class="eyebrow">No lock-in. No data hostage.</span>
-      <h2 id="open-h2">Design <em>and</em> collaborate in the browser — without surrendering your files.</h2>
-      <p class="lead">
-        Cloud EDA tools trap your designs in proprietary formats and clouds you can’t leave.
-        Desktop open-source tools keep you free but strand you offline and solo. PCBJam refuses
-        the trade-off: <strong>real KiCad format</strong> in and out, <strong>self-host</strong>
-        it on your own server, run it <strong>offline as a PWA</strong>, and it’s
-        <strong>open source</strong>. Collaborate in our cloud when it’s convenient — and walk
-        away with every byte whenever you want.
-      </p>
-      <div class="cluster">
-        {chips.map((c) => <Chip label={c} />)}
-      </div>
-      <p class="reassure muted">
-        PCBJam rides KiCad — a project backed for decades by CERN, the KiCad Services Corp, and a
-        global community. This isn’t a VC bet that vanishes when the runway ends.
-      </p>
+  <div class="section-head open-copy">
+    <span class="eyebrow">No lock-in. No data hostage.</span>
+    <h2 id="open-h2">Design <em>and</em> collaborate in the browser — without surrendering your files.</h2>
+    <p class="lead">
+      Cloud EDA tools trap your designs in proprietary formats and clouds you can’t leave.
+      Desktop open-source tools keep you free but strand you offline and solo. PCBJam refuses
+      the trade-off: <strong>real KiCad format</strong> in and out, <strong>self-host</strong>
+      it on your own server, run it <strong>offline as a PWA</strong>, and it’s
+      <strong>open source</strong>. Collaborate in our cloud when it’s convenient — and walk
+      away with every byte whenever you want.
+    </p>
+    <div class="cluster">
+      {chips.map((c) => <Chip label={c} />)}
     </div>
-    <div class="open-art" aria-hidden="true">
-      <Icon name="icons/cloud.svg" mode="img" size="5rem" />
-      <Icon name="icons/github.svg" mode="mask" size="3rem" class="open-gh" />
-    </div>
+    <p class="reassure muted">
+      PCBJam rides KiCad — a project backed for decades by CERN, the KiCad Services Corp, and a
+      global community. This isn’t a VC bet that vanishes when the runway ends.
+    </p>
   </div>
 </SectionBand>
 
 <style>
-  .open-grid {
-    display: grid;
-    grid-template-columns: 1.4fr 0.6fr;
-    gap: 2rem;
-    align-items: center;
-  }
   .open-copy {
     margin-bottom: 0;
   }
@@ -56,20 +43,5 @@ const chips = [
     margin-top: 1.25rem;
     font-size: 0.9rem;
     max-width: 40rem;
-  }
-  .open-art {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    color: var(--accent);
-  }
-  @media (max-width: 820px) {
-    .open-grid {
-      grid-template-columns: 1fr;
-    }
-    .open-art {
-      display: none;
-    }
   }
 </style>

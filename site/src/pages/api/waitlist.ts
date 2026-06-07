@@ -79,10 +79,8 @@ export const POST: APIRoute = async ({ request }) => {
       text: [
         "You're on the list. 🎉",
         '',
-        "We'll email you the moment your early-access seat opens. Early access rolls",
-        'out in waves — no spam, just a heads-up when your seat is ready.',
-        '',
-        'In the meantime: star us on GitHub and follow along.',
+        "We'll keep you posted with product updates, and send your early-access invite",
+        'as seats open in waves. No spam — unsubscribe anytime.',
         '',
         '— The PCBJam team, built by Emergence Engineering',
       ].join('\n'),

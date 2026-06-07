@@ -2,11 +2,11 @@
 import SectionBand from '../components/SectionBand.astro';
 
 const row = [
-  { title: 'Free core', body: 'The full editor and real-time collaboration, free to start.' },
+  { title: 'Free & local', body: 'The full editor, free. Your files live right in your browser.' },
   { title: 'Open format', body: 'Your .kicad_pcb / .kicad_sch, open forever.' },
   {
-    title: 'Paid for team scale',
-    body: 'Private org workspaces, SSO, compliance, hosted storage.',
+    title: 'Paid: cloud & sync',
+    body: 'Hosted storage, cross-device sync, and shared team workspaces.',
   },
 ];
 ---
@@ -15,16 +15,11 @@ const row = [
   <div class="section-head">
     <h3 id="money-h3">Free to start — and the core stays open.</h3>
     <p class="lead">
-      The full editor and real-time collaboration are <strong>free to start</strong>, and the
-      file format is open, forever. Later, we’ll charge teams for the things teams actually need —
-      private org workspaces, SSO and compliance, hosted storage, and optional AI assistance. The
-      individual, open-source core isn’t the thing we paywall.
-      <strong>No per-editor toll. No metered AI. No surprises.</strong>
-    </p>
-    {/* TODO(verify): point-in-time competitor pricing — Flux was ~$112–158/editor/mo.
-        Re-verify before stating a hard number publicly (§17, §31.10). */}
-    <p class="contrast muted">
-      Some browser EDA tools charge over $100 per editor, per month. We won’t.
+      The editor and the open file format are <strong>free</strong> — design entirely in your
+      browser, with your files stored locally on your own machine. When you want PCBJam’s
+      <strong>cloud</strong> — hosted storage, sync across your devices, and shared workspaces for
+      your team — that’s the paid part. The open core stays free, and your local files are always
+      yours.
     </p>
   </div>
 
@@ -41,10 +36,6 @@ const row = [
 </SectionBand>
 
 <style>
-  .contrast {
-    margin-top: 1rem;
-    font-style: italic;
-  }
   .money-card p {
     margin: 0.35rem 0 0;
     font-size: 0.95rem;

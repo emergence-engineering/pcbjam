@@ -225,6 +225,13 @@ main.wide {
   padding-block: 0;
 }
 
+/* Only the hero waitlist form needs an anchor offset for the sticky header —
+   the section anchors (#how-it-works, #open) already clear it via their own
+   top padding, so we don't touch global scroll behavior. */
+#waitlist {
+  scroll-margin-top: 5rem;
+}
+
 /* Visually-hidden but accessible (labels, honeypot). */
 .sr-only {
   position: absolute;

@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@astrojs/vercel": "^10.0.8",
+    "@fontsource/oswald": "^5.2.8",
     "astro": "^6.4.4",
     "resend": "^6.12.4"
   },

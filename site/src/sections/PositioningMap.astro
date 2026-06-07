@@ -1,6 +1,5 @@
 ---
 import SectionBand from '../components/SectionBand.astro';
-import Placeholder from '../components/Placeholder.astro';
 ---
 
 <SectionBand labelledby="pos-h3">
@@ -12,10 +11,25 @@ import Placeholder from '../components/Placeholder.astro';
       <strong>PCBJam is the only one in the middle.</strong>
     </p>
   </div>
-  {/* TODO(assets): build the quadrant/Venn graphic on the you-are-here motif (§4b.5). */}
-  <Placeholder
-    label="PRODUCE: positioning quadrant — Browser × Open × Multiplayer (§15)"
-    kind="image"
-    ratio="2 / 1"
+  <img
+    class="pos-map"
+    src="/graphics/positioning-quadrant.svg"
+    width="820"
+    height="600"
+    alt="Positioning map: PCBJam is the only PCB tool that is browser-native, open, and truly real-time multiplayer. Flux and EasyEDA are browser-based but proprietary; KiCanvas is browser and open but viewer-only; LibrePCB and KiCad are open but desktop-only; Altium 365 and OrCAD X are desktop and proprietary."
+    loading="lazy"
+    decoding="async"
   />
 </SectionBand>
+
+<style>
+  .pos-map {
+    display: block;
+    width: 100%;
+    max-width: 46rem;
+    height: auto;
+    margin-inline: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+  }
+</style>

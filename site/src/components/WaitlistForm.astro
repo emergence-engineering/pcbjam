@@ -18,7 +18,7 @@ const {
   source,
   id,
   layout = 'row',
-  microcopy = "Early access rolls out in waves. We'll email you when your seat opens — no spam.",
+  microcopy = 'Get early-access invites and the occasional product update — no spam, unsubscribe anytime.',
   class: cls = '',
 } = Astro.props;
 
@@ -60,7 +60,7 @@ const hpId = `wl-hp-${source}`;
 
   <div class="wl-success" hidden data-wl-success>
     <strong>You're on the list. 🎉</strong>
-    <span class="muted">We'll email you when your early-access seat opens — no spam.</span>
+    <span class="muted">We'll be in touch with product updates and your early-access invite.</span>
   </div>
 
   {microcopy && <p class="wl-micro muted">{microcopy}</p>}

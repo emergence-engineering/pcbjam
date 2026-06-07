@@ -1,28 +1,27 @@
 ---
-import Icon from './Icon.astro';
-
 // TODO(assets): replace favicon "K" + text wordmark with the real PCBJam logo (§4b.1).
 // TODO(links): add "Roadmap" → /roadmap and repoint How-it-works/Open to their own
 //   pages once the supporting pages ship; for now they anchor to landing sections.
-// TODO(config): point at the public PCBJam repo when it exists.
-const GITHUB_URL = 'https://github.com/emergence-engineering';
-
 const links = [
   { href: '/#how-it-works', label: 'How it works' },
   { href: '/#open', label: 'Open & yours' },
   { href: '/blog', label: 'Blog' },
-  { href: '/#built-by', label: 'Built by Emergence Engineering' },
+  {
+    href: 'https://emergence-engineering.com',
+    label: 'Built by Emergence Engineering',
+    external: true,
+  },
 ];
 
 const path = Astro.url.pathname;
-const isActive = (href: string) =>
-  href.startsWith('/#') ? false : href === '/' ? path === '/' : path.startsWith(href);
+const isActive = (href: string, external?: boolean) =>
+  external || href.startsWith('/#') ? false : href === '/' ? path === '/' : path.startsWith(href);
 ---
 
 <header class="site-header" transition:persist>
   <div class="container bar">
     <a class="brand" href="/">
-      <img src="/favicon.svg" alt="" width="24" height="24" />
+      <img src="/favicon.svg" alt="" width="20" height="28" />
       <span class="brand-name">PCBJam</span>
       <span class="brand-chip">built on KiCad</span>
     </a>
@@ -35,14 +34,16 @@ const isActive = (href: string) =>
     <nav class="nav" aria-label="Primary">
       {
         links.map((l) => (
-          <a href={l.href} aria-current={isActive(l.href) ? 'page' : undefined}>
+          <a
+            href={l.href}
+            aria-current={isActive(l.href, l.external) ? 'page' : undefined}
+            rel={l.external ? 'noopener' : undefined}
+            target={l.external ? '_blank' : undefined}
+          >
             {l.label}
           </a>
         ))
       }
-      <a class="gh" href={GITHUB_URL} rel="noopener" target="_blank">
-        <Icon name="icons/github.svg" size="1rem" alt="GitHub" /> <span>★</span>
-      </a>
       <a class="btn btn-primary cta-join" href="/#waitlist">Join the waitlist</a>
     </nav>
   </div>
@@ -72,8 +73,8 @@ const isActive = (href: string) =>
     gap: 0.5rem;
   }
   .brand img {
-    width: 1.5rem;
-    height: 1.5rem;
+    height: 1.85rem;
+    width: auto;
   }
   .brand-chip {
     font-family: var(--font-mono);
@@ -98,11 +99,6 @@ const isActive = (href: string) =>
   }
   .nav > a[aria-current='page'] {
     color: var(--fg);
-  }
-  .gh {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
   }
   .cta-join {
     padding-block: 0.5rem;
@@ -147,8 +143,7 @@ const isActive = (href: string) =>
     .nav-toggle:checked ~ .nav {
       display: flex;
     }
-    .nav > a,
-    .gh {
+    .nav > a {
       padding-block: 0.6rem;
       border-bottom: 1px solid var(--border);
     }
