@@ -1,37 +1,72 @@
-# Cold build of all KiCad WASM apps (with deps) + full e2e suites, on Ubicloud.
+# Ephemeral Hetzner Cloud CI: a fresh ccx53 VM is created per run, the full
+# build + e2e suites run on it, then it is destroyed. No persistent infra.
 #
-# Runs on Ubicloud's managed GitHub Actions runners. Premium runners (AMD Ryzen 9
-# 7950X3D, ~2x faster) are enabled at the ACCOUNT level in the Ubicloud Console
-# (GitHub Runners -> Settings -> Enable Premium Runners); jobs on the
-# `ubicloud-standard-*` labels below are then auto-routed to the premium fleet with
-# no change needed here.
+# Lifecycle (Cyclenerd/hcloud-github-runner): create-runner spins up a Hetzner
+# VM registered as an ephemeral self-hosted runner -> build-and-test runs on it
+# -> delete-runner tears it down (always, even on failure -> no lingering cost).
 #
-# Submodules: kicad/wxwidgets use SSH URLs (.gitmodules) but point at PUBLIC repos
-# (emergence-engineering/kicad-source-mirror and emergence-engineering/wxWidgets), so
-# no PAT/secret is needed. actions/checkout rewrites the SSH URLs to HTTPS and the
-# default GITHUB_TOKEN reads them fine.
+# Required repo secrets (emergence-engineering/pcbjam -> Settings -> Secrets):
+#   HCLOUD_TOKEN        Hetzner Cloud API token, Read & Write
+#   HETZNER_RUNNER_PAT  GitHub PAT with Administration: read & write (registers
+#                       and unregisters the self-hosted runner)
+#
+# Submodules: kicad/wxwidgets use SSH URLs (.gitmodules) but point at PUBLIC repos,
+# so actions/checkout rewrites them to HTTPS and the default GITHUB_TOKEN reads them.
 
-name: CI
+name: CI (Hetzner)
 
 on:
   push:
-    branches: [main, istvanmatejcsok/feat/ci]
+    branches: [istvanmatejcsok/feat/ci-hetzner]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-hetzner-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    runs-on: ubicloud-standard-30
-    timeout-minutes: 160 # cold --build-deps dominates; + wx build + both suites
-    # env:
-    # Stream build-script output straight to the Actions log instead of redirecting
-    # it to logs/<script>/<ts>.log (see scripts/common/logging.sh). Nothing consumes
-    # KICAD_LOG_FILE, so this is safe and gives live, greppable CI output.
-    # KICAD_LOG_NESTED: "1"
+  create-runner:
+    name: Create Hetzner runner
+    runs-on: ubuntu-latest # or ubicloud-standard-2 if GitHub-hosted is disabled
+    outputs:
+      label: ${{ steps.create.outputs.label }}
+      server_id: ${{ steps.create.outputs.server_id }}
     steps:
+      - name: Create ephemeral ccx53 runner
+        id: create
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: create
+          github_token: ${{ secrets.HETZNER_RUNNER_PAT }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          server_type: ccx53
+          location: nbg1
+          image: ubuntu-24.04
+
+  build-and-test:
+    name: Build & test (Hetzner ccx53)
+    needs: create-runner
+    runs-on: ${{ needs.create-runner.outputs.label }}
+    timeout-minutes: 160 # cold --build-deps dominates; + wx build + both suites
+    steps:
+      # Hetzner's ubuntu-24.04 cloud image ships neither Docker nor git (Ubicloud
+      # preinstalled both). Install Docker CE + git before the Docker-based build.
+      - name: Install system deps (Docker, git)
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl git
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+            https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+            | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+            docker-buildx-plugin docker-compose-plugin
+
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
         with:
@@ -45,16 +80,14 @@ jobs:
         with:
           node-version: 20
 
-      # 1) Cold build every KiCad WASM app + all dependencies (Docker; longest step).
-      #    Output lands in ./output/.
-      # `-j 10` (not the full 30 vCPUs): the heavy KiCad/wxWidgets TUs each eat
-      # 1-2GB+ under emcc, so -j 30 exhausts RAM and sends the runner into swap-
-      # thrash (build crawls but never OOM-kills). 10 keeps memory in check.
+      # 1) Cold build KiCad WASM app + all dependencies (Docker; longest step).
+      #    -j 10 kept from the Ubicloud config so hardware is the only changed
+      #    variable for this first run; ccx53 has 128 GB so -j can be raised later.
       - name: Build KiCad WASM (all, --build-deps)
         run: ./docker/build.sh eeschema --build-deps -j 10
 
-      # 2) Host-side wxWidgets build that produces the wxWidgets test apps consumed by
-      #    `npm run test` (NOT produced by docker/build.sh). Auto-installs emsdk.
+      # 2) Host-side wxWidgets build that produces the wxWidgets test apps consumed
+      #    by `npm run test` (NOT produced by docker/build.sh). Auto-installs emsdk.
       - name: Build wxWidgets (wxUniversal WASM)
         run: ./scripts/build-wxuniversal-wasm.sh
 
@@ -97,3 +130,18 @@ jobs:
             tests/playwright-report/**
             logs/**
           if-no-files-found: ignore
+
+  delete-runner:
+    name: Delete Hetzner runner
+    needs: [create-runner, build-and-test]
+    runs-on: ubuntu-latest # match create-runner's choice
+    if: always() # tear down even if the build fails -> no lingering cost
+    steps:
+      - name: Delete ephemeral runner
+        uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: delete
+          github_token: ${{ secrets.HETZNER_RUNNER_PAT }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          name: ${{ needs.create-runner.outputs.label }}
+          server_id: ${{ needs.create-runner.outputs.server_id }}
