@@ -155,11 +155,23 @@ const isActive = (href: string, external?: boolean) =>
 </style>
 
 <script>
-  // ClientRouter persists the header (transition:persist), so reset the mobile
-  // menu toggle after every navigation to avoid it staying open.
-  function resetNav() {
-    const t = document.getElementById('nav-toggle') as HTMLInputElement | null;
-    if (t) t.checked = false;
+  // ClientRouter persists the header (transition:persist). Two jobs:
+  //  1. Reset the mobile menu toggle after every navigation (was already here).
+  //  2. Close the menu when ANY nav link is tapped — including same-page anchor
+  //     links (How it works / Open & yours / Join the waitlist) that scroll but
+  //     don't navigate, so astro:page-load never fires for them and the CSS-only
+  //     checkbox would otherwise stay checked (menu stuck open).
+  function initMobileNav() {
+    const toggle = document.getElementById('nav-toggle') as HTMLInputElement | null;
+    if (!toggle) return;
+    toggle.checked = false;
+
+    const nav = document.querySelector<HTMLElement>('.nav');
+    if (!nav || nav.dataset.bound === '1') return; // header persists — bind once
+    nav.dataset.bound = '1';
+    nav.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('a')) toggle.checked = false;
+    });
   }
-  document.addEventListener('astro:page-load', resetNav);
+  document.addEventListener('astro:page-load', initMobileNav);
 </script>
