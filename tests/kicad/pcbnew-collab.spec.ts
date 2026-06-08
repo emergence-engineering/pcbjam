@@ -249,6 +249,9 @@ test.describe("pcbnew collab bridge — single page", () => {
         const snap = JSON.parse(window.Module.kicadCollabSnapshot());
         return snap.added.find((it: { id: string }) => it.id === i);
       }, id);
+      // The item's own layer travels in the delta and is applied explicitly by makeItem — it does
+      // NOT pick up the peer editor's active layer. (Footprint layer = which side it sits on.)
+      expect(after.layer, `${label} layer preserved`).toBe(payload.layer);
       if (type === "PCB_TEXT") {
         expect(after.text, "text string preserved").toBe(payload.text);
         expect(after.hjust, "text horizontal justification preserved").toBe(payload.hjust);
