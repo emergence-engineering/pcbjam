@@ -17,7 +17,7 @@ name: CI (Hetzner)
 
 on:
   push:
-    branches: [istvanmatejcsok/feat/ci-hetzner]
+    branches: [istvanmatejcsok/feat/ci-hetzner, istvanmatejcsok/feat/ci-hetzner-allcores]
   workflow_dispatch:
 
 concurrency:
@@ -48,6 +48,12 @@ jobs:
     needs: create-runner
     runs-on: ${{ needs.create-runner.outputs.label }}
     timeout-minutes: 160 # cold --build-deps dominates; + wx build + both suites
+    env:
+      # Stream build-script output straight to the Actions log instead of
+      # redirecting it to logs/<script>/<ts>.log (see scripts/common/logging.sh,
+      # which returns early when KICAD_LOG_NESTED=1). Nothing consumes
+      # KICAD_LOG_FILE, so this is safe and gives live, greppable CI output.
+      KICAD_LOG_NESTED: "1"
     steps:
       # Hetzner's ubuntu-24.04 cloud image ships neither Docker nor git (Ubicloud
       # preinstalled both). Install Docker CE + git before the Docker-based build.
@@ -81,10 +87,11 @@ jobs:
           node-version: 20
 
       # 1) Cold build KiCad WASM app + all dependencies (Docker; longest step).
-      #    -j 10 kept from the Ubicloud config so hardware is the only changed
-      #    variable for this first run; ccx53 has 128 GB so -j can be raised later.
+      #    ccx53 has 32 vCPU / 128 GB RAM, so use every core: -j $(nproc) for the
+      #    C++ compile, BINARYEN_CORES=$(nproc) for the host-side wasm-opt/asyncify
+      #    (apply-asyncify.sh runs on the host and reads BINARYEN_CORES).
       - name: Build KiCad WASM (all, --build-deps)
-        run: ./docker/build.sh eeschema --build-deps -j 10
+        run: BINARYEN_CORES=$(nproc) ./docker/build.sh eeschema --build-deps -j $(nproc)
 
       # 2) Host-side wxWidgets build that produces the wxWidgets test apps consumed
       #    by `npm run test` (NOT produced by docker/build.sh). Auto-installs emsdk.
