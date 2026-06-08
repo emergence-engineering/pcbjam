@@ -28,6 +28,7 @@ const FP1_REF = "66666666-0000-0000-0000-0000000000aa"; // Reference field (PCB_
 const FP1_TXT = "66666666-0000-0000-0000-0000000000cc"; // user fp_text (PCB_TEXT, F.SilkS)
 const VIA1 = "77777777-0000-0000-0000-000000000001"; // a through via (PCB_VIA)
 const ZONE1 = "77777777-0000-0000-0000-000000000002"; // a copper zone (ZONE)
+const TEXT1 = "77777777-0000-0000-0000-000000000003"; // a board graphic text (PCB_TEXT)
 const SAMPLE_PCB = `(kicad_pcb
 \t(version 20241229)
 \t(generator "pcbnew")
@@ -78,6 +79,12 @@ const SAMPLE_PCB = `(kicad_pcb
 \t\t(connect_pads (clearance 0))
 \t\t(min_thickness 0.25)
 \t\t(polygon (pts (xy 60 110) (xy 75 110) (xy 75 125) (xy 60 125)))
+\t)
+\t(gr_text "BOARDTEXT"
+\t\t(at 90 95 0)
+\t\t(layer "F.SilkS")
+\t\t(uuid "${TEXT1}")
+\t\t(effects (font (size 1 1) (thickness 0.15)) (justify left bottom))
 \t)
 \t(segment (start 50.8 50.8) (end 101.6 50.8) (width 0.2) (layer "F.Cu") (net 0) (uuid "${SEG1}"))
 \t(segment (start 50.8 76.2) (end 101.6 76.2) (width 0.2) (layer "F.Cu") (net 0) (uuid "${SEG2}"))
@@ -179,6 +186,11 @@ test.describe("pcbnew collab bridge — single page", () => {
       (byId.get(ZONE1) as { poly?: number[][] }).poly?.length,
       "zone outline emitted",
     ).toBeGreaterThanOrEqual(3);
+    expect(byId.has(TEXT1), "board text present").toBe(true);
+    expect(byId.get(TEXT1)!.type).toBe("PCB_TEXT");
+    expect((byId.get(TEXT1) as { text?: string }).text, "board text string emitted").toBe(
+      "BOARDTEXT",
+    );
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
 
@@ -191,8 +203,9 @@ test.describe("pcbnew collab bridge — single page", () => {
     ["footprint", FP1, "FOOTPRINT"],
     ["via", VIA1, "PCB_VIA"],
     ["zone", ZONE1, "ZONE"],
+    ["board text", TEXT1, "PCB_TEXT"],
   ] as const) {
-    test(`apply adds a ${label} (footprint via blob, via/zone native)`, async ({ page, testLogger }) => {
+    test(`apply adds a ${label} (footprint via blob, via/zone/text native)`, async ({ page, testLogger }) => {
       await bootAndOpen(page, `add-${label}`);
 
       // Full emit-equivalent payload: snapshot item (native geometry fields) + the clipboard blob.
@@ -228,6 +241,19 @@ test.describe("pcbnew collab bridge — single page", () => {
           intervals: [200],
         })
         .toBe(posBefore);
+
+      // Fidelity beyond the anchor: a text's justification anchors its glyphs, so a peer that
+      // dropped it would render the text visibly offset even though GetPosition matches. Confirm
+      // the reconstructed item round-trips its type-defining fields.
+      const after = await page.evaluate((i) => {
+        const snap = JSON.parse(window.Module.kicadCollabSnapshot());
+        return snap.added.find((it: { id: string }) => it.id === i);
+      }, id);
+      if (type === "PCB_TEXT") {
+        expect(after.text, "text string preserved").toBe(payload.text);
+        expect(after.hjust, "text horizontal justification preserved").toBe(payload.hjust);
+        expect(after.vjust, "text vertical justification preserved").toBe(payload.vjust);
+      }
       expect(hasAbort(testLogger), "no WASM abort").toBe(false);
     });
   }

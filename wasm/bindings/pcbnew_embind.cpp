@@ -28,6 +28,7 @@
 #include <tools/pcb_selection.h>
 #include <geometry/shape_poly_set.h>
 #include <geometry/shape_line_chain.h>
+#include <geometry/eda_angle.h>
 #include <kiway_player.h>
 #include <kiway.h>
 #include <kiid.h>
@@ -196,9 +197,28 @@ json itemToJson( BOARD_ITEM* aItem )
 
         j["poly"] = pts;
     }
+    // A board-level graphic text (Place→Text) also reconstructs NATIVELY (same asyncify reason as
+    // via/zone): emit its size / stroke / angle so makeItem can rebuild it. Footprint child text
+    // is synced by move, not `added`, so this is only the board PCB_TEXT case.
+    else if( aItem->Type() == PCB_TEXT_T )
+    {
+        auto* txt    = static_cast<PCB_TEXT*>( aItem );
+        j["tw"]      = txt->GetTextSize().x;
+        j["th"]      = txt->GetTextSize().y;
+        j["thick"]   = txt->GetTextThickness();
+        j["angle"]   = txt->GetTextAngle().AsTenthsOfADegree();
+        // Justification + mirror anchor the glyphs relative to the text POSITION; without them a
+        // left-justified text reconstructs centered and renders visibly offset from the same
+        // GetPosition() (peers diverge visually though GetPosition matches). Bold/italic for looks.
+        j["hjust"]   = (int) txt->GetHorizJustify();
+        j["vjust"]   = (int) txt->GetVertJustify();
+        j["mirror"]  = txt->IsMirrored();
+        j["bold"]    = txt->IsBold();
+        j["italic"]  = txt->IsItalic();
+    }
 
     // Text items (incl. footprint fields / graphic text): carry the string so a move diff is
-    // legible and a future text `added` can reconstruct. Position-only sync uses x/y above.
+    // legible and a text `added` can reconstruct. Position-only sync uses x/y above.
     if( EDA_TEXT* txt = dynamic_cast<EDA_TEXT*>( aItem ) )
         j["text"] = toUtf8( txt->GetText() );
 
@@ -327,6 +347,40 @@ BOARD_ITEM* makeItem( BOARD& aBoard, const json& j )
 
         item = zone;
     }
+    else if( type == "PCB_TEXT" && j.contains( "text" ) )
+    {
+        auto* txt = new PCB_TEXT( &aBoard );
+        txt->SetText( wxString::FromUTF8( j.value( "text", "" ).c_str() ) );
+        txt->SetPosition( VECTOR2I( j.value( "x", 0 ), j.value( "y", 0 ) ) );
+        txt->SetLayer( (PCB_LAYER_ID) j.value( "layer", (int) F_SilkS ) );
+
+        if( j.contains( "tw" ) )
+            txt->SetTextSize( VECTOR2I( j.value( "tw", 0 ), j.value( "th", 0 ) ) );
+
+        if( j.contains( "thick" ) )
+            txt->SetTextThickness( j.value( "thick", 0 ) );
+
+        if( j.contains( "angle" ) )
+            txt->SetTextAngle( EDA_ANGLE( j.value( "angle", 0 ), TENTHS_OF_A_DEGREE_T ) );
+
+        // Restore justification/mirror so the glyphs sit at the same place relative to position.
+        if( j.contains( "hjust" ) )
+            txt->SetHorizJustify( (GR_TEXT_H_ALIGN_T) j.value( "hjust", (int) GR_TEXT_H_ALIGN_LEFT ) );
+
+        if( j.contains( "vjust" ) )
+            txt->SetVertJustify( (GR_TEXT_V_ALIGN_T) j.value( "vjust", (int) GR_TEXT_V_ALIGN_CENTER ) );
+
+        if( j.contains( "mirror" ) )
+            txt->SetMirrored( j.value( "mirror", false ) );
+
+        if( j.contains( "bold" ) )
+            txt->SetBold( j.value( "bold", false ) );
+
+        if( j.contains( "italic" ) )
+            txt->SetItalic( j.value( "italic", false ) );
+
+        item = txt;
+    }
     else if( j.contains( "sexpr" ) )
     {
         item = makeFromBlob( aBoard, j.value( "sexpr", "" ) );
@@ -439,10 +493,11 @@ void flushDiff()
             json withBlob = j;
 
             // Attach an s-expr clipboard blob ONLY for types makeItem reconstructs from it
-            // (footprints, board shapes/text, …). Tracks/vias/zones rebuild NATIVELY from the
+            // (footprints, board graphics, …). Tracks/vias/zones/text rebuild NATIVELY from the
             // fields itemToJson already emitted, so they need no blob — and skipping it avoids a
             // wasted SaveSelection plus the asyncify-fragile envelope parse for those.
-            if( live && !isTrackType( live->Type() ) && live->Type() != PCB_ZONE_T )
+            if( live && !isTrackType( live->Type() ) && live->Type() != PCB_ZONE_T
+                && live->Type() != PCB_TEXT_T )
                 withBlob["sexpr"] = blobForItem( board, live );
 
             added.push_back( withBlob );
