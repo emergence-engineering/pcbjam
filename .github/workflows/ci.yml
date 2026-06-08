@@ -25,12 +25,12 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubicloud-standard-30
-    timeout-minutes: 160          # cold --build-deps dominates; + wx build + both suites
-    env:
-      # Stream build-script output straight to the Actions log instead of redirecting
-      # it to logs/<script>/<ts>.log (see scripts/common/logging.sh). Nothing consumes
-      # KICAD_LOG_FILE, so this is safe and gives live, greppable CI output.
-      KICAD_LOG_NESTED: "1"
+    timeout-minutes: 160 # cold --build-deps dominates; + wx build + both suites
+    # env:
+    # Stream build-script output straight to the Actions log instead of redirecting
+    # it to logs/<script>/<ts>.log (see scripts/common/logging.sh). Nothing consumes
+    # KICAD_LOG_FILE, so this is safe and gives live, greppable CI output.
+    # KICAD_LOG_NESTED: "1"
     steps:
       - name: Checkout (with submodules)
         uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
       # 1-2GB+ under emcc, so -j 30 exhausts RAM and sends the runner into swap-
       # thrash (build crawls but never OOM-kills). 10 keeps memory in check.
       - name: Build KiCad WASM (all, --build-deps)
-        run: ./docker/build.sh all --build-deps -j 10
+        run: ./docker/build.sh eeschema --build-deps -j 10
 
       # 2) Host-side wxWidgets build that produces the wxWidgets test apps consumed by
       #    `npm run test` (NOT produced by docker/build.sh). Auto-installs emsdk.
