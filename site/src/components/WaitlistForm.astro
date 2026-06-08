@@ -166,7 +166,7 @@ const hpId = `wl-hp-${source}`;
             headers: { 'content-type': 'application/json', accept: 'application/json' },
             body: JSON.stringify(payload),
           });
-          const data = await res.json().catch(() => ({}));
+          const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
           if (res.ok && data.ok) {
             form.hidden = true;
             if (okEl) okEl.hidden = false;

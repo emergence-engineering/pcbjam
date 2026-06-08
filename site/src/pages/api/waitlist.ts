@@ -1,20 +1,16 @@
 import type { APIRoute } from 'astro';
 import { Resend } from 'resend';
+// Typed server secrets (schema in astro.config.mjs). Optional, so RESEND_API_KEY
+// and RESEND_SEGMENT_ID are `string | undefined`; WAITLIST_FROM_EMAIL has a
+// schema default so it's always a `string`. The Vercel adapter reads these from
+// process.env at runtime — never inlined.
+import { RESEND_API_KEY, RESEND_SEGMENT_ID, WAITLIST_FROM_EMAIL } from 'astro:env/server';
 
 // Opt this single route into on-demand (serverless) rendering. The rest of the
 // site stays static; Vercel emits exactly one function for /api/waitlist.
 export const prerender = false;
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-
-// Runtime secrets (Vercel injects at runtime). Never prefix with PUBLIC_.
-const RESEND_API_KEY = process.env.RESEND_API_KEY ?? import.meta.env.RESEND_API_KEY;
-const RESEND_AUDIENCE_ID =
-  process.env.RESEND_AUDIENCE_ID ?? import.meta.env.RESEND_AUDIENCE_ID;
-const FROM_EMAIL =
-  process.env.WAITLIST_FROM_EMAIL ??
-  import.meta.env.WAITLIST_FROM_EMAIL ??
-  'PCBJam <hello@pcbjam.com>';
 
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -61,19 +57,27 @@ export const POST: APIRoute = async ({ request }) => {
     return wantsJson ? json(200, { ok: true }) : redirect('ok');
   }
 
-  try {
-    const resend = new Resend(RESEND_API_KEY);
+  const resend = new Resend(RESEND_API_KEY);
 
-    if (RESEND_AUDIENCE_ID) {
-      await resend.contacts.create({
+  try {
+    // Add to the segment (the modern name for an "audience"). The SDK returns
+    // { data, error } and does NOT throw on API errors. A duplicate contact has
+    // no stable error code (it surfaces as a validation_error), so we treat the
+    // contact step as best-effort: log any error but never fail the request on
+    // it — the user-facing promise is the confirmation email below.
+    if (RESEND_SEGMENT_ID) {
+      const { error: contactError } = await resend.contacts.create({
         email,
         unsubscribed: false,
-        audienceId: RESEND_AUDIENCE_ID,
+        segments: [{ id: RESEND_SEGMENT_ID }],
       });
+      if (contactError) {
+        console.error('[waitlist] contacts.create failed (non-fatal)', contactError);
+      }
     }
 
-    await resend.emails.send({
-      from: FROM_EMAIL,
+    const { error: sendError } = await resend.emails.send({
+      from: WAITLIST_FROM_EMAIL,
       to: email,
       subject: "You're on the PCBJam waitlist",
       text: [
@@ -86,10 +90,18 @@ export const POST: APIRoute = async ({ request }) => {
       ].join('\n'),
     });
 
+    // The confirmation send IS the user-facing promise — fail loudly if Resend
+    // rejected it (bad key, unverified domain, invalid from-address, …).
+    if (sendError) {
+      console.error('[waitlist] emails.send failed', sendError);
+      return wantsJson ? json(502, { ok: false, error: 'send_failed' }) : redirect('error');
+    }
+
     return wantsJson ? json(200, { ok: true }) : redirect('ok');
   } catch (err) {
-    console.error('[waitlist] send failed', err);
-    return wantsJson ? json(500, { ok: false, error: 'send_failed' }) : redirect('error');
+    // Defensive: unexpected throw (network error, bad construction).
+    console.error('[waitlist] unexpected error', err);
+    return wantsJson ? json(502, { ok: false, error: 'send_failed' }) : redirect('error');
   }
 };
 
