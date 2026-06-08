@@ -100,11 +100,36 @@ download_file() {
     log_info "Downloading $(basename "$dest")..."
     mkdir -p "$(dirname "$dest")"
 
-    if ! curl -L -o "$dest" "$url"; then
-        log_error "Failed to download $url"
+    # -f: fail (non-zero exit) on HTTP >= 400 instead of silently saving the error
+    #     page as the file — otherwise a transient GitHub 504 gets written as the
+    #     "tarball" and only blows up later at `tar`/`unzip` ("not in gzip format").
+    # --retry-all-errors + --retry: ride out transient 5xx from release CDNs
+    #     (GitHub release assets intermittently 504) within a single call.
+    if ! curl -fL --retry 5 --retry-all-errors --retry-delay 5 \
+              --connect-timeout 30 -o "$dest" "$url"; then
+        log_error "Failed to download $url after retries"
         rm -f "$dest"
         return 1
     fi
+
+    # Defense in depth: validate archive integrity so a bad download fails here
+    # with a clear message rather than deep in a later build step.
+    case "$dest" in
+        *.tar.gz|*.tgz)
+            if ! gzip -t "$dest" 2>/dev/null; then
+                log_error "Downloaded file is not a valid gzip archive: $dest"
+                rm -f "$dest"
+                return 1
+            fi
+            ;;
+        *.zip)
+            if command -v unzip >/dev/null 2>&1 && ! unzip -tqq "$dest" >/dev/null 2>&1; then
+                log_error "Downloaded file is not a valid zip archive: $dest"
+                rm -f "$dest"
+                return 1
+            fi
+            ;;
+    esac
 
     if [ -n "$expected_sha256" ]; then
         local actual_sha256
