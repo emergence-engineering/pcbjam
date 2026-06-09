@@ -118,6 +118,16 @@ echo "  LD_PRELOAD=${WASM_OPT_PRELOAD:-<none>}"
     --pass-arg=asyncify-propagate-addlist \
     "${INPUT_WASM}" -o "${OUTPUT_WASM}"
 
+# ASYNCIFY_ONLY=1 stops after the asyncify pass (skips -O2). Used by the
+# benchmark harness (scripts/bench/) to time/compare just the asyncify pass,
+# whose RAM fits where the -O2 pass on the bloated module would not.
+if [[ "${ASYNCIFY_ONLY:-0}" == "1" ]]; then
+    echo ""
+    echo "ASYNCIFY_ONLY=1 → skipping -O2 pass (benchmark mode)."
+    ls -lh "${OUTPUT_WASM}"
+    exit 0
+fi
+
 echo ""
 echo "Running wasm-opt -O2 on the asyncified wasm..."
 echo "  Purpose: shrink asyncify-instrumented functions back under V8's"
