@@ -7,6 +7,30 @@
 > work, environment only moves it ±15%" conclusion was **wrong**. See
 > "Correction log" at the bottom for what changed and why.
 
+## ✅ THE FIX (bench run 27210317273): upgrade Binaryen 121 → 130
+Measured on the cached 188 MB fixture, same `-O2`, identical output size:
+
+| Binaryen | cores | `-O2` wall | system time | ctx-switches | effective cores |
+|---|---|---|---|---|---|
+| **121** (current) | 32 | **1:12:52** | 89% | 180,000,000 | ~2.6 |
+| **130** | 32 | **8:02** | **1%** | **3,599** | **~10** |
+| 130 | 8 | ~10:00 | 1% | 848 | ~5.8 |
+
+**~9× faster.** v130 eliminates the `wasm::Type` lock convoy: system time 89%→1%,
+context-switches 180M→3,599, and the work that was capped at ~2.6 parallel cores now
+scales to ~10. This is the whole story — the "more cores = slower" and "weak Mac beats
+strong Linux" symptoms were all downstream of the v121 contention bug, fixed by v130.
+Ruled out on-box: `-O1` (still 88% system — lock is pass-independent) and fewer threads
+(still ~4 effective cores — lock caps it regardless). It is the **version**, full stop.
+
+**Remaining work = validation (run #3):** the speed win is solid, but it was measured
+running v130's `-O2` on a *v121*-asyncified module. `get-wasm-opt.sh` warns that
+Binaryen/emsdk skew can corrupt asyncify metadata, so the real change is to build the
+**whole** asyncify+`-O2` step on v130 (now selectable via `BINARYEN_VERSION=130`) and
+run the **Chrome e2e suite** to confirm the app still loads. If e2e passes, bump the
+default in `get-wasm-opt.sh` (and check the emsdk-bundled Binaryen matches). If it hits
+"func is not a function", the emsdk Binaryen also needs bumping.
+
 ## ⚠️ VERDICT (measured on-box, bench run 27197360957) — supersedes the memory theory
 **The `-O2` cost is ~90% FUTEX LOCK CONTENTION inside wasm-opt, not memory
 management.** `perf` on the live ccx53 shows ~92% of CPU in

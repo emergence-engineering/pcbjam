@@ -19,8 +19,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 # --- Prefer emsdk-bundled Binaryen (matches the Emscripten that compiled the WASM) ---
+# Override: set BINARYEN_VERSION in the env to FORCE a specific standalone release
+# (skips the emsdk preference). Used to A/B Binaryen versions — e.g. v121 carries a
+# wasm::Type lock-contention bug that makes the host-side -O2 pass ~9x slower than
+# v130 (see docs/ci-build-slowness-findings.md). Validate any bump with the e2e
+# suite: a Binaryen/emsdk skew can corrupt asyncify metadata ("func is not a function").
 EMSDK_WASM_OPT="${PROJECT_ROOT}/tools/emsdk/upstream/bin/wasm-opt"
-if [ -x "${EMSDK_WASM_OPT}" ]; then
+if [ -z "${BINARYEN_VERSION:-}" ] && [ -x "${EMSDK_WASM_OPT}" ]; then
     EMSDK_VERSION=$("${EMSDK_WASM_OPT}" --version 2>&1 || true)
     echo "Using emsdk-bundled Binaryen: ${EMSDK_VERSION}" >&2
     echo "${EMSDK_WASM_OPT}"
@@ -30,7 +35,7 @@ fi
 # --- Fallback: download standalone Binaryen (for CI or environments without local emsdk) ---
 echo "emsdk Binaryen not found at ${EMSDK_WASM_OPT}, falling back to standalone download..." >&2
 
-BINARYEN_VERSION="121"
+BINARYEN_VERSION="${BINARYEN_VERSION:-121}"
 BINARYEN_DIR="${PROJECT_ROOT}/build-wasm/tools/binaryen-${BINARYEN_VERSION}"
 WASM_OPT="${BINARYEN_DIR}/bin/wasm-opt"
 

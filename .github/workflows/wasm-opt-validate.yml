@@ -1,0 +1,120 @@
+# Run #3 — VALIDATE that Binaryen v130 produces a WORKING KiCad, not just a faster
+# build. Bench run 27210317273 proved v130's -O2 is ~9x faster than the pinned
+# v121 (lock-contention fix), but that measured v130's -O2 on a v121-asyncified
+# module. Here we build the WHOLE asyncify+-O2 step on v130 (BINARYEN_VERSION=130
+# → get-wasm-opt.sh) and run the KiCad e2e suite in Chrome/Firefox. If it passes,
+# bump the default; if it fails ("func is not a function"), the emsdk Binaryen
+# also needs bumping. See docs/ci-build-slowness-findings.md.
+#
+# Triggers on push to validate/** (can't collide with main CI [main], the
+# feature-branch Hetzner CI, or the bench/** sweeps). Same ephemeral ccx53.
+
+name: wasm-opt validate (v130 e2e)
+
+on:
+  push:
+    branches: ["validate/**"]
+  workflow_dispatch:
+    inputs:
+      binaryen_version: { description: "Binaryen version for the host asyncify+-O2 step", required: false, default: "130" }
+
+concurrency:
+  group: wasm-opt-bench          # share the one-Hetzner-slot lock with the sweeps
+  cancel-in-progress: false
+
+jobs:
+  create-runner:
+    name: Create Hetzner runner
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.create.outputs.label }}
+      server_id: ${{ steps.create.outputs.server_id }}
+    steps:
+      - uses: Cyclenerd/hcloud-github-runner@v1
+        id: create
+        with:
+          mode: create
+          github_token: ${{ secrets.HETZNER_RUNNER_PAT }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          server_type: ccx53
+          location: nbg1
+          image: ubuntu-24.04
+
+  validate:
+    name: Build (Binaryen v130) + KiCad e2e
+    needs: create-runner
+    runs-on: ${{ needs.create-runner.outputs.label }}
+    timeout-minutes: 180
+    env:
+      KICAD_LOG_NESTED: "1"
+      BINARYEN_VERSION: ${{ inputs.binaryen_version || '130' }}
+    steps:
+      - name: Install system deps (Docker, git)
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl git libjemalloc2
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+            https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+            | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      # Full KiCad WASM build, but the host-side asyncify + -O2 use Binaryen v130
+      # (BINARYEN_VERSION in env → get-wasm-opt.sh forces that standalone release).
+      - name: Build KiCad WASM with Binaryen ${{ env.BINARYEN_VERSION }}
+        run: |
+          echo "Building with BINARYEN_VERSION=${BINARYEN_VERSION}, compile -j $(nproc)"
+          ./docker/build.sh eeschema --build-deps -j "$(nproc)"
+          echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
+          ls -lh output/eeschema.wasm
+
+      - name: Install test deps
+        working-directory: tests
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: tests
+        run: npx playwright install --with-deps firefox chromium
+
+      - name: Stage KiCad WASM for tests
+        working-directory: tests
+        run: npm run setup:kicad
+
+      - name: KiCad e2e (npm run test:kicad)
+        working-directory: tests
+        run: npm run test:kicad
+
+      - name: Upload test logs & screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validate-v130-e2e-${{ github.run_id }}
+          path: |
+            tests/logs/**
+            tests/test-results/**
+            tests/playwright-report/**
+          if-no-files-found: ignore
+
+  delete-runner:
+    name: Delete Hetzner runner
+    needs: [create-runner, validate]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: Cyclenerd/hcloud-github-runner@v1
+        with:
+          mode: delete
+          github_token: ${{ secrets.HETZNER_RUNNER_PAT }}
+          hcloud_token: ${{ secrets.HCLOUD_TOKEN }}
+          name: ${{ needs.create-runner.outputs.label }}
+          server_id: ${{ needs.create-runner.outputs.server_id }}
