@@ -14,13 +14,43 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # Get wasm-opt path
 WASM_OPT=$("${SCRIPT_DIR}/get-wasm-opt.sh")
 
-# Cap Binaryen's host thread pool. wasm-opt runs function-parallel passes, and
+# Bound Binaryen's host thread pool. wasm-opt runs function-parallel passes, and
 # each worker holds the optimization working-set of one function at a time — so
-# peak RAM scales with thread count. On a 30-vCPU runner the asyncify-bloated
-# giant functions can spike RAM far past the nominal ~10-15 GB and thrash swap,
-# which is far slower than running on fewer cores. Binaryen reads BINARYEN_CORES
-# to bound the pool; default to 8, overridable via the environment.
+# peak RAM scales with thread count. Binaryen reads BINARYEN_CORES to size the
+# pool; default to 8 for memory-constrained dev machines, overridable via the
+# environment (CI sets it to $(nproc) on the 128 GB Hetzner runner).
 export BINARYEN_CORES="${BINARYEN_CORES:-8}"
+
+# Preload a scalable allocator on Linux. wasm-opt churns a ~40 GB high-water mark
+# of short-lived allocations across all worker threads; glibc malloc serializes
+# concurrent alloc/free on per-arena locks, so under many threads ~half of every
+# core's cycles collapse into futex lock-spin (strace: ~99% kernel time in futex)
+# instead of optimization work — the more cores, the worse it gets. jemalloc and
+# mimalloc are built for exactly this many-thread churn and eliminate the storm,
+# roughly halving wall-clock. macOS already ships a scalable allocator
+# (libmalloc/nano-zone), so only Linux needs this. Honor an externally-set
+# WASM_OPT_PRELOAD; otherwise auto-detect a system jemalloc/mimalloc.
+if [[ -z "${WASM_OPT_PRELOAD:-}" && "$(uname -s)" == "Linux" ]]; then
+    for _alloc in \
+        "/usr/lib/$(uname -m)-linux-gnu/libjemalloc.so.2" \
+        "/usr/lib/$(uname -m)-linux-gnu/libmimalloc.so.2" \
+        /usr/lib/libjemalloc.so.2 \
+        /usr/lib/libmimalloc.so.2; do
+        if [[ -e "${_alloc}" ]]; then
+            WASM_OPT_PRELOAD="${_alloc}"
+            break
+        fi
+    done
+fi
+
+# Build the command prefix that injects the allocator (preserving any existing
+# LD_PRELOAD). Empty when no scalable allocator was found — wasm-opt then runs
+# under the default allocator, just slower.
+if [[ -n "${WASM_OPT_PRELOAD:-}" ]]; then
+    PRELOAD_CMD=(env "LD_PRELOAD=${WASM_OPT_PRELOAD}${LD_PRELOAD:+:${LD_PRELOAD}}")
+else
+    PRELOAD_CMD=()
+fi
 
 # Wrap wasm-opt in GNU `time -v` when available (Linux CI) so the log records
 # peak RSS + wall-clock for each pass. macOS `time` lacks -v, so fall back to
@@ -72,8 +102,9 @@ echo ""
 echo "Running wasm-opt --asyncify..."
 echo "This may take several minutes and use significant RAM..."
 echo "  BINARYEN_CORES=${BINARYEN_CORES}"
+echo "  LD_PRELOAD=${WASM_OPT_PRELOAD:-<none>}"
 
-"${TIME_CMD[@]}" "${WASM_OPT}" --asyncify \
+"${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${WASM_OPT}" --asyncify \
     "--pass-arg=asyncify-imports@${ASYNCIFY_IMPORTS}" \
     "--pass-arg=asyncify-removelist@${ASYNCIFY_REMOVE_ARG}" \
     --pass-arg=asyncify-propagate-addlist \
@@ -87,8 +118,9 @@ echo "  similar functions silently stall in Chrome's V8). See docs/debugging/DEB
 echo "  and memory/bundle-size-asyncify-optimization.md."
 echo "  This pass also takes several minutes and ~10-15 GB RAM."
 echo "  BINARYEN_CORES=${BINARYEN_CORES}"
+echo "  LD_PRELOAD=${WASM_OPT_PRELOAD:-<none>}"
 
-"${TIME_CMD[@]}" "${WASM_OPT}" -O2 "${OUTPUT_WASM}" -o "${OUTPUT_WASM}"
+"${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${WASM_OPT}" -O2 "${OUTPUT_WASM}" -o "${OUTPUT_WASM}"
 
 echo ""
 echo "Asyncify + -O2 complete: ${OUTPUT_WASM}"
