@@ -1,0 +1,46 @@
+# EXPERIMENT: is a cheap arm64 cloud runner competitive for the wasm-opt phase?
+# Motivation: wasm-opt -O2 is Amdahl-capped at ~4 effective cores, so per-core
+# speed dominates the bottleneck. Same-silicon tests (M-chip: macOS native vs
+# Linux VM) show the Mac's edge is partly environment, partly per-core speed.
+# This builds ONLY calculator (--build-deps) on ubicloud-standard-8-arm and
+# logs per-pass /usr/bin/time -v, to compare against the Hetzner ccx53 x86
+# numbers (calculator asyncify 3:36 + -O2 4:47) and the local arm64 data.
+#
+# Fires on push to the repro branch only. Independent of the Hetzner slot.
+
+name: wasm-opt arm64 repro (Ubicloud)
+
+on:
+  push:
+    branches: ["validate/calc-pipeline-repro"]
+  workflow_dispatch: {}
+
+concurrency:
+  group: wasm-opt-arm-repro
+  cancel-in-progress: true
+
+jobs:
+  build-calculator-arm:
+    name: Build calculator (arm64, Binaryen 130)
+    runs-on: ubicloud-standard-8-arm
+    timeout-minutes: 180
+    env:
+      KICAD_LOG_NESTED: "1"
+      BINARYEN_VERSION: "130"
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+
+      - name: Show machine info
+        run: |
+          uname -m; nproc; free -g | head -2; df -h / | tail -1
+          docker --version && docker compose version
+
+      - name: Build calculator WASM (arm64)
+        run: |
+          # Size the container to the runner (standard-8-arm: 8 vcpu / 32 GB).
+          export KICAD_DOCKER_CPUS="$(nproc)" KICAD_DOCKER_MEM=28G
+          export BINARYEN_CORES=8
+          echo "Building calculator on arm64, -j $(nproc)"
+          time ./docker/build.sh calculator --build-deps -j "$(nproc)"
+          ls -lh output/calculator.wasm

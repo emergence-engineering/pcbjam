@@ -48,6 +48,11 @@ jobs:
     env:
       KICAD_LOG_NESTED: "1"
       BINARYEN_VERSION: ${{ inputs.binaryen_version || '130' }}
+      # REPRO BRANCH (validate/calc-pipeline-repro): fast repro of the
+      # orchestration changes — two small tools, pipeline on, no e2e.
+      # The validate/v130-e2e branch keeps BUILD_TARGET=all + RUN_E2E=1.
+      BUILD_TARGET: "calculator,pl_editor"
+      RUN_E2E: "0"
     steps:
       - name: Install system deps (Docker, git)
         run: |
@@ -83,24 +88,28 @@ jobs:
           # two postprocesses run concurrently next to the compile.
           export KICAD_DOCKER_CPUS="$(nproc)" KICAD_DOCKER_MEM=110G
           export KICAD_PIPELINE=1 BINARYEN_CORES=16
-          echo "Building ALL tools with BINARYEN_VERSION=${BINARYEN_VERSION}, compile -j $(nproc) on ${KICAD_DOCKER_CPUS} CPUs, pipelined wasm-opt"
-          ./docker/build.sh all --build-deps -j "$(nproc)"
+          echo "Building ${BUILD_TARGET} with BINARYEN_VERSION=${BINARYEN_VERSION}, compile -j $(nproc) on ${KICAD_DOCKER_CPUS} CPUs, pipelined wasm-opt"
+          ./docker/build.sh "${BUILD_TARGET}" --build-deps -j "$(nproc)"
           echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
           ls -lh output/*.wasm
 
       - name: Install test deps
+        if: env.RUN_E2E == '1'
         working-directory: tests
         run: npm ci
 
       - name: Install Playwright browsers
+        if: env.RUN_E2E == '1'
         working-directory: tests
         run: npx playwright install --with-deps firefox chromium
 
       - name: Stage KiCad WASM for tests
+        if: env.RUN_E2E == '1'
         working-directory: tests
         run: npm run setup:kicad
 
       - name: KiCad e2e (npm run test:kicad)
+        if: env.RUN_E2E == '1'
         working-directory: tests
         run: npm run test:kicad
 
