@@ -63,7 +63,13 @@ const hpId = `wl-hp-${source}`;
     <span class="muted">We'll be in touch with product updates and your early-access invite.</span>
   </div>
 
-  {microcopy && <p class="wl-micro muted">{microcopy}</p>}
+  {
+    microcopy && (
+      <p class="wl-micro muted">
+        {microcopy} · <a href="/privacy">Privacy policy</a>
+      </p>
+    )
+  }
 </div>
 
 <style>

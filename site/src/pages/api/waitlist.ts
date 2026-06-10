@@ -83,10 +83,14 @@ export const POST: APIRoute = async ({ request }) => {
       text: [
         "You're on the list. 🎉",
         '',
-        "We'll keep you posted with product updates, and send your early-access invite",
-        'as seats open in waves. No spam — unsubscribe anytime.',
+        "We'll send your early-access invite as seats open in waves, plus the occasional",
+        'product update. Every update includes an unsubscribe link — and you can reply',
+        'to this email at any time to be taken off the list.',
+        '',
+        "Didn't sign up? Just reply and we'll remove this address.",
         '',
         '— The PCBJam team, built by Emergence Engineering',
+        'https://pcbjam.com/privacy',
       ].join('\n'),
     });
 
