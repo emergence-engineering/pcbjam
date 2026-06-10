@@ -59,3 +59,18 @@ fixes:
      wxButtonBase::GetDefaultSize implemented.
   10. Shim-only edits didn't relink test apps — JS pre-js files are now
       Makefile dependencies of every app link rule.
+
+## Phase 3 B1 (2026-06-10) — minimal app Controls tab
+
+`04-controls-tab` vs canvas baseline with checkbox/radio/toggle/gauge/
+slider/statline/statbox wired:
+
+- **Matches canvas:** checkbox with native checked state, toggle button
+  with pressed highlight, slider thumb position, gauge fill proportion,
+  static-box group borders with legends, status bar fields, layout rhythm.
+- **Native-styling deltas (accepted):** browser-blue range/progress chrome
+  vs univ grey; native checkbox glyph.
+- **Known gaps (tracked):** notebook tab strip renders black boxes — the
+  generic notebook/tabg canvas island doesn't paint label text/background
+  (Phase 4 sweep); wxRadioBox "Options" group absent (composite control,
+  Phase 3 B2); File/Help menubar absent (Phase 5).
