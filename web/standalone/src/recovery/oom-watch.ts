@@ -308,6 +308,33 @@ export function createOomWatch(opts: OomWatchOptions): OomWatch {
   return { start, stop, onAbort };
 }
 
+/**
+ * User-gesture escape hatch for the terminal dialog: open the editor in a brand
+ * new tab with a clean retry chain, then close this one.
+ *
+ * This is deliberately NOT the automatic recovery path: it runs from a real
+ * click, so `window.open` is not popup-blocked, and a fresh top-level browsing
+ * context is the most reliable way to actually drop the OOM'd wasm heap — an
+ * in-place `location.replace` reload does not reliably release it in every
+ * browser (notably Firefox). `window.close()` may still be refused on the
+ * original, user-opened tab; that's fine — the new tab is the working one and
+ * the user can close the old one. Returns whether a new tab was opened.
+ */
+export function respawnInNewTab(win: Window = window): boolean {
+  const url = new URL(win.location.href);
+  url.searchParams.delete(RETRY_PARAM); // fresh chain — this is a manual retry
+  const opened = win.open(url.toString(), "_blank");
+  if (opened) {
+    try {
+      win.close();
+    } catch {
+      /* original tab may refuse to close — new tab is the survivor anyway */
+    }
+    return true;
+  }
+  return false;
+}
+
 function safeLocalStorage(win: Window): Storage | null {
   try {
     return win.localStorage;

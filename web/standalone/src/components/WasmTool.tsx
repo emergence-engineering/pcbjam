@@ -13,7 +13,7 @@ import { memfsProjectDir } from "@/wasm/constants";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
 import type { CollabWindow } from "@/wasm/collab";
 import { clog, cwarn } from "@/wasm/collab/debug";
-import { createOomWatch } from "@/recovery/oom-watch";
+import { createOomWatch, respawnInNewTab } from "@/recovery/oom-watch";
 import { MemoryExhaustedDialog } from "@/recovery/MemoryExhaustedDialog";
 
 // Tools with a working collab bridge (kicadCollabSnapshot/Apply embind exports).
@@ -349,7 +349,10 @@ export function WasmTool({
       <div id="window-container" />
 
       {oomExhausted && (
-        <MemoryExhaustedDialog onReload={() => window.location.reload()} />
+        <MemoryExhaustedDialog
+          onOpenNewTab={() => respawnInNewTab()}
+          onReload={() => window.location.reload()}
+        />
       )}
 
       {status && (
