@@ -1,0 +1,110 @@
+import { describe, expect, it } from "vitest";
+import { parseSexpr, sexprDiff } from "./sexpr-diff";
+
+// A tiny item helper: a list node `(type (uuid "ID") <props…>)` as text.
+const item = (type: string, id: string, ...props: string[]) =>
+  `(${type} (uuid "${id}") ${props.join(" ")})`;
+
+describe("parseSexpr", () => {
+  it("parses nested lists and atoms", () => {
+    expect(parseSexpr("(a b (c 1))")).toEqual([["a", "b", ["c", "1"]]]);
+  });
+
+  it("keeps quoted strings (with quotes) as single atoms, spaces preserved", () => {
+    expect(parseSexpr('(text "hello world")')).toEqual([["text", '"hello world"']]);
+  });
+
+  it("handles escaped quotes inside strings", () => {
+    expect(parseSexpr('(t "a\\"b")')).toEqual([["t", '"a\\"b"']]);
+  });
+
+  it("throws on unbalanced parens", () => {
+    expect(() => parseSexpr("(a (b)")).toThrow(/unbalanced/);
+  });
+
+  it("throws on an unterminated string", () => {
+    expect(() => parseSexpr('(a "oops)')).toThrow(/unterminated/);
+  });
+});
+
+describe("sexprDiff — equality", () => {
+  it("identical text is equal", () => {
+    const a = `(root ${item("seg", "u1", "(x 1)", "(y 2)")})`;
+    expect(sexprDiff(a, a).equal).toBe(true);
+  });
+
+  it("reordered items are equal (keyed by uuid)", () => {
+    const a = `(root ${item("seg", "u1", "(x 1)")} ${item("seg", "u2", "(x 2)")})`;
+    const b = `(root ${item("seg", "u2", "(x 2)")} ${item("seg", "u1", "(x 1)")})`;
+    expect(sexprDiff(a, b).equal).toBe(true);
+  });
+
+  it("reordered properties within an item are equal", () => {
+    const a = `(root ${item("seg", "u1", "(x 1)", "(y 2)", "(layer F)")})`;
+    const b = `(root ${item("seg", "u1", "(layer F)", "(y 2)", "(x 1)")})`;
+    expect(sexprDiff(a, b).equal).toBe(true);
+  });
+
+  it("whitespace differences are irrelevant", () => {
+    const a = `(root ${item("seg", "u1", "(x 1)")})`;
+    const b = `(root\n   (seg   (uuid "u1")\n     (x 1)  )\n)`;
+    expect(sexprDiff(a, b).equal).toBe(true);
+  });
+});
+
+describe("sexprDiff — changes", () => {
+  it("catches a single changed value with uuid + path + a/b", () => {
+    const a = `(root ${item("seg", "u1", "(x 1)", "(y 2)")})`;
+    const b = `(root ${item("seg", "u1", "(x 1)", "(y 9)")})`;
+    const r = sexprDiff(a, b);
+    expect(r.equal).toBe(false);
+    expect(r.changed).toHaveLength(1);
+    expect(r.changed[0]).toMatchObject({ uuid: "u1", path: "y", a: "(2 y)", b: "(9 y)" });
+  });
+
+  it("distinguishes a quoted string from the same bare token", () => {
+    const a = `(root ${item("t", "u1", '(val "5")')})`;
+    const b = `(root ${item("t", "u1", "(val 5)")})`;
+    const r = sexprDiff(a, b);
+    expect(r.equal).toBe(false);
+    expect(r.changed[0]).toMatchObject({ uuid: "u1", path: "val" });
+  });
+
+  it("detects an added item (present only in B)", () => {
+    const a = `(root ${item("seg", "u1", "(x 1)")})`;
+    const b = `(root ${item("seg", "u1", "(x 1)")} ${item("seg", "u2", "(x 2)")})`;
+    const r = sexprDiff(a, b);
+    expect(r.equal).toBe(false);
+    expect(r.added).toEqual(["u2"]);
+    expect(r.removed).toEqual([]);
+  });
+
+  it("detects a removed item (present only in A)", () => {
+    const a = `(root ${item("seg", "u1", "(x 1)")} ${item("seg", "u2", "(x 2)")})`;
+    const b = `(root ${item("seg", "u1", "(x 1)")})`;
+    const r = sexprDiff(a, b);
+    expect(r.equal).toBe(false);
+    expect(r.removed).toEqual(["u2"]);
+    expect(r.added).toEqual([]);
+  });
+
+  it("compares nested blob items by their own uuids", () => {
+    const a = `(root (fp (uuid "f1") (at 0 0) ${item("pad", "p1", "(size 1)")}))`;
+    const b = `(root (fp (uuid "f1") (at 0 0) ${item("pad", "p1", "(size 2)")}))`;
+    const r = sexprDiff(a, b);
+    expect(r.equal).toBe(false);
+    // The nested pad's value change surfaces under its own uuid…
+    expect(r.changed.some((c) => c.uuid === "p1" && c.path === "size")).toBe(true);
+    // …and the parent footprint differs too (it contains the pad subtree).
+    expect(r.changed.some((c) => c.uuid === "f1")).toBe(true);
+  });
+});
+
+describe("sexprDiff — ignoreTokens", () => {
+  it("ignores a volatile token so equal-but-for-version compares equal", () => {
+    const a = `(root ${item("seg", "u1", '(generator_version "8.0")', "(x 1)")})`;
+    const b = `(root ${item("seg", "u1", '(generator_version "9.9")', "(x 1)")})`;
+    expect(sexprDiff(a, b).equal).toBe(false); // by default the version diff shows
+    expect(sexprDiff(a, b, { ignoreTokens: ["generator_version"] }).equal).toBe(true);
+  });
+});
