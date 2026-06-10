@@ -13,6 +13,8 @@ import { memfsProjectDir } from "@/wasm/constants";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
 import type { CollabWindow } from "@/wasm/collab";
 import { clog, cwarn } from "@/wasm/collab/debug";
+import { createOomWatch } from "@/recovery/oom-watch";
+import { MemoryExhaustedDialog } from "@/recovery/MemoryExhaustedDialog";
 
 // Tools with a working collab bridge (kicadCollabSnapshot/Apply embind exports).
 const COLLAB_TOOLS = new Set<Tool>(["pl_editor", "eeschema", "pcbnew"]);
@@ -259,6 +261,7 @@ export function WasmTool({
   const [status, setStatus] = React.useState("Loading tool…");
   const [logs, setLogs] = React.useState<string[]>([]);
   const [showLog, setShowLog] = React.useState(false);
+  const [oomExhausted, setOomExhausted] = React.useState(false);
 
   const base = (assetBaseUrl ?? WASM_ASSET_BASE_URL).replace(/\/$/, "");
   const append = React.useCallback(
@@ -291,9 +294,27 @@ export function WasmTool({
 
     const win = window as ToolWindow;
 
+    // OOM recovery (feature 0002): watch for soft aborts + a stale hard-kill
+    // sentinel, respawning a fresh tab (capped). If the chain is already
+    // exhausted, skip boot and show the terminal dialog.
+    const oom = createOomWatch({
+      channelKey: `${slug}:${targetPath ?? tool}`,
+      showExhaustedDialog: () => setOomExhausted(true),
+      log: append,
+    });
+    const { proceed } = oom.start();
+    if (!proceed) return;
+
     void (async () => {
       try {
-        await bootKicadTool({ tool, base, container, log: append, onStatus: setStatus });
+        await bootKicadTool({
+          tool,
+          base,
+          container,
+          log: append,
+          onStatus: setStatus,
+          onAbort: oom.onAbort,
+        });
         await driveProjectIntoTool(win, {
           tool,
           slug,
@@ -309,6 +330,8 @@ export function WasmTool({
         setStatus(`Error: ${String(err)}`);
       }
     })();
+
+    return () => oom.stop();
     // Boot is one-shot per mount; deps intentionally exclude files/targetPath so
     // they don't retrigger a (rejected) second boot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,6 +347,10 @@ export function WasmTool({
       */}
       <div ref={containerRef} id="main-window" className="absolute inset-0 h-full w-full" />
       <div id="window-container" />
+
+      {oomExhausted && (
+        <MemoryExhaustedDialog onReload={() => window.location.reload()} />
+      )}
 
       {status && (
         <div className="pointer-events-none absolute left-3 top-3 z-20 rounded bg-black/70 px-3 py-2 font-mono text-xs text-white">

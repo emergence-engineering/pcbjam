@@ -37,6 +37,9 @@ export interface BootOptions {
   container: HTMLElement;
   log: (msg: string) => void;
   onStatus: (text: string) => void;
+  /** OOM recovery hook (feature 0002): emscripten `abort()` routes here so a
+   *  soft OOM can respawn a fresh tab. Optional — boot works without it. */
+  onAbort?: (what: string) => void;
 }
 
 let booted: { tool: Tool; promise: Promise<void> } | null = null;
@@ -75,7 +78,7 @@ function loadScript(src: string): Promise<void> {
 }
 
 async function doBoot(opts: BootOptions): Promise<void> {
-  const { tool, base, container, log, onStatus } = opts;
+  const { tool, base, container, log, onStatus, onAbort } = opts;
   const w = window as ToolWindow;
 
   // The wasm reads the top-level frame geometry from a GLOBAL `mainWindow`
@@ -196,6 +199,13 @@ async function doBoot(opts: BootOptions): Promise<void> {
     printErr: (...args: unknown[]) => log(`[err] ${args.join(" ")}`),
     setStatus: (text: string) => {
       if (text) onStatus(text);
+    },
+    // OOM recovery (feature 0002): emscripten calls onAbort on abort() — commonly
+    // how an out-of-memory surfaces. Forward it so the watcher can respawn.
+    onAbort: (what: unknown) => {
+      const msg = what === undefined ? "" : String(what);
+      log(`[boot] abort: ${msg}`);
+      onAbort?.(msg);
     },
     monitorRunDependencies: () => {},
     onRuntimeInitialized: () => {
