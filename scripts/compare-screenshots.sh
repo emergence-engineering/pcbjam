@@ -7,8 +7,26 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-BASELINE_DIR="$PROJECT_ROOT/tests/baseline-screenshots"
-TEST_RESULTS_DIR="$PROJECT_ROOT/tests/test-results"
+
+# --port dom compares the DOM-port artifacts (WX_PORT=dom test runs) against
+# their own baseline set; canvas paths are the default and stay unchanged.
+PORT=""
+ARGS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --port) PORT="$2"; shift 2 ;;
+        *) ARGS+=("$1"); shift ;;
+    esac
+done
+set -- "${ARGS[@]+"${ARGS[@]}"}"
+
+if [ "$PORT" = "dom" ]; then
+    BASELINE_DIR="$PROJECT_ROOT/tests/baseline-screenshots-dom"
+    TEST_RESULTS_DIR="$PROJECT_ROOT/tests/test-results/dom"
+else
+    BASELINE_DIR="$PROJECT_ROOT/tests/baseline-screenshots"
+    TEST_RESULTS_DIR="$PROJECT_ROOT/tests/test-results"
+fi
 
 # Check if directories exist
 if [ ! -d "$BASELINE_DIR" ]; then

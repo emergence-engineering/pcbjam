@@ -62,6 +62,10 @@ function findFreePort(): number {
 
 const port = resolvePort();
 
+// WX_PORT=dom runs the suite against the DOM-port bundles (built by
+// scripts/build-wasm-test.sh --dom into tests/apps-dom with identical layout).
+const appsDir = process.env.WX_PORT === 'dom' ? 'apps-dom' : 'apps';
+
 export default defineConfig({
   globalSetup: './global-setup.ts',
   testDir: './e2e',
@@ -98,7 +102,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npx serve apps -p ${port} -c ../serve.json`,
+    command: `npx serve ${appsDir} -p ${port} -c ../serve.json`,
     port: port,
     reuseExistingServer: !process.env.CI,
   },

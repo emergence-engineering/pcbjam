@@ -22,13 +22,40 @@ source "$(dirname "$0")/common/stages.sh"
 # Usage:
 #   ./build-wxuniversal-wasm.sh          # Incremental build (default)
 #   ./build-wxuniversal-wasm.sh --clean  # Clean build from scratch
+#   ./build-wxuniversal-wasm.sh --dom    # Build the DOM port (native widgets,
+#                                        # no wxUniversal) into build-wasm/wxwidgets-dom
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
 WX_SOURCE="$PROJECT_ROOT/wxwidgets"
+
+# Parse arguments: --clean and/or --dom, in any order
+CLEAN_BUILD=0
+DOM_BUILD=0
+for arg in "$@"; do
+    case "$arg" in
+        --clean) CLEAN_BUILD=1 ;;
+        --dom)   DOM_BUILD=1 ;;
+        *) echo "Unknown argument: $arg"; exit 1 ;;
+    esac
+done
+
+if [ "$DOM_BUILD" = "1" ]; then
+    BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-dom"
+    # Native (non-universal) widget set: controls are real DOM elements.
+    UNIVERSAL_FLAG=""
+    # Tooltips will be DOM title attributes (dom-phase-5); no wxToolTip yet.
+    # (Universal mode auto-disables them; native mode must do it explicitly.)
+    PORT_EXTRA_FLAGS="--disable-tooltips"
+    WXLIB_PREFIX="libwx_wasmu"
+else
+    BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
+    UNIVERSAL_FLAG="--enable-universal"
+    PORT_EXTRA_FLAGS=""
+    WXLIB_PREFIX="libwx_wasmunivu"
+fi
 
 # Use our config.sub wrapper for autoconf projects
 # CONFIG_SHELL is critical: nested configures (pcre, etc.) do SHELL=${CONFIG_SHELL-/bin/sh}
@@ -54,14 +81,17 @@ if [ ! -f "$WX_SOURCE/configure.in" ]; then
     exit 1
 fi
 
-# Regenerate configure if configure.in is newer
-if [ "$WX_SOURCE/configure.in" -nt "$WX_SOURCE/configure" ]; then
-    echo "configure.in is newer than configure, regenerating..."
+# Regenerate configure if configure.in or autoconf_inc.m4 is newer.
+# (configure.in sincludes autoconf_inc.m4, which bakefile regenerates from
+# build/bakefiles/files.bkl — new build conditions live there.)
+if [ "$WX_SOURCE/configure.in" -nt "$WX_SOURCE/configure" ] || \
+   [ "$WX_SOURCE/autoconf_inc.m4" -nt "$WX_SOURCE/configure" ]; then
+    echo "configure inputs changed, regenerating configure..."
     (cd "$WX_SOURCE" && autoconf)
 fi
 
 # Incremental build by default, use --clean for full rebuild
-if [ "$1" = "--clean" ]; then
+if [ "$CLEAN_BUILD" = "1" ]; then
     echo "Cleaning build directory..."
     rm -rf "$BUILD_DIR"
 fi
@@ -83,6 +113,11 @@ elif [ "$WX_SOURCE/configure.in" -nt "$BUILD_DIR/Makefile" ]; then
     NEEDS_CONFIGURE=1
 elif [ "$WX_SOURCE/configure" -nt "$BUILD_DIR/Makefile" ]; then
     echo "configure script changed, will reconfigure..."
+    NEEDS_CONFIGURE=1
+elif [ "$WX_SOURCE/Makefile.in" -nt "$BUILD_DIR/Makefile" ]; then
+    # Makefile.in is regenerated from build/bakefiles/files.bkl (see header);
+    # the build Makefile must be re-derived or new source files are ignored.
+    echo "Makefile.in changed since last configure, will reconfigure..."
     NEEDS_CONFIGURE=1
 else
     echo "Already configured, skipping configure (use clean build to reconfigure)"
@@ -145,7 +180,8 @@ if [ $NEEDS_CONFIGURE -eq 1 ]; then
     emconfigure "$WX_SOURCE/configure" \
         --host=emscripten \
         --without-subdirs \
-        --enable-universal \
+        ${UNIVERSAL_FLAG} \
+        ${PORT_EXTRA_FLAGS} \
         --disable-shared \
         --with-opengl \
         --enable-exceptions \
@@ -188,9 +224,9 @@ done
 echo "Creating stub libraries..."
 for stub in richtext webview; do
     # Remove any existing symlinks first to avoid "same file" errors
-    rm -f "libwx_wasmunivu_${stub}-3.2.a" "libwx_wasmunivu_${stub}-3.2-emscripten.a"
-    emar rcs "libwx_wasmunivu_${stub}-3.2.a"
-    ln -sf "libwx_wasmunivu_${stub}-3.2.a" "libwx_wasmunivu_${stub}-3.2-emscripten.a"
+    rm -f "${WXLIB_PREFIX}_${stub}-3.2.a" "${WXLIB_PREFIX}_${stub}-3.2-emscripten.a"
+    emar rcs "${WXLIB_PREFIX}_${stub}-3.2.a"
+    ln -sf "${WXLIB_PREFIX}_${stub}-3.2.a" "${WXLIB_PREFIX}_${stub}-3.2-emscripten.a"
 done
 
 cd "$BUILD_DIR"

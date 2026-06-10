@@ -10,6 +10,7 @@ source "$(dirname "$0")/common/env.sh"
 #   ./build-wasm-test.sh              # Incremental build (default)
 #   ./build-wasm-test.sh --clean      # Clean build from scratch
 #   ./build-wasm-test.sh --debug      # Build with debug symbols
+#   ./build-wasm-test.sh --dom        # Build against the DOM port into tests/apps-dom
 #   ./build-wasm-test.sh menu         # Build only the menu test
 #   ./build-wasm-test.sh --debug menu # Build menu test with debug symbols
 
@@ -17,6 +18,7 @@ set -e
 
 DEBUG_BUILD=0
 CLEAN_BUILD=0
+DOM_BUILD=0
 TARGET=""
 
 # Parse arguments
@@ -25,6 +27,8 @@ for arg in "$@"; do
         DEBUG_BUILD=1
     elif [ "$arg" = "--clean" ]; then
         CLEAN_BUILD=1
+    elif [ "$arg" = "--dom" ]; then
+        DOM_BUILD=1
     elif [ "$arg" != "" ]; then
         TARGET="$arg"
     fi
@@ -32,9 +36,26 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
 TESTS_DIR="$PROJECT_ROOT/tests"
-WASM_APP_DIR="$TESTS_DIR/apps"
+
+if [ "$DOM_BUILD" = "1" ]; then
+    BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-dom"
+    # DOM apps build in a mirrored source tree so canvas and DOM bundles
+    # coexist; relative ../../ paths in Makefile.wasm resolve identically.
+    WASM_APP_DIR="$TESTS_DIR/apps-dom"
+    echo "Mirroring test app sources into apps-dom..."
+    rsync -a --delete \
+        --exclude '*.o' --exclude '*.d' \
+        --exclude '*_test.html' --exclude '*_test.js' --exclude '*_test.wasm' \
+        --exclude '*_repro.html' --exclude '*_repro.js' --exclude '*_repro.wasm' \
+        --exclude '*.wasm.map' \
+        "$TESTS_DIR/apps/" "$WASM_APP_DIR/"
+    MAKE_PORT_ARGS="PORT=dom"
+else
+    BUILD_DIR="$PROJECT_ROOT/build-wasm/wxwidgets-universal"
+    WASM_APP_DIR="$TESTS_DIR/apps"
+    MAKE_PORT_ARGS=""
+fi
 STANDALONE_DIR="$WASM_APP_DIR/standalone"
 
 echo "=== Building wxWidgets WASM Test Applications ==="
@@ -93,9 +114,9 @@ fi
 
 # Build (pass DEBUG flag if requested)
 if [ "$DEBUG_BUILD" = "1" ]; then
-    make -f Makefile.wasm DEBUG=1 "$MAKE_TARGET"
+    make -f Makefile.wasm DEBUG=1 $MAKE_PORT_ARGS "$MAKE_TARGET"
 else
-    make -f Makefile.wasm "$MAKE_TARGET"
+    make -f Makefile.wasm $MAKE_PORT_ARGS "$MAKE_TARGET"
 fi
 
 echo ""

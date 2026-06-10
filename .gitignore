@@ -50,6 +50,14 @@ wxwidgets-clean/
 /tests/apps/standalone/*/*.wasm
 /tests/apps/kicad/*.js
 /tests/apps/kicad/*.wasm
+
+# DOM-port test bundles (mirrored + built by scripts/build-wasm-test.sh --dom)
+/tests/apps-dom/
+
+# Worktree-local canvas reference snapshot for regression gating (see
+# features/wx-dom-port docs); derived from a local run, not a project asset
+/tests/phase0-canvas-reference/
+/tests/phase0-timestamp-noisy.txt
 /tests/apps/kicad/*.tar.gz
 !tests/apps/kicad/pcbnew.html
 /tests/apps/gal-webgl/*.js

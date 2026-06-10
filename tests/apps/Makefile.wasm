@@ -5,9 +5,19 @@
 #   make -f Makefile.wasm          # Optimized release build
 #   make -f Makefile.wasm DEBUG=1  # Debug build with DWARF symbols and source maps
 
-WXCONFIG = ../../build-wasm/wxwidgets-universal/wx-config
 TOOLS_ROOT = ../../wxwidgets/build/wasm
 KICAD_ROOT = ../../kicad
+
+# PORT=dom links against the DOM (non-universal) wxWidgets build and adds the
+# wx-dom.js shim. Invoked by scripts/build-wasm-test.sh --dom from a mirrored
+# source tree in tests/apps-dom (so canvas and DOM bundles coexist).
+ifeq ($(PORT),dom)
+    WXCONFIG = ../../build-wasm/wxwidgets-dom/wx-config
+    WXLIB_PREFIX = libwx_wasmu
+else
+    WXCONFIG = ../../build-wasm/wxwidgets-universal/wx-config
+    WXLIB_PREFIX = libwx_wasmunivu
+endif
 
 CXX = em++
 WX_CXXFLAGS := $(shell $(WXCONFIG) --cxxflags)
@@ -103,13 +113,23 @@ LDFLAGS_COROUTINE = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) $(WX_LDFLAGS_NOGL
 # forbids the very multi-parked-sleep states the harness exists to exercise.
 LDFLAGS_RACES = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -sASSERTIONS=0 $(WX_LDFLAGS_NOGL)
 
-JS = $(TOOLS_ROOT)/wx.js
+# In dom mode a second pre-js carries the DOM-control shim ("--pre-js A --pre-js B"
+# after expansion — emcc accepts repeated --pre-js).
+ifeq ($(PORT),dom)
+    JS = $(TOOLS_ROOT)/wx.js --pre-js $(TOOLS_ROOT)/wx-dom.js
+else
+    JS = $(TOOLS_ROOT)/wx.js
+endif
 HTML = $(TOOLS_ROOT)/template.html
 
 # wxWidgets library directory - used as dependency to rebuild when libs change
-WX_LIB_DIR = ../../build-wasm/wxwidgets-universal/lib
+ifeq ($(PORT),dom)
+    WX_LIB_DIR = ../../build-wasm/wxwidgets-dom/lib
+else
+    WX_LIB_DIR = ../../build-wasm/wxwidgets-universal/lib
+endif
 # Key library that changes when wxWidgets is rebuilt
-WX_CORE_LIB = $(WX_LIB_DIR)/libwx_wasmunivu_core-3.2-emscripten.a
+WX_CORE_LIB = $(WX_LIB_DIR)/$(WXLIB_PREFIX)_core-3.2-emscripten.a
 
 # Standalone directories
 S = standalone
