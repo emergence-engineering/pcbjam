@@ -10,9 +10,9 @@
 
 name: wasm-opt arm64 repro (Ubicloud)
 
+# NOTE: push trigger removed after the first data-gathering run — re-trigger
+# manually (workflow_dispatch) if another arm64 data point is needed.
 on:
-  push:
-    branches: ["validate/calc-pipeline-repro"]
   workflow_dispatch: {}
 
 concurrency:

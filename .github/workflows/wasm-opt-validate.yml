@@ -67,6 +67,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          # toolchain for the binaryen from-source A/B bench (repro branch)
+          sudo apt-get install -y cmake ninja-build g++
 
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -92,6 +94,12 @@ jobs:
           ./docker/build.sh "${BUILD_TARGET}" --build-deps -j "$(nproc)"
           echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
           ls -lh output/*.wasm
+
+      # x86 verdict on the release-tarball defect: on aarch64 a stock gcc
+      # -O3+LTO build runs asyncify 9-13x faster than the official tarball
+      # (bit-identical output). Replays calculator asyncify+-O2 with both.
+      - name: Bench release tarball vs from-source Binaryen (x86)
+        run: ./scripts/bench/binaryen-source-bench.sh
 
       - name: Install test deps
         if: env.RUN_E2E == '1'
