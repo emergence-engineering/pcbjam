@@ -216,6 +216,47 @@ main {
   margin-top: 2rem;
 }
 
+.prose h3 {
+  margin-top: 1.5rem;
+}
+
+.prose .card {
+  margin: 1rem 0;
+}
+
+.prose .table-wrap {
+  overflow-x: auto;
+  margin: 1rem 0;
+}
+
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose th {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.35em;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Shared landing-page helpers
    ───────────────────────────────────────────────────────────────────────── */
