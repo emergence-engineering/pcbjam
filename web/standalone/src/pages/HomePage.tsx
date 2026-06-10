@@ -84,6 +84,7 @@ export function HomePage() {
       <WasmTool
         tool={tool}
         slug="local"
+        projectId="local"
         files={local.files}
         targetPath={FILELESS_TOOLS.has(tool) ? undefined : target}
         fetchBytes={local.fetchBytes}

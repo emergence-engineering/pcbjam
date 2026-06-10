@@ -1,7 +1,7 @@
 import * as React from "react";
-import type { Tool } from "@pcbjam/shared";
+import { collabRoomId, type Tool } from "@pcbjam/shared";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { WASM_ASSET_BASE_URL } from "@/lib/config";
+import { WASM_ASSET_BASE_URL, yjsProviderConfig } from "@/lib/config";
 import { bootKicadTool } from "@/wasm/boot";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
 import type { CollabWindow } from "@/wasm/collab";
@@ -22,7 +22,7 @@ async function maybeStartCollab(
   win: ToolWindow,
   opts: {
     tool: Tool;
-    slug: string;
+    projectId: string;
     targetPath?: string;
     log: (m: string) => void;
     onStatus: (t: string) => void;
@@ -58,12 +58,16 @@ async function maybeStartCollab(
   }
 
   const { startCollab } = await import("@/wasm/collab");
-  const channel = `kicad-collab:${opts.slug}:${opts.targetPath ?? ""}`;
-  clog("starting on channel", channel);
-  await startCollab(mod, win as unknown as CollabWindow, { channel });
-  opts.log(`[collab] connected on ${channel}`);
+  const provider = yjsProviderConfig();
+  // One room per (project, document). Two tabs of the same build compute the
+  // same id, so cross-tab BroadcastChannel still works; network providers use it
+  // verbatim to namespace + persist (see @pcbjam/shared collabRoomId).
+  const room = collabRoomId(opts.projectId, opts.targetPath ?? opts.tool);
+  clog("starting collab", provider.kind, "room", room);
+  await startCollab(mod, win as unknown as CollabWindow, { provider, room });
+  opts.log(`[collab] ${provider.kind} connected on ${room}`);
   opts.onStatus("Collab: connected");
-  clog("connected ✓ — edit in one tab, watch the other");
+  clog("connected ✓");
 }
 
 /**
@@ -76,6 +80,7 @@ async function maybeStartCollab(
 export function WasmTool({
   tool,
   slug,
+  projectId,
   files,
   targetPath,
   fetchBytes,
@@ -83,6 +88,8 @@ export function WasmTool({
 }: {
   tool: Tool;
   slug: string;
+  /** Stable project id — used to key the collab room (see @pcbjam/shared). */
+  projectId: string;
   files: ToolFile[];
   targetPath?: string;
   /** Fetch one project-relative file's bytes (contract loader or local folder). */
@@ -126,7 +133,7 @@ export function WasmTool({
           log: append,
           onStatus: setStatus,
         });
-        await maybeStartCollab(win, { tool, slug, targetPath, log: append, onStatus: setStatus });
+        await maybeStartCollab(win, { tool, projectId, targetPath, log: append, onStatus: setStatus });
       } catch (err) {
         append(`[fatal] ${String(err)}`);
         setStatus(`Error: ${String(err)}`);

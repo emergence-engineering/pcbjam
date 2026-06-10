@@ -1,12 +1,22 @@
 import * as Y from "yjs";
-import { connectBroadcastChannel, type Transport } from "./broadcast-transport";
 import { clog } from "./debug";
+import {
+  connectProvider,
+  type ProviderConfig,
+  type YjsProvider,
+} from "./provider";
 import { createReconciler, type Reconciler } from "./reconciler";
 import type { CollabBridge } from "./types";
 
 export type { CollabBridge, CollabDelta, CollabItem } from "./types";
 export { createReconciler } from "./reconciler";
 export { connectBroadcastChannel } from "./broadcast-transport";
+export {
+  connectProvider,
+  type ProviderConfig,
+  type ProviderKind,
+  type YjsProvider,
+} from "./provider";
 
 /** The subset of the Emscripten Module the collab bridge needs (embind functions). */
 export interface CollabModule {
@@ -31,51 +41,51 @@ export function moduleBridge(mod: CollabModule, win: CollabWindow): CollabBridge
 }
 
 export interface StartCollabOptions {
-  /** BroadcastChannel name — tabs sharing this name share the document. */
-  channel: string;
-  /**
-   * How long to wait for an existing tab's state before deciding seed-vs-adopt
-   * (seed-once rule). First tab: no reply, seeds from its local model. Later tab:
-   * receives state within this window, then adopts it. Default 300ms.
-   */
-  settleMs?: number;
+  /** Which Yjs provider to use + its endpoint/params (env-selected upstream). */
+  provider: ProviderConfig;
+  /** Room id — see @pcbjam/shared `collabRoomId`. Identifies one shared doc. */
+  room: string;
 }
 
 export interface CollabHandle {
   doc: Y.Doc;
   reconciler: Reconciler;
-  transport: Transport;
+  provider: YjsProvider;
   destroy(): void;
 }
 
 /**
- * Wire a running pl_editor wasm Module into a collaborative session: Module ⇄ Y.Doc ⇄
- * BroadcastChannel. Returns once the initial seed/adopt has run. The editor must
- * already have its document loaded (so kicadCollabSnapshot reflects it).
+ * Wire a running KiCad wasm Module into a collaborative session:
+ * Module ⇄ Y.Doc ⇄ provider. Returns once the initial seed/adopt has run. The
+ * editor must already have its document loaded (so kicadCollabSnapshot reflects
+ * it), so that — if this is the first/only client — `seed()` captures it.
+ *
+ * Seed-vs-adopt: after `provider.whenSynced()` the Y.Doc holds the authoritative
+ * state (the server's, a peer tab's, or — first ever — empty). `seed()` then
+ * seeds from the local model if the doc is empty, else adopts the shared doc.
  */
 export async function startCollab(
   mod: CollabModule,
   win: CollabWindow,
   opts: StartCollabOptions,
 ): Promise<CollabHandle> {
-  clog("startCollab: channel =", opts.channel);
+  clog("startCollab:", opts.provider.kind, "room =", opts.room);
   const doc = new Y.Doc();
   const bridge = moduleBridge(mod, win);
   const reconciler = createReconciler(doc, bridge);
-  const transport = connectBroadcastChannel(doc, opts.channel);
+  const provider = await connectProvider(doc, opts.provider, { room: opts.room });
 
-  // Let any existing tab answer our state query before we decide to seed.
-  await new Promise((r) => setTimeout(r, opts.settleMs ?? 300));
+  await provider.whenSynced();
   reconciler.seed();
   clog("startCollab: ready; doc items =", reconciler.items.size);
 
   return {
     doc,
     reconciler,
-    transport,
+    provider,
     destroy() {
       reconciler.destroy();
-      transport.destroy();
+      provider.destroy();
       doc.destroy();
     },
   };

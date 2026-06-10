@@ -34,6 +34,7 @@ export function ToolPage() {
     <WasmTool
       tool={parsedTool.data}
       slug={slug}
+      projectId={data.project.id}
       files={data.files}
       targetPath={targetPath}
       fetchBytes={(relPath) => fetchFileBytes(slug, relPath)}

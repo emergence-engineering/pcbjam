@@ -55,6 +55,9 @@ importers:
 
   standalone:
     dependencies:
+      '@hocuspocus/provider':
+        specifier: ^4.1.1
+        version: 4.1.1(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)
       '@pcbjam/shared':
         specifier: workspace:*
         version: link:../pcbjam-shared
@@ -97,6 +100,9 @@ importers:
       tailwindcss-animate:
         specifier: ^1.0.7
         version: 1.0.7(tailwindcss@3.4.19(tsx@4.22.4))
+      y-partyserver:
+        specifier: ^2.2.0
+        version: 2.2.0(@cloudflare/workers-types@4.20260610.1)(partyserver@0.5.6(@cloudflare/workers-types@4.20260610.1))(yjs@13.6.31)
       yjs:
         specifier: ^13.6.18
         version: 13.6.31
@@ -217,6 +223,9 @@ packages:
   '@babel/types@7.29.7':
     resolution: {integrity: sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA==}
     engines: {node: '>=6.9.0'}
+
+  '@cloudflare/workers-types@4.20260610.1':
+    resolution: {integrity: sha512-Mk/f3lUygeIHzQ4HnJjU/JvGg/kllgp9gISty9nylHE/2M2MFeKO+hgAKSgiPpmwUbuhewdYGgqFGgT/ADK0/g==}
 
   '@esbuild/aix-ppc64@0.25.12':
     resolution: {integrity: sha512-Hhmwd6CInZ3dwpuGTF8fJG6yoWmsToE+vYgD4nytZVxcu1ulHpUQRAB1UJ8+N1Am3Mz4+xOByoQoSZf4D+CpkA==}
@@ -545,6 +554,15 @@ packages:
   '@fastify/merge-json-schemas@0.1.1':
     resolution: {integrity: sha512-fERDVz7topgNjtXsJTTW1JKLy0rhuLRcquYqNR9rF7OcVpCa2OVW49ZPDIhaRRCaUuvVxI+N416xUoF76HNSXA==}
 
+  '@hocuspocus/common@4.1.1':
+    resolution: {integrity: sha512-7jvCti57eYp6Yf7MHzPI4QI75o4zHg4G2f2HC3jbAdpTb+aKxAEPpnDxxpl2Lj4XzyDcisZfwB0Rvf7lbPXAog==}
+
+  '@hocuspocus/provider@4.1.1':
+    resolution: {integrity: sha512-LSbr50a1+1yoyO7tiWBkBxZZQzSRkW6xQRfEx6phNhQDzn5E4lL24mvfkUIyVFrr+TzPDGMFz5CBx6cXSaFYzw==}
+    peerDependencies:
+      y-protocols: ^1.0.6
+      yjs: ^13.6.8
+
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
 
@@ -560,6 +578,9 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@lifeomic/attempt@3.1.0':
+    resolution: {integrity: sha512-QZqem4QuAnAyzfz+Gj5/+SLxqwCAw2qmt7732ZXodr6VDWGeYLG6w1i/vYLa55JQM9wRuBKLmXmiZ2P0LtE5rw==}
 
   '@nodelib/fs.scandir@2.1.5':
     resolution: {integrity: sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g==}
@@ -1316,6 +1337,9 @@ packages:
   lines-and-columns@1.2.4:
     resolution: {integrity: sha512-7ylylesZQ/PV29jhEDl3Ufjo6ZX7gCqJr5F7PKrqc93v7fzSymt1BpwEU8nAUXs8qzzvqhbjhK5QZg6Mt/HkBg==}
 
+  lodash.debounce@4.0.8:
+    resolution: {integrity: sha512-FT1yDzDYEoYWhnSGnpE/4Kj1fLZkDFyqRb7fNt6FdYOSxlUWAtp42Eh6Wb0rGIv/m9Bgo7x4GhQbm5Ys4SG5ow==}
+
   loose-envify@1.4.0:
     resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
     hasBin: true
@@ -1350,6 +1374,11 @@ packages:
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
+  nanoid@5.1.11:
+    resolution: {integrity: sha512-v+KEsUv2ps74PaSKv0gHTxTCgMXOIfBEbaqa6w6ISIGC7ZsvHN4N9oJ8d4cmf0n5oTzQz2SLmThbQWhjd/8eKg==}
+    engines: {node: ^18 || >=20}
+    hasBin: true
+
   node-releases@2.0.46:
     resolution: {integrity: sha512-GYVXHE2KnrzAfsAjl4uP++evGFCrAU1jta4ubEjIG7YWt/64Gqv66a30yKwWczVjA6j3bM4nBwH7Pk1JmDHaxQ==}
     engines: {node: '>=18'}
@@ -1372,6 +1401,11 @@ packages:
   on-exit-leak-free@2.1.2:
     resolution: {integrity: sha512-0eJJY6hXLGf1udHwfNftBqH+g73EU4B504nZeKpz1sYRKafAghwxEJunB2O7rDZkL4PGfsMVnTXZ2EjibbqcsA==}
     engines: {node: '>=14.0.0'}
+
+  partyserver@0.5.6:
+    resolution: {integrity: sha512-/LKCqlq9nWzNXA8UXZFO/Xz15QDCjJnGAgRQVLnXJO9bA0HKt5J8VM8wLnGc814WatzuQgeG17tqzI//y5WFGA==}
+    peerDependencies:
+      '@cloudflare/workers-types': ^4.20260424.1
 
   path-parse@1.0.7:
     resolution: {integrity: sha512-LDJzPVEEEPR+y48z93A0Ed0yXb8pAByGWo/k5YYdYgpY2/2EsOsksJrq7lOHxryrVOn1ejG6oAp8ahvOIQD8sw==}
@@ -1735,6 +1769,19 @@ packages:
       yaml:
         optional: true
 
+  y-partyserver@2.2.0:
+    resolution: {integrity: sha512-AIsTEZ3jPicBe3VHO5c/VdSGSaFr0J9cAGj6+sgRL/RnXLTNSkP3oQXyXf1y8hQNeXv/j9zYDT5NnRv2k1eMGA==}
+    peerDependencies:
+      '@cloudflare/workers-types': ^4.20260424.1
+      partyserver: '>=0.2.0 <1.0.0'
+      yjs: ^13.6.14
+
+  y-protocols@1.0.7:
+    resolution: {integrity: sha512-YSVsLoXxO67J6eE/nV4AtFtT3QEotZf5sK5BHxFBXso7VDUT3Tx07IfA6hsu5Q5OmBdMkQVmFZ9QOA7fikWvnw==}
+    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
+    peerDependencies:
+      yjs: ^13.0.0
+
   yallist@3.1.1:
     resolution: {integrity: sha512-a4UGQaWPH59mOXUYnAG2ewncQS4i4F43Tv3JoAM+s2VDAmS9NsK8GpDMLrCHPksFT7h3K6TOoUNn2pb7RoXx4g==}
 
@@ -1860,6 +1907,8 @@ snapshots:
     dependencies:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
+
+  '@cloudflare/workers-types@4.20260610.1': {}
 
   '@esbuild/aix-ppc64@0.25.12':
     optional: true
@@ -2038,6 +2087,18 @@ snapshots:
     dependencies:
       fast-deep-equal: 3.1.3
 
+  '@hocuspocus/common@4.1.1':
+    dependencies:
+      lib0: 0.2.117
+
+  '@hocuspocus/provider@4.1.1(y-protocols@1.0.7(yjs@13.6.31))(yjs@13.6.31)':
+    dependencies:
+      '@hocuspocus/common': 4.1.1
+      '@lifeomic/attempt': 3.1.0
+      lib0: 0.2.117
+      y-protocols: 1.0.7(yjs@13.6.31)
+      yjs: 13.6.31
+
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -2056,6 +2117,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@lifeomic/attempt@3.1.0': {}
 
   '@nodelib/fs.scandir@2.1.5':
     dependencies:
@@ -2717,6 +2780,8 @@ snapshots:
 
   lines-and-columns@1.2.4: {}
 
+  lodash.debounce@4.0.8: {}
+
   loose-envify@1.4.0:
     dependencies:
       js-tokens: 4.0.0
@@ -2750,6 +2815,8 @@ snapshots:
 
   nanoid@3.3.12: {}
 
+  nanoid@5.1.11: {}
+
   node-releases@2.0.46: {}
 
   normalize-path@3.0.0: {}
@@ -2761,6 +2828,11 @@ snapshots:
   obliterator@2.0.5: {}
 
   on-exit-leak-free@2.1.2: {}
+
+  partyserver@0.5.6(@cloudflare/workers-types@4.20260610.1):
+    dependencies:
+      '@cloudflare/workers-types': 4.20260610.1
+      nanoid: 5.1.11
 
   path-parse@1.0.7: {}
 
@@ -3110,6 +3182,21 @@ snapshots:
       fsevents: 2.3.3
       jiti: 1.21.7
       tsx: 4.22.4
+
+  y-partyserver@2.2.0(@cloudflare/workers-types@4.20260610.1)(partyserver@0.5.6(@cloudflare/workers-types@4.20260610.1))(yjs@13.6.31):
+    dependencies:
+      '@cloudflare/workers-types': 4.20260610.1
+      lib0: 0.2.117
+      lodash.debounce: 4.0.8
+      nanoid: 5.1.11
+      partyserver: 0.5.6(@cloudflare/workers-types@4.20260610.1)
+      y-protocols: 1.0.7(yjs@13.6.31)
+      yjs: 13.6.31
+
+  y-protocols@1.0.7(yjs@13.6.31):
+    dependencies:
+      lib0: 0.2.117
+      yjs: 13.6.31
 
   yallist@3.1.1: {}
 
