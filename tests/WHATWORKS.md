@@ -59,8 +59,8 @@ This section maps KiCad's wxWidgets usage to our test coverage.
 | Tab panels | wxNotebook | WORKS | 7 tabs switching correctly |
 | Property editor panels | wxSplitterWindow | WORKS | layout-01-loaded.png shows split panes |
 | Scrollable content | wxScrolledWindow | WORKS | 20 items scrollable in each pane |
-| OpenGL canvas | wxGLCanvas | WORKS | gl-01-opengl-tab.png shows rendering |
-| OpenGL context | wxGLContext | WORKS | Context created successfully |
+| OpenGL canvas | wxGLCanvas | WORKS | covered by gal-webgl tests (WebGL GAL) |
+| OpenGL context | wxGLContext | WORKS | covered by gal-webgl tests (WebGL GAL) |
 | Drawing/painting | wxDC | WORKS | 08-drawing-done.png shows strokes |
 | Mouse events | wxMouseEvent | WORKS | Drawing strokes captured |
 
@@ -88,20 +88,11 @@ This section maps KiCad's wxWidgets usage to our test coverage.
 | Multi-line entry | wxTextCtrl (multiline) | WORKS | Line 1/2/3 typed successfully |
 | Password fields | wxTextCtrl (password) | WORKS | Password field visible |
 
-### OpenGL Rendering - WORKING
+### OpenGL Rendering
 
-| KiCad Use | GL Function | Test Status | Evidence |
-|-----------|-------------|-------------|----------|
-| Immediate mode | glBegin/glEnd | WORKS | Rainbow triangle renders |
-| Vertex positioning | glVertex2f/3f | WORKS | Shapes positioned correctly |
-| Colors | glColor3f/4f | WORKS | Rainbow colors visible |
-| Triangles | GL_TRIANGLES | WORKS | Triangle visible |
-| Quads | GL_QUADS | WORKS | Yellow rectangle visible |
-| Lines | GL_LINES | WORKS | Cyan lines visible |
-| Matrix operations | glMatrixMode, glTranslatef | WORKS | Test passes |
-| Vertex arrays | glVertexPointer, glDrawElements | WORKS | Test passes |
-| State management | glEnable, glDisable | WORKS | Test passes |
-| Blending | glBlendFunc, GL_BLEND | WORKS | Test passes |
+KiCad renders through the WebGL GAL path; see `gal-webgl.spec.ts` (26 scenarios).
+The legacy-GL-emulation tests (immediate mode via -sLEGACY_GL_EMULATION and
+gl_immediate_shim.js) were removed 2026-06-10 along with minimal_test's OpenGL tab.
 
 ### File Operations - PARTIAL
 
@@ -251,11 +242,6 @@ Organized in `apps/standalone/` folders:
 - Add/Remove buttons functional
 - wxChoice: Dropdown opens with items (Red, Green, Blue, Yellow, Purple)
 
-### OpenGL Tab
-- wxGLCanvas renders blue background
-- Immediate mode: Rainbow triangle
-- GL_QUADS: Yellow rectangle
-- GL_LINES: Cyan lines
 - Vertex arrays: Working
 - Matrix operations: Working
 - State management: Working
@@ -283,43 +269,42 @@ Organized in `apps/standalone/` folders:
 4. Basic controls (buttons, checkboxes, radio buttons, sliders)
 5. Text input (single/multi-line)
 6. List controls (wxListBox, wxChoice, wxComboBox)
-7. OpenGL rendering (immediate mode, vertex arrays, matrix ops)
-8. Drawing/painting (wxDC, mouse events)
-9. **wxMessageBox/wxDialog** - Modal dialogs with Asyncify
-10. **wxGrid** - Property grids with cells, labels, and events
-11. **wxTreeCtrl** - Hierarchy browsers with expand/collapse, selection, add/delete
-12. **wxClipboard** - Copy/paste via browser Clipboard API with Asyncify
-13. **wxDataViewCtrl** - Zone Manager, Net Inspector, Library browsers
-14. **wxHtmlWindow** - About dialogs, error message formatting
-15. **wxStyledTextCtrl** - DRC rules editor, Python console, script editors
-16. **wxPrinting** - Print preview, print dialog, browser print via window.print()
-17. **wxDragDrop** - External file drops via HTML5 drag and drop API
-18. **wxPropertyGrid** - Property panels with categories, various property types
-19. **wxPropertyGridManager** - Multi-page property organization
-20. **wxColourPickerCtrl** - Color pickers for layer colors
-21. **wxFontPickerCtrl** - Font pickers for text preferences
-22. **wxCollapsiblePane** - Expandable/collapsible property sections
-23. **wxListCtrl (virtual)** - Virtual mode for 10000+ item lists
-24. **wxInfoBar** - Notification bar for DRC messages, warnings
-25. **wxDataViewCtrl (virtual)** - Virtual mode for 10,000+ items (Zone Manager, Net Inspector)
-26. **wxAuiNotebook** - Closeable, reorderable tabbed panels
-27. **wxWizard** - Step-by-step Footprint Wizard dialog
-28. **wxGrid cell editing** - Full editing with text, number, choice, checkbox editors
-29. **wxCalendarCtrl** - Date picker with month/year navigation
-30. **wxGrid custom renderers** - Color swatches, icon+text, striped rows for layer manager
-31. **wxPrintPreview frame** - Print preview with zoom, page navigation
-32. **wxBitmapButton** - Toolbar buttons with custom bitmap icons
-33. **wxTreebook** - Hierarchical settings pages (General, Display>Colors, etc.)
-34. **wxBitmapComboBox** - Layer chooser dropdown with color swatch icons
-35. **wxCheckListBox** - Layer visibility list with checkboxes
-36. **wxValidator** - Input validation (text, integer, float, custom validators)
-37. **wxOwnerDrawnComboBox** - Custom dropdown rendering (layer selectors, font choosers)
-38. **wxPopupWindow** - Transient popups (toolbar palettes, color pickers)
-39. **wxXmlDocument** - XML parsing for config and project files
-40. **wxFontEnumerator** - Font enumeration via Local Font Access API (Chrome 103+)
-41. **wxMask (bitmap masking)** - Color-keyed transparency for toolbar icons
-42. **Text decorations** - Underline/strikethrough in wxDC text rendering
-43. **wxRegion clipping** - Non-rectangular clipping for complex shapes
+7. Drawing/painting (wxDC, mouse events)
+8. **wxMessageBox/wxDialog** - Modal dialogs with Asyncify
+9. **wxGrid** - Property grids with cells, labels, and events
+10. **wxTreeCtrl** - Hierarchy browsers with expand/collapse, selection, add/delete
+11. **wxClipboard** - Copy/paste via browser Clipboard API with Asyncify
+12. **wxDataViewCtrl** - Zone Manager, Net Inspector, Library browsers
+13. **wxHtmlWindow** - About dialogs, error message formatting
+14. **wxStyledTextCtrl** - DRC rules editor, Python console, script editors
+15. **wxPrinting** - Print preview, print dialog, browser print via window.print()
+16. **wxDragDrop** - External file drops via HTML5 drag and drop API
+17. **wxPropertyGrid** - Property panels with categories, various property types
+18. **wxPropertyGridManager** - Multi-page property organization
+19. **wxColourPickerCtrl** - Color pickers for layer colors
+20. **wxFontPickerCtrl** - Font pickers for text preferences
+21. **wxCollapsiblePane** - Expandable/collapsible property sections
+22. **wxListCtrl (virtual)** - Virtual mode for 10000+ item lists
+23. **wxInfoBar** - Notification bar for DRC messages, warnings
+24. **wxDataViewCtrl (virtual)** - Virtual mode for 10,000+ items (Zone Manager, Net Inspector)
+25. **wxAuiNotebook** - Closeable, reorderable tabbed panels
+26. **wxWizard** - Step-by-step Footprint Wizard dialog
+27. **wxGrid cell editing** - Full editing with text, number, choice, checkbox editors
+28. **wxCalendarCtrl** - Date picker with month/year navigation
+29. **wxGrid custom renderers** - Color swatches, icon+text, striped rows for layer manager
+30. **wxPrintPreview frame** - Print preview with zoom, page navigation
+31. **wxBitmapButton** - Toolbar buttons with custom bitmap icons
+32. **wxTreebook** - Hierarchical settings pages (General, Display>Colors, etc.)
+33. **wxBitmapComboBox** - Layer chooser dropdown with color swatch icons
+34. **wxCheckListBox** - Layer visibility list with checkboxes
+35. **wxValidator** - Input validation (text, integer, float, custom validators)
+36. **wxOwnerDrawnComboBox** - Custom dropdown rendering (layer selectors, font choosers)
+37. **wxPopupWindow** - Transient popups (toolbar palettes, color pickers)
+38. **wxXmlDocument** - XML parsing for config and project files
+39. **wxFontEnumerator** - Font enumeration via Local Font Access API (Chrome 103+)
+40. **wxMask (bitmap masking)** - Color-keyed transparency for toolbar icons
+41. **Text decorations** - Underline/strikethrough in wxDC text rendering
+42. **wxRegion clipping** - Non-rectangular clipping for complex shapes
 
 ### All KiCad-Critical Features Tested
 
@@ -388,9 +373,8 @@ The `wasmedge_test` app verifies WASM-specific behaviors:
 ## Build Notes
 
 ### GL vs Non-GL Apps
-- Main app (minimal_test) uses `LDFLAGS_GL` with OpenGL support
-- Standalone test apps use `LDFLAGS_NOGL` without OpenGL
-- This prevents "_glBegin is not defined" crashes in non-GL apps
+- All wx test apps (including minimal_test) link with `LDFLAGS_NOGL`; legacy GL
+  emulation was removed 2026-06-10. WebGL rendering is tested by gal-webgl.
 
 ### Build Command
 Always use the build script:
@@ -483,7 +467,6 @@ npx playwright test --ui    # Interactive mode with screenshot preview
 | 08-drawing-done.png | Drawing strokes on canvas |
 | 09-lists-tab.png | ListBox and Choice controls |
 | 10a-choice-dropdown-open.png | Dropdown menu open |
-| gl-01-opengl-tab.png | OpenGL rendering |
 | aui-01-loaded.png | AUI dockable panels |
 | menu-03-file-clicked.png | File menu dropdown |
 | toolbar-01-loaded.png | Toolbar with icons |

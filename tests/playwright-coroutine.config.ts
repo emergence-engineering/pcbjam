@@ -23,20 +23,25 @@ function findFreePort(): number {
   }
 }
 
-function getOrFindPort(): number {
-  try {
-    const stat = fs.statSync(PORT_FILE);
-    if (Date.now() - stat.mtimeMs < 60000) {
-      const port = parseInt(fs.readFileSync(PORT_FILE, 'utf-8').trim());
-      if (port > 0 && port < 65536) return port;
-    }
-  } catch { /* fall through */ }
+// Same port-pinning scheme as playwright-kicad.config.ts: the main runner (argv
+// contains `test`) always picks a fresh port and writes the file before workers
+// spawn; workers — including ones recreated mid-run after a failure — always
+// reuse it. No freshness window, so a recreated worker can never rotate to a
+// dead port (ERR_CONNECTION_REFUSED cascade).
+function resolvePort(): number {
+  const isMainRunner = process.argv.slice(2).includes('test');
+  if (!isMainRunner) {
+    try {
+      const existing = parseInt(fs.readFileSync(PORT_FILE, 'utf-8').trim(), 10);
+      if (existing > 0 && existing < 65536) return existing;
+    } catch { /* fall through */ }
+  }
   const port = findFreePort();
   fs.writeFileSync(PORT_FILE, port.toString());
   return port;
 }
 
-const port = getOrFindPort();
+const port = resolvePort();
 
 export default defineConfig({
   globalSetup: './global-setup.ts',

@@ -42,7 +42,6 @@ tests/
 │   ├── dialog.spec.ts      # wxDialog/wxMessageBox tests
 │   ├── tree.spec.ts        # wxTreeCtrl tests
 │   ├── grid.spec.ts        # wxGrid/wxSpinCtrl/wxSearchCtrl tests
-│   ├── opengl.spec.ts      # OpenGL tab tests
 │   ├── wxwidgets.spec.ts   # Comprehensive UI interaction tests
 │   └── ...
 ├── logs/                   # Test logs (auto-generated)
@@ -102,13 +101,12 @@ Then open http://localhost:8000/minimal_test.html
 
 | Spec File | Tests | Description |
 |-----------|-------|-------------|
-| `wxwidgets.spec.ts` | Comprehensive | Full UI interaction, stability, OpenGL |
+| `wxwidgets.spec.ts` | Comprehensive | Full UI interaction, stability |
 | `menu.spec.ts` | wxMenuBar | Menu bar visibility and interactions |
 | `timer.spec.ts` | wxTimer | Timer start/stop/reset functionality |
 | `dialog.spec.ts` | wxDialog | Message boxes and custom dialogs |
 | `tree.spec.ts` | wxTreeCtrl | Tree control with expand/collapse |
 | `grid.spec.ts` | wxGrid | Grid, SpinCtrl, SearchCtrl |
-| `opengl.spec.ts` | OpenGL | GL tests (immediate mode, vertex arrays) |
 | `aui.spec.ts` | wxAuiManager | Dockable panels |
 | `clipboard.spec.ts` | wxClipboard | Copy/paste operations |
 | `dataview.spec.ts` | wxDataViewCtrl | List and tree data views (Zone Manager-like) |

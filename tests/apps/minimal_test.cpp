@@ -16,27 +16,9 @@
 #include "wx/gauge.h"
 #include "wx/dcbuffer.h"
 #include "wx/datetime.h"
-#include "wx/glcanvas.h"
 #include "wx/grid.h"
 #include "wx/spinctrl.h"
 #include "wx/srchctrl.h"
-
-// OpenGL headers - using legacy GL with Emscripten's emulation
-#ifdef __EMSCRIPTEN__
-#include <GL/gl.h>
-#include <GL/glu.h>
-#include <emscripten/emscripten.h>
-#else
-#include <OpenGL/gl.h>
-#include <OpenGL/glu.h>
-#endif
-
-// Console logging macro for WASM debugging
-#ifdef __EMSCRIPTEN__
-#define CONSOLE_LOG(msg) EM_ASM({ console.log('[GL-CPP] ' + UTF8ToString($0)); }, msg)
-#else
-#define CONSOLE_LOG(msg) printf("[GL-CPP] %s\n", msg)
-#endif
 
 #include <vector>
 
@@ -59,12 +41,6 @@ enum {
     ID_BTN_CLEAR,
     ID_EVENT_LOG,
     ID_DRAWING_PANEL,
-    ID_GL_CANVAS,
-    ID_BTN_GL_TEST_IMMEDIATE,
-    ID_BTN_GL_TEST_MATRIX,
-    ID_BTN_GL_TEST_VERTEX_ARRAY,
-    ID_BTN_GL_RUN_ALL,
-    ID_GL_TEST_SELECT,
     // Grid tab IDs
     ID_GRID,
     ID_SPIN_CTRL,
@@ -164,477 +140,6 @@ void DrawingPanel::OnPaint(wxPaintEvent& WXUNUSED(evt))
     }
 }
 
-//-----------------------------------------------------------------------------
-// GLTestCanvas - OpenGL canvas for testing legacy GL functions (KiCad uses these)
-//-----------------------------------------------------------------------------
-class GLTestCanvas : public wxGLCanvas
-{
-public:
-    GLTestCanvas(wxWindow* parent);
-    virtual ~GLTestCanvas();
-
-    // Test functions matching KiCad's GL usage
-    void TestImmediateMode();      // glBegin/glEnd, glVertex, glColor
-    void TestMatrixOperations();   // glMatrixMode, glPushMatrix, glTranslate, etc.
-    void TestVertexArrays();       // glEnableClientState, glVertexPointer, etc.
-    void TestStateManagement();    // glEnable/glDisable, glBlendFunc
-    void TestTexCoords();          // glTexCoord2f
-    void TestNormals();            // glNormal3f
-    void RunAllTests();
-    void SetCurrentTest(int test);
-
-    bool IsGLInitialized() const { return m_glInitialized; }
-
-private:
-    wxGLContext* m_context;
-    bool m_glInitialized;
-    int m_currentTest;  // Which test pattern to display
-
-    void OnPaint(wxPaintEvent& evt);
-    void OnSize(wxSizeEvent& evt);
-    void InitGL();
-    void SetupViewport();
-    void Render();
-
-    wxDECLARE_EVENT_TABLE();
-};
-
-wxBEGIN_EVENT_TABLE(GLTestCanvas, wxGLCanvas)
-    EVT_PAINT(GLTestCanvas::OnPaint)
-    EVT_SIZE(GLTestCanvas::OnSize)
-wxEND_EVENT_TABLE()
-
-// Helper to get GL attributes
-static wxGLAttributes GetGLAttributes()
-{
-    wxGLAttributes attrs;
-    attrs.PlatformDefaults().Defaults().EndList();
-    return attrs;
-}
-
-GLTestCanvas::GLTestCanvas(wxWindow* parent)
-    : wxGLCanvas(parent, GetGLAttributes(), ID_GL_CANVAS,
-                 wxDefaultPosition, wxSize(400, 300))
-    , m_context(nullptr)
-    , m_glInitialized(false)
-    , m_currentTest(0)
-{
-    CONSOLE_LOG("GLTestCanvas constructor called");
-    SetBackgroundStyle(wxBG_STYLE_PAINT);
-
-    // Check if wxGLCanvas was created successfully
-    EMSCRIPTEN_WEBGL_CONTEXT_HANDLE ctx = GetWebGLContext();
-    if (ctx > 0) {
-        EM_ASM({ console.log('[GL-CPP] WebGL context ID: ' + $0); }, ctx);
-    } else {
-        CONSOLE_LOG("ERROR: No WebGL context from wxGLCanvas!");
-    }
-}
-
-GLTestCanvas::~GLTestCanvas()
-{
-    delete m_context;
-}
-
-void GLTestCanvas::InitGL()
-{
-    CONSOLE_LOG("InitGL called");
-
-    if (m_glInitialized) {
-        CONSOLE_LOG("Already initialized, skipping");
-        return;
-    }
-
-    CONSOLE_LOG("Creating wxGLContext...");
-    if (!m_context) {
-        m_context = new wxGLContext(this);
-        if (m_context && m_context->IsOK()) {
-            CONSOLE_LOG("wxGLContext created successfully");
-        } else {
-            CONSOLE_LOG("ERROR: wxGLContext creation failed!");
-            return;
-        }
-    }
-
-    CONSOLE_LOG("Calling SetCurrent...");
-    if (!SetCurrent(*m_context)) {
-        CONSOLE_LOG("ERROR: SetCurrent failed!");
-        return;
-    }
-    CONSOLE_LOG("SetCurrent succeeded");
-
-    // Basic GL setup
-    CONSOLE_LOG("Setting up GL state...");
-    glClearColor(0.2f, 0.2f, 0.3f, 1.0f);
-    glEnable(GL_DEPTH_TEST);
-
-    m_glInitialized = true;
-
-    CONSOLE_LOG("OpenGL initialized successfully");
-    wxPrintf("[GL] Vendor: %s\n", glGetString(GL_VENDOR));
-    wxPrintf("[GL] Renderer: %s\n", glGetString(GL_RENDERER));
-    wxPrintf("[GL] Version: %s\n", glGetString(GL_VERSION));
-    fflush(stdout);
-}
-
-void GLTestCanvas::SetupViewport()
-{
-    wxSize size = GetClientSize();
-    glViewport(0, 0, size.x, size.y);
-
-    // Setup orthographic projection (legacy style)
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(-2.0, 2.0, -2.0, 2.0, -10.0, 10.0);
-
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
-}
-
-void GLTestCanvas::OnSize(wxSizeEvent& evt)
-{
-    if (m_glInitialized && m_context) {
-        SetCurrent(*m_context);
-        SetupViewport();
-    }
-    evt.Skip();
-}
-
-void GLTestCanvas::OnPaint(wxPaintEvent& WXUNUSED(evt))
-{
-    CONSOLE_LOG("OnPaint called");
-    wxPaintDC dc(this);  // Required even for GL
-
-    // Initialize GL if not done yet (this creates m_context)
-    if (!m_glInitialized) {
-        CONSOLE_LOG("GL not initialized, calling InitGL...");
-        InitGL();
-        if (!m_glInitialized) {
-            CONSOLE_LOG("InitGL failed, returning");
-            return;
-        }
-        SetupViewport();
-    }
-
-    if (!m_context) {
-        CONSOLE_LOG("No context after InitGL, returning");
-        return;
-    }
-
-    CONSOLE_LOG("Setting context current in OnPaint...");
-    SetCurrent(*m_context);
-
-    CONSOLE_LOG("Calling Render...");
-    Render();
-    CONSOLE_LOG("Calling SwapBuffers...");
-    SwapBuffers();
-    CONSOLE_LOG("OnPaint complete");
-}
-
-void GLTestCanvas::Render()
-{
-    // Set a bright visible color to prove GL is working
-    glClearColor(0.2f, 0.4f, 0.8f, 1.0f);  // Bright blue
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    CONSOLE_LOG("glClear done with blue color");
-
-    // Debug GLImmediate state before drawing
-    EM_ASM({
-        if (typeof GLImmediate !== 'undefined') {
-            console.log('[GL-DEBUG] GLImmediate state:');
-            console.log('  initted:', GLImmediate.initted);
-            console.log('  enabledClientAttributes:', GLImmediate.enabledClientAttributes);
-            console.log('  totalEnabledClientAttributes:', GLImmediate.totalEnabledClientAttributes);
-            if (GLImmediate.TexEnvJIT) {
-                console.log('  TexEnvJIT.enabled:', GLImmediate.TexEnvJIT.enabled);
-            }
-        } else {
-            console.log('[GL-DEBUG] GLImmediate not defined!');
-        }
-    });
-
-    // Draw based on current test
-    switch (m_currentTest) {
-        case 0: TestImmediateMode(); break;
-        case 1: TestMatrixOperations(); break;
-        case 2: TestVertexArrays(); break;
-        case 3: TestStateManagement(); break;
-        default: TestImmediateMode(); break;
-    }
-
-    glFlush();
-}
-
-// Test 1: Immediate Mode Drawing (glBegin/glEnd) - KiCad uses this heavily
-// Using STANDARD OpenGL patterns (color once, multiple vertices)
-// This tests the GL shim that handles Emscripten's color-per-vertex requirement
-void GLTestCanvas::TestImmediateMode()
-{
-    wxPrintf("[GL TEST] Testing immediate mode (glBegin/glEnd)...\n");
-    wxPrintf("[GL TEST] Using STANDARD OpenGL patterns (color set once per primitive)\n");
-    fflush(stdout);
-
-    // Test GL_TRIANGLES with glVertex3f and glColor3f
-    // RGB triangle - each vertex has a different color (smooth shading)
-    glBegin(GL_TRIANGLES);
-        glColor3f(1.0f, 0.0f, 0.0f);  // Red
-        glVertex3f(-1.0f, -0.5f, 0.0f);
-        glColor3f(0.0f, 1.0f, 0.0f);  // Green
-        glVertex3f(0.0f, 1.0f, 0.0f);
-        glColor3f(0.0f, 0.0f, 1.0f);  // Blue
-        glVertex3f(1.0f, -0.5f, 0.0f);
-    glEnd();
-
-    // Test GL_QUADS with glVertex2f and glColor4f
-    // STANDARD OPENGL: Set color ONCE, then multiple vertices
-    // The GL shim should inject color before each vertex automatically
-    glColor4f(1.0f, 1.0f, 0.0f, 0.8f);  // Yellow, semi-transparent - SET ONCE
-    glBegin(GL_QUADS);
-        glVertex2f(-1.8f, -1.8f);  // All 4 vertices use the same yellow color
-        glVertex2f(-1.2f, -1.8f);
-        glVertex2f(-1.2f, -1.2f);
-        glVertex2f(-1.8f, -1.2f);
-    glEnd();
-
-    // Test GL_LINES with standard pattern
-    // STANDARD OPENGL: Set color ONCE, then multiple vertices
-    glColor3f(1.0f, 1.0f, 1.0f);  // White - SET ONCE
-    glBegin(GL_LINES);
-        glVertex3f(-1.5f, 1.5f, 0.0f);
-        glVertex3f(1.5f, 1.5f, 0.0f);
-    glEnd();
-
-    // Test GL_LINE_STRIP with standard pattern
-    glColor3f(0.0f, 1.0f, 1.0f);  // Cyan - SET ONCE
-    glBegin(GL_LINE_STRIP);
-        glVertex3f(1.2f, -1.8f, 0.0f);
-        glVertex3f(1.4f, -1.4f, 0.0f);
-        glVertex3f(1.6f, -1.6f, 0.0f);
-        glVertex3f(1.8f, -1.2f, 0.0f);
-    glEnd();
-
-    // Test GL_LINE_LOOP with standard pattern
-    glColor3f(1.0f, 0.0f, 1.0f);  // Magenta - SET ONCE
-    glBegin(GL_LINE_LOOP);
-        glVertex3f(1.2f, 1.2f, 0.0f);
-        glVertex3f(1.8f, 1.2f, 0.0f);
-        glVertex3f(1.8f, 1.8f, 0.0f);
-        glVertex3f(1.2f, 1.8f, 0.0f);
-    glEnd();
-
-    wxPrintf("[GL TEST] Immediate mode test complete\n");
-    fflush(stdout);
-}
-
-// Test 2: Matrix Operations - KiCad uses glPushMatrix/glPopMatrix extensively
-// Using STANDARD OpenGL patterns (color once, multiple vertices)
-void GLTestCanvas::TestMatrixOperations()
-{
-    wxPrintf("[GL TEST] Testing matrix operations...\n");
-    fflush(stdout);
-
-    // Draw centered triangle with standard GL pattern
-    glPushMatrix();
-        glTranslatef(0.0f, 0.0f, 0.0f);
-        glColor3f(0.5f, 0.5f, 0.5f);  // Gray - SET ONCE
-        glBegin(GL_TRIANGLES);
-            glVertex3f(-0.3f, -0.3f, 0.0f);
-            glVertex3f(0.3f, -0.3f, 0.0f);
-            glVertex3f(0.0f, 0.3f, 0.0f);
-        glEnd();
-    glPopMatrix();
-
-    // Draw 4 rotated/translated copies with standard GL pattern
-    for (int i = 0; i < 4; i++) {
-        glPushMatrix();
-            float angle = i * 90.0f;
-            float tx = 1.2f * ((i % 2) * 2 - 1);  // -1.2 or 1.2
-            float ty = 1.2f * ((i / 2) * 2 - 1);  // -1.2 or 1.2
-
-            glTranslatef(tx, ty, 0.0f);
-            glRotatef(angle, 0.0f, 0.0f, 1.0f);
-            glScalef(0.5f, 0.5f, 1.0f);
-
-            // Draw colored square with standard GL pattern
-            float r = (i == 0 || i == 3) ? 1.0f : 0.3f;
-            float g = (i == 1 || i == 3) ? 1.0f : 0.3f;
-            float b = (i == 2 || i == 3) ? 1.0f : 0.3f;
-
-            glColor3f(r, g, b);  // SET ONCE before glBegin
-            glBegin(GL_QUADS);
-                glVertex3f(-0.5f, -0.5f, 0.0f);
-                glVertex3f(0.5f, -0.5f, 0.0f);
-                glVertex3f(0.5f, 0.5f, 0.0f);
-                glVertex3f(-0.5f, 0.5f, 0.0f);
-            glEnd();
-        glPopMatrix();
-    }
-
-    wxPrintf("[GL TEST] Matrix operations test complete\n");
-    fflush(stdout);
-}
-
-// Test 3: Legacy Vertex Arrays - KiCad uses glVertexPointer, glColorPointer
-void GLTestCanvas::TestVertexArrays()
-{
-    wxPrintf("[GL TEST] Testing legacy vertex arrays...\n");
-    fflush(stdout);
-
-    // Vertex data for a hexagon
-    static GLfloat vertices[] = {
-        0.0f, 0.0f, 0.0f,    // Center
-        1.0f, 0.0f, 0.0f,    // Right
-        0.5f, 0.866f, 0.0f,  // Upper right
-        -0.5f, 0.866f, 0.0f, // Upper left
-        -1.0f, 0.0f, 0.0f,   // Left
-        -0.5f, -0.866f, 0.0f,// Lower left
-        0.5f, -0.866f, 0.0f  // Lower right
-    };
-
-    static GLfloat colors[] = {
-        1.0f, 1.0f, 1.0f,  // White center
-        1.0f, 0.0f, 0.0f,  // Red
-        1.0f, 0.5f, 0.0f,  // Orange
-        1.0f, 1.0f, 0.0f,  // Yellow
-        0.0f, 1.0f, 0.0f,  // Green
-        0.0f, 0.0f, 1.0f,  // Blue
-        0.5f, 0.0f, 1.0f   // Purple
-    };
-
-    // KiCad uses GL_UNSIGNED_SHORT or GL_UNSIGNED_INT for indices, never GL_UNSIGNED_BYTE
-    // Emscripten's legacy GL emulation only supports GL_UNSIGNED_SHORT for client-side arrays
-    static GLushort indices[] = {
-        0, 1, 2,
-        0, 2, 3,
-        0, 3, 4,
-        0, 4, 5,
-        0, 5, 6,
-        0, 6, 1
-    };
-
-    // Enable client state (legacy)
-    glEnableClientState(GL_VERTEX_ARRAY);
-    glEnableClientState(GL_COLOR_ARRAY);
-
-    // Set up pointers
-    glVertexPointer(3, GL_FLOAT, 0, vertices);
-    glColorPointer(3, GL_FLOAT, 0, colors);
-
-    // Draw using vertex arrays (GL_UNSIGNED_SHORT matches KiCad's usage)
-    glDrawElements(GL_TRIANGLES, 18, GL_UNSIGNED_SHORT, indices);
-
-    // Disable client state
-    glDisableClientState(GL_COLOR_ARRAY);
-    glDisableClientState(GL_VERTEX_ARRAY);
-
-    wxPrintf("[GL TEST] Legacy vertex arrays test complete\n");
-    fflush(stdout);
-}
-
-// Test 4: State Management - glEnable/glDisable, blending
-// Using STANDARD OpenGL patterns with separate glBegin/glEnd for each color
-void GLTestCanvas::TestStateManagement()
-{
-    wxPrintf("[GL TEST] Testing state management...\n");
-    fflush(stdout);
-
-    // Enable blending
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    // Draw overlapping semi-transparent squares using standard GL pattern
-    // Each quad has its own color set before glBegin
-
-    // Red square
-    glColor4f(1.0f, 0.0f, 0.0f, 0.5f);  // SET ONCE
-    glBegin(GL_QUADS);
-        glVertex2f(-1.0f, -1.0f);
-        glVertex2f(0.5f, -1.0f);
-        glVertex2f(0.5f, 0.5f);
-        glVertex2f(-1.0f, 0.5f);
-    glEnd();
-
-    // Green square
-    glColor4f(0.0f, 1.0f, 0.0f, 0.5f);  // SET ONCE
-    glBegin(GL_QUADS);
-        glVertex2f(-0.5f, -0.5f);
-        glVertex2f(1.0f, -0.5f);
-        glVertex2f(1.0f, 1.0f);
-        glVertex2f(-0.5f, 1.0f);
-    glEnd();
-
-    // Blue square
-    glColor4f(0.0f, 0.0f, 1.0f, 0.5f);  // SET ONCE
-    glBegin(GL_QUADS);
-        glVertex2f(0.0f, 0.0f);
-        glVertex2f(1.5f, 0.0f);
-        glVertex2f(1.5f, 1.5f);
-        glVertex2f(0.0f, 1.5f);
-    glEnd();
-
-    glDisable(GL_BLEND);
-
-    wxPrintf("[GL TEST] State management test complete\n");
-    fflush(stdout);
-}
-
-// Test 5: Texture coordinates (no actual texture, just testing the calls)
-// Note: glTexCoord is per-vertex anyway, and color is set once before glBegin
-void GLTestCanvas::TestTexCoords()
-{
-    wxPrintf("[GL TEST] Testing texture coordinates...\n");
-    fflush(stdout);
-
-    glColor3f(0.8f, 0.8f, 0.8f);  // SET ONCE
-    glBegin(GL_QUADS);
-        glTexCoord2f(0.0f, 0.0f); glVertex2f(-1.0f, -1.0f);
-        glTexCoord2f(1.0f, 0.0f); glVertex2f(1.0f, -1.0f);
-        glTexCoord2f(1.0f, 1.0f); glVertex2f(1.0f, 1.0f);
-        glTexCoord2f(0.0f, 1.0f); glVertex2f(-1.0f, 1.0f);
-    glEnd();
-
-    wxPrintf("[GL TEST] Texture coordinates test complete\n");
-    fflush(stdout);
-}
-
-// Test 6: Normal vectors (for lighting, which we're not testing but calls should work)
-// Note: glNormal is per-vertex, and color is set once before glBegin
-void GLTestCanvas::TestNormals()
-{
-    wxPrintf("[GL TEST] Testing normal vectors...\n");
-    fflush(stdout);
-
-    glColor3f(0.7f, 0.7f, 0.9f);  // SET ONCE
-    glBegin(GL_TRIANGLES);
-        glNormal3f(0.0f, 0.0f, 1.0f);
-        glVertex3f(-1.0f, -1.0f, 0.0f);
-        glNormal3f(0.0f, 0.0f, 1.0f);
-        glVertex3f(1.0f, -1.0f, 0.0f);
-        glNormal3f(0.0f, 0.0f, 1.0f);
-        glVertex3f(0.0f, 1.0f, 0.0f);
-    glEnd();
-
-    wxPrintf("[GL TEST] Normal vectors test complete\n");
-    fflush(stdout);
-}
-
-void GLTestCanvas::RunAllTests()
-{
-    wxPrintf("[GL TEST] Running all legacy GL tests...\n");
-    fflush(stdout);
-
-    m_currentTest = 0;
-    Refresh();
-}
-
-void GLTestCanvas::SetCurrentTest(int test)
-{
-    m_currentTest = test;
-    Refresh();
-}
-
-//-----------------------------------------------------------------------------
 // TestFrame - Main application frame
 //-----------------------------------------------------------------------------
 class TestFrame : public wxFrame
@@ -651,8 +156,6 @@ private:
     wxTextCtrl* m_textMulti;
     DrawingPanel* m_drawingPanel;
     wxListBox* m_listBox;
-    GLTestCanvas* m_glCanvas;
-    wxChoice* m_glTestChoice;
     // Grid tab controls
     wxGrid* m_grid;
     wxSpinCtrl* m_spinCtrl;
@@ -667,7 +170,6 @@ private:
     wxPanel* CreateTextPage(wxNotebook* parent);
     wxPanel* CreateDrawingPage(wxNotebook* parent);
     wxPanel* CreateListsPage(wxNotebook* parent);
-    wxPanel* CreateOpenGLPage(wxNotebook* parent);
     wxPanel* CreateGridPage(wxNotebook* parent);
     wxPanel* CreateDialogsPage(wxNotebook* parent);
 
@@ -688,8 +190,6 @@ private:
     void OnRemoveItem(wxCommandEvent& evt);
     void OnClearDrawing(wxCommandEvent& evt);
     void OnNotebookPageChanged(wxBookCtrlEvent& evt);
-    void OnGLTestSelect(wxCommandEvent& evt);
-    void OnGLRunAll(wxCommandEvent& evt);
     // Grid tab event handlers
     void OnGridCellChange(wxGridEvent& evt);
     void OnGridCellSelect(wxGridEvent& evt);
@@ -725,8 +225,6 @@ wxBEGIN_EVENT_TABLE(TestFrame, wxFrame)
     EVT_BUTTON(ID_BTN_REMOVE_ITEM, TestFrame::OnRemoveItem)
     EVT_BUTTON(ID_BTN_CLEAR, TestFrame::OnClearDrawing)
     EVT_NOTEBOOK_PAGE_CHANGED(wxID_ANY, TestFrame::OnNotebookPageChanged)
-    EVT_CHOICE(ID_GL_TEST_SELECT, TestFrame::OnGLTestSelect)
-    EVT_BUTTON(ID_BTN_GL_RUN_ALL, TestFrame::OnGLRunAll)
     // Grid tab events
     EVT_GRID_CELL_CHANGED(TestFrame::OnGridCellChange)
     EVT_GRID_SELECT_CELL(TestFrame::OnGridCellSelect)
@@ -773,7 +271,6 @@ TestFrame::TestFrame(const wxString& title)
     m_notebook->AddPage(CreateTextPage(m_notebook), "Text Input");
     m_notebook->AddPage(CreateDrawingPage(m_notebook), "Drawing");
     m_notebook->AddPage(CreateListsPage(m_notebook), "Lists");
-    m_notebook->AddPage(CreateOpenGLPage(m_notebook), "OpenGL");
     m_notebook->AddPage(CreateGridPage(m_notebook), "Grid");
     m_notebook->AddPage(CreateDialogsPage(m_notebook), "Dialogs");
 
@@ -980,60 +477,6 @@ wxPanel* TestFrame::CreateListsPage(wxNotebook* parent)
     return panel;
 }
 
-wxPanel* TestFrame::CreateOpenGLPage(wxNotebook* parent)
-{
-    wxPanel* panel = new wxPanel(parent);
-    wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
-
-    // Description
-    wxStaticText* desc = new wxStaticText(panel, wxID_ANY,
-        "OpenGL Legacy Function Tests\n"
-        "Tests the GL functions KiCad uses (immediate mode, matrix ops, vertex arrays).\n"
-        "Using Emscripten's -sLEGACY_GL_EMULATION for WebGL compatibility.");
-    mainSizer->Add(desc, 0, wxALL, 10);
-
-    // Test selection row
-    wxBoxSizer* controlSizer = new wxBoxSizer(wxHORIZONTAL);
-
-    controlSizer->Add(new wxStaticText(panel, wxID_ANY, "Test:"), 0,
-        wxALL | wxALIGN_CENTER_VERTICAL, 5);
-
-    wxString testChoices[] = {
-        "Immediate Mode (glBegin/glEnd)",
-        "Matrix Operations (glPush/Pop)",
-        "Vertex Arrays (glVertexPointer)",
-        "State Management (glEnable/Blend)"
-    };
-    m_glTestChoice = new wxChoice(panel, ID_GL_TEST_SELECT, wxDefaultPosition,
-        wxSize(250, -1), 4, testChoices);
-    m_glTestChoice->SetSelection(0);
-    controlSizer->Add(m_glTestChoice, 0, wxALL, 5);
-
-    wxButton* btnRunAll = new wxButton(panel, ID_BTN_GL_RUN_ALL, "Run All Tests");
-    controlSizer->Add(btnRunAll, 0, wxALL, 5);
-
-    mainSizer->Add(controlSizer, 0, wxEXPAND);
-
-    // GL Canvas
-    m_glCanvas = new GLTestCanvas(panel);
-    mainSizer->Add(m_glCanvas, 1, wxEXPAND | wxALL, 10);
-
-    // Legend/info
-    wxStaticBox* legendBox = new wxStaticBox(panel, wxID_ANY, "Test Details");
-    wxStaticBoxSizer* legendSizer = new wxStaticBoxSizer(legendBox, wxVERTICAL);
-
-    wxStaticText* legend = new wxStaticText(panel, wxID_ANY,
-        "Immediate Mode: glBegin, glEnd, glVertex2f/3f, glColor3f/4f, GL_TRIANGLES/QUADS/LINES\n"
-        "Matrix Ops: glMatrixMode, glPushMatrix, glPopMatrix, glTranslatef, glRotatef, glScalef\n"
-        "Vertex Arrays: glEnableClientState, glVertexPointer, glColorPointer, glDrawElements\n"
-        "State Mgmt: glEnable, glDisable, glBlendFunc, GL_BLEND, GL_DEPTH_TEST");
-    legendSizer->Add(legend, 0, wxALL, 5);
-    mainSizer->Add(legendSizer, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
-
-    panel->SetSizer(mainSizer);
-    return panel;
-}
-
 wxPanel* TestFrame::CreateGridPage(wxNotebook* parent)
 {
     wxPanel* panel = new wxPanel(parent);
@@ -1200,29 +643,6 @@ void TestFrame::OnNotebookPageChanged(wxBookCtrlEvent& evt)
     wxString pageName = m_notebook->GetPageText(page);
     LogEvent(wxString::Format("Tab changed to: %s", pageName));
     evt.Skip();
-}
-
-void TestFrame::OnGLTestSelect(wxCommandEvent& evt)
-{
-    int sel = evt.GetSelection();
-    wxString testNames[] = {
-        "Immediate Mode",
-        "Matrix Operations",
-        "Vertex Arrays",
-        "State Management"
-    };
-
-    if (sel >= 0 && sel < 4) {
-        LogEvent(wxString::Format("GL Test selected: %s", testNames[sel]));
-        m_glCanvas->SetCurrentTest(sel);
-    }
-}
-
-void TestFrame::OnGLRunAll(wxCommandEvent& WXUNUSED(evt))
-{
-    LogEvent("Running all GL tests...");
-    m_glCanvas->RunAllTests();
-    LogEvent("All GL tests completed - check console for detailed results");
 }
 
 // Grid tab event handlers

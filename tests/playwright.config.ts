@@ -5,24 +5,41 @@ import * as path from 'path';
 
 const PORT_FILE = path.join(__dirname, '.test-port');
 
-// Get existing port from file or find a new one
-// This ensures all workers use the same port
-function getOrFindPort(): number {
-  // Check if port file exists and is recent (created in last 60 seconds)
-  try {
-    const stat = fs.statSync(PORT_FILE);
-    const age = Date.now() - stat.mtimeMs;
-    if (age < 60000) {
-      const port = parseInt(fs.readFileSync(PORT_FILE, 'utf-8').trim());
-      if (port > 0 && port < 65536) {
-        return port;
+// Resolve the static-server port for this run.
+//
+// This config file is re-imported by EVERY Playwright process: the main runner
+// (which launches the webServer) and each worker process (which calls
+// page.goto(baseURL)). They must all agree on one port. Playwright also
+// *recreates* a worker mid-run after a test times out or crashes — and that new
+// worker re-imports this config.
+//
+// The previous heuristic ("reuse .test-port if it's <60s old, else pick a new
+// free port") broke exactly there: once a run passed the 60s mark, a recreated
+// worker treated the file as stale, picked a DIFFERENT free port, and every
+// subsequent page.goto hit a dead port (net::ERR_CONNECTION_REFUSED) because the
+// webServer was still listening on the original port. A single failing test
+// thus cascaded into ~all later tests failing.
+//
+// Fix (same as playwright-kicad.config.ts): drop the time window entirely. The
+// main runner always picks a fresh port and writes it; workers always reuse
+// whatever the main runner wrote. The main runner is the only process whose
+// argv carries the `test` command (workers are forked with an empty argv), and
+// it imports this config — and so writes the file — before any worker is
+// spawned.
+function resolvePort(): number {
+  const isMainRunner = process.argv.slice(2).includes('test');
+  if (!isMainRunner) {
+    try {
+      const existing = parseInt(fs.readFileSync(PORT_FILE, 'utf-8').trim(), 10);
+      if (existing > 0 && existing < 65536) {
+        return existing;
       }
+    } catch {
+      // No readable port file — fall through. Shouldn't happen in a worker,
+      // since the main runner writes the file before spawning workers.
     }
-  } catch {
-    // File doesn't exist or can't be read
   }
 
-  // Find a new free port
   const port = findFreePort();
   fs.writeFileSync(PORT_FILE, port.toString());
   return port;
@@ -43,7 +60,7 @@ function findFreePort(): number {
   }
 }
 
-const port = getOrFindPort();
+const port = resolvePort();
 
 export default defineConfig({
   globalSetup: './global-setup.ts',
