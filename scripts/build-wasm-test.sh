@@ -112,11 +112,12 @@ if [ "$CLEAN_BUILD" = "1" ]; then
     make -f Makefile.wasm clean 2>/dev/null || true
 fi
 
-# Build (pass DEBUG flag if requested)
+# Build (pass DEBUG flag if requested). App links are independent, so honor
+# JOBS/PARALLEL_JOBS from env.sh (each emcc link is slow due to Asyncify).
 if [ "$DEBUG_BUILD" = "1" ]; then
-    make -f Makefile.wasm DEBUG=1 $MAKE_PORT_ARGS "$MAKE_TARGET"
+    make -j"${JOBS:-1}" -f Makefile.wasm DEBUG=1 $MAKE_PORT_ARGS "$MAKE_TARGET"
 else
-    make -f Makefile.wasm $MAKE_PORT_ARGS "$MAKE_TARGET"
+    make -j"${JOBS:-1}" -f Makefile.wasm $MAKE_PORT_ARGS "$MAKE_TARGET"
 fi
 
 echo ""
