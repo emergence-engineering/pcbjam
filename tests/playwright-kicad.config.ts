@@ -62,6 +62,18 @@ function findFreePort(): number {
 
 const port = resolvePort();
 
+// pcbnew's wasm (~190M debug build) exceeds SpiderMonkey's per-process code
+// budget on x86-64 CI even with the baseline-only JIT (run 27343416511:
+// "InternalError: out of memory" at instantiation; the same module compiles
+// on arm64, whose denser code fits). V8 handles it, so on CI these specs run
+// on bundled Chromium (the 'chromium-ci' project) and firefox skips them.
+const PCBNEW_FAMILY_SPECS = [
+  '**/pcbnew.spec.ts',
+  '**/pcbnew-collab.spec.ts',
+  '**/load-pcb.spec.ts',
+  '**/load-pcb-probe.spec.ts',
+];
+
 export default defineConfig({
   globalSetup: './global-setup.ts',
   testDir: './kicad',
@@ -85,6 +97,9 @@ export default defineConfig({
     {
       // Firefox is the default for headless testing (works on ARM Mac)
       name: 'firefox',
+      // On CI the pcbnew-family specs run on chromium-ci instead (see
+      // PCBNEW_FAMILY_SPECS above for why).
+      ...(process.env.CI ? { testIgnore: PCBNEW_FAMILY_SPECS } : {}),
       use: {
         ...devices['Desktop Firefox'],
         viewport: { width: 1280, height: 720 },
@@ -122,6 +137,22 @@ export default defineConfig({
       use: {
         channel: 'chrome',
         viewport: { width: 1280, height: 720 },
+      },
+    },
+    {
+      // CI-only carrier for the pcbnew-family specs (see PCBNEW_FAMILY_SPECS):
+      // Playwright-bundled Chromium, headless, software WebGL via SwiftShader
+      // (fine on x86 Linux; the SwiftShader bug above is ARM-Mac-specific).
+      // --enable-unsafe-swiftshader: newer Chromium refuses software WebGL in
+      // headless without it.
+      name: 'chromium-ci',
+      testMatch: PCBNEW_FAMILY_SPECS,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 720 },
+        launchOptions: {
+          args: ['--enable-unsafe-swiftshader'],
+        },
       },
     },
   ],
