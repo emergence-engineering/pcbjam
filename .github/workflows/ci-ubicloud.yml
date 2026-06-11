@@ -1,0 +1,92 @@
+# EXPERIMENT: same full build + e2e as ci-full-build.yml, but on a Ubicloud
+# runner instead of an ephemeral Hetzner VM. Ubicloud runners are plain
+# runs-on labels — no create/delete-runner jobs, no shared one-slot lock.
+# Triggered ONLY on the ubicloud-ci branch (and manual dispatch) so it never
+# competes with the Hetzner main CI. ubicloud-standard-30 (x86, 30 vcpu) is
+# the closest parity to the Hetzner ccx53 (32 cores) and matches the arch the
+# e2e screenshot baselines were captured on.
+
+name: CI full build + e2e (Ubicloud)
+
+on:
+  push:
+    branches: ["ubicloud-ci"]
+    # docs-only commits must not burn a paid runner slot
+    paths-ignore: ["docs/**", "**.md"]
+  workflow_dispatch:
+    inputs:
+      binaryen_version: { description: "Binaryen version for the host asyncify+-O2 step", required: false, default: "130" }
+
+concurrency:
+  group: ci-ubicloud              # independent of the Hetzner wasm-opt-bench slot
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Build all tools + KiCad e2e (Ubicloud)
+    runs-on: ubicloud-standard-30
+    timeout-minutes: 300
+    env:
+      KICAD_LOG_NESTED: "1"
+      BINARYEN_VERSION: ${{ inputs.binaryen_version || '130' }}
+    steps:
+      # Docker comes preinstalled on Ubicloud images (validated by the arm64
+      # repro run) — only the Binaryen from-source toolchain is needed.
+      - name: Install build toolchain (Binaryen from-source)
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libjemalloc2
+
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      # Same build recipe as ci-full-build.yml: full KiCad WASM build of ALL 6
+      # tools, host-side asyncify + -O2 on Binaryen v130 (BINARYEN_VERSION in
+      # env → get-wasm-opt.sh). 'all' = pcbnew eeschema calculator pl_editor
+      # symbol_editor gerbview, built in sequence.
+      - name: Build all KiCad tools WASM with Binaryen ${{ env.BINARYEN_VERSION }}
+        run: |
+          # Lift the docker-compose dev-Mac caps and pipeline the host-side
+          # asyncify+-O2 with the next tool's container compile — same tuning
+          # as the Hetzner workflow (rationale in ci-full-build.yml and
+          # docs/ci-build-slowness-findings.md). standard-30: 30 vcpu / 120 GB.
+          export KICAD_DOCKER_CPUS="$(nproc)" KICAD_DOCKER_MEM=110G
+          export KICAD_PIPELINE=1 BINARYEN_CORES=16
+          # Self-built wasm-opt: official x86_64-linux tarballs run asyncify
+          # ~4x slower than a stock gcc -O3+LTO build (A/B run 27276830256).
+          export BINARYEN_BUILD_FROM_SOURCE=1
+          echo "Building ALL tools with BINARYEN_VERSION=${BINARYEN_VERSION}, compile -j $(nproc) on ${KICAD_DOCKER_CPUS} CPUs, pipelined wasm-opt"
+          ./docker/build.sh all --build-deps -j "$(nproc)"
+          echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
+          ls -lh output/*.wasm
+
+      - name: Install test deps
+        working-directory: tests
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: tests
+        run: npx playwright install --with-deps firefox chromium
+
+      - name: Stage KiCad WASM for tests
+        working-directory: tests
+        run: npm run setup:kicad
+
+      - name: KiCad e2e (npm run test:kicad)
+        working-directory: tests
+        run: npm run test:kicad
+
+      - name: Upload test logs & screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubicloud-e2e-${{ github.run_id }}
+          path: |
+            tests/logs/**
+            tests/test-results/**
+            tests/playwright-report/**
+          if-no-files-found: ignore
