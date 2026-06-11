@@ -22,18 +22,10 @@ namespace UI
 
 bool IsDarkTheme()
 {
-#ifdef __EMSCRIPTEN__
-    // Check if browser prefers dark color scheme
-    int isDark = EM_ASM_INT({
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            return 1;
-        }
-        return 0;
-    });
-    return isDark == 1;
-#else
-    return false;
-#endif
+    // The wasm/wxUniversal UI renders a fixed theme that does not follow the
+    // browser's prefers-color-scheme; report the theme actually rendered so
+    // icon variants and widget colours stay consistent with the widget chrome.
+    return wxSystemSettings::GetColour( wxSYS_COLOUR_WINDOW ).GetLuminance() < 0.5;
 }
 
 wxColour GetDialogBGColour()
