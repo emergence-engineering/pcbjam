@@ -81,6 +81,20 @@ jobs:
       - name: Build wxWidgets test apps
         run: ./scripts/build-wasm-test.sh
 
+      # The GAL test compiles against kicad headers that include boost from
+      # build-wasm/sysroot — a real host dir on dev machines, but inside the
+      # docker build-cache volume on CI (run 27370316200 failed with
+      # "boost/ptr_container/ptr_vector.hpp not found"). Its Makefile only
+      # needs $(SYSROOT)/include, so copy just the headers out of the volume.
+      - name: Expose docker sysroot headers to host builds
+        run: |
+          VOL=$(docker volume ls -q --filter name=kicad-build-cache | head -1)
+          echo "sysroot volume: $VOL"
+          mkdir -p build-wasm/sysroot
+          docker run --rm -v "$VOL":/bw -v "$PWD/build-wasm/sysroot":/host alpine \
+            sh -c 'cp -r /bw/sysroot/include /host/'
+          sudo chown -R "$(id -u):$(id -g)" build-wasm/sysroot
+
       # gal_webgl_test.{js,wasm} are gitignored build artifacts with their own
       # build script — without this, all 29 gal-webgl scenarios time out on
       # galTest.isReady() because the page 404s the wasm (run 27359020746).
