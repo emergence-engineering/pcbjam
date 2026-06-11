@@ -14,6 +14,8 @@ name: wasm-opt validate (v130 e2e)
 on:
   push:
     branches: ["validate/**"]
+    # docs-only commits must not burn a ~2h Hetzner slot
+    paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
     inputs:
       binaryen_version: { description: "Binaryen version for the host asyncify+-O2 step", required: false, default: "130" }
