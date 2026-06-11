@@ -131,3 +131,34 @@ slider/statline/statbox wired:
   wxDomGetLastCommandId + wxDOM_EVENT_MENU → wxMenu::SendEvent. Toolbar
   identical shape (wxDomToolbarSetTools / wxDOM_EVENT_TOOL →
   wxToolBarBase::OnLeftClick with radio-group + veto handling).
+
+## Phase 7 (2026-06-11) — KiCad on the DOM port
+
+- **All six apps build and run** (pcbnew, eeschema, calculator,
+  pl_editor, symbol_editor, gerbview); full kicad e2e suite under
+  WX_PORT=dom: 28 passed / 1 flaky / 2 skipped / 0 failed.
+- **Screenshots:** pcbnew = layer manager, appearance panes, toolbars,
+  WebGL board canvas, native menubar (File…Help, 9 menus) — near-twin of
+  the canvas reference modulo native chrome styling. eeschema = full
+  editor with real checkbox filter panels. calculator = native DOM form
+  controls (inputs, radios, buttons) beside canvas-island diagrams.
+  Port-aware reference images: tests/wizard-04-finish-headless-dom.png.
+- **Bugs found & fixed by KiCad-on-DOM:**
+  16. DomMenuItemsToJson passed labels through wxString::Format, which
+      returns "" when vsnprintf rejects an argument (some KiCad labels)
+      → empty JSON item → whole menu document unparseable. Labels are
+      now concatenated; wxDomJsonEscape hardened for ctrl chars < 0x20.
+  17. The first TLW (the browser page) started logically hidden; KiCad
+      never calls Show(true) on it (canvas renders regardless), so every
+      pre-Show child stayed display:none. Main frame now starts shown.
+  18. Keyboard arbitration was stateful (focusin/focusout flag); Firefox
+      fires no focusout when a focused element is REMOVED (wizard page
+      destroyed mid-focus) → flag stuck → all keys except Escape
+      swallowed for the session (eeschema Backspace/Delete dead). Now a
+      stateless document.activeElement check.
+  19. Build pipeline: fresh build trees failed at the embind pre-compile
+      (generated pcb_lexer.h not yet emitted) — found here and fixed
+      independently upstream (f936eb1); upstream's version kept.
+- **Known cosmetic gap:** DOM menubar/toolbar styling differs from univ
+  pixels by design (native buttons, system font); the kicad reference
+  regions therefore use per-port reference images.

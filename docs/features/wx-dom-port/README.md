@@ -6,10 +6,14 @@ instead of wxUniversal pixels on a canvas. Goals: styleable modern UI,
 native text input/IME, accessibility, crisp rendering — while the existing
 canvas port keeps working unchanged from the same source tree.
 
-Status: wxWidgets-side port complete (Phases 0–5); both e2e suites green
-from one tree. KiCad-on-DOM is the next phase. Work intentionally stays on
-`feature/wx-dom-port` (root + wxwidgets + kicad) — not merged to
-`main`/`wasm-port`.
+Status: COMPLETE (Phases 0–7). wxWidgets-side port done, both wx e2e
+suites green from one tree, and all six KiCad apps (pcbnew, eeschema,
+calculator, pl_editor, symbol_editor, gerbview) build and run on the DOM
+port — full kicad e2e suite green under `WX_PORT=dom` (28/0, 1 flaky,
+2 skipped). Build with `WX_PORT=dom docker/build.sh <app>` (outputs in
+`output/dom/`); test with `WX_PORT=dom npm run test:kicad`. Work
+intentionally stays on `feature/wx-dom-port` (root + wxwidgets + kicad) —
+not merged to `main`/`wasm-port`.
 
 ## Architecture in one page
 
