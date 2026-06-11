@@ -1,7 +1,9 @@
 // Lightweight collab debug logging to the BROWSER DEVTOOLS console (not the in-app
 // log panel). On by default while we bring the bridge up; silence with
 // `window.__COLLAB_DEBUG = false` (or `localStorage.collabDebug = "0"`).
+// Quiet (and crash-free) outside a DOM context — e.g. the vitest node env.
 function on(): boolean {
+  if (typeof window === "undefined") return false;
   const w = window as unknown as { __COLLAB_DEBUG?: boolean };
   if (typeof w.__COLLAB_DEBUG === "boolean") return w.__COLLAB_DEBUG;
   try {

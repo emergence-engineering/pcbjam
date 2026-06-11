@@ -7,6 +7,13 @@ import {
 } from "./provider";
 import { createReconciler, type Reconciler } from "./reconciler";
 import type { CollabBridge } from "./types";
+import {
+  bindKicadCollab,
+  moduleItemsBridge,
+  type KicadBinding,
+  type KicadItemsModule,
+  type KicadItemsWindow,
+} from "./kicad-binding";
 
 export type { CollabBridge, CollabDelta, CollabItem } from "./types";
 export { createReconciler } from "./reconciler";
@@ -17,6 +24,9 @@ export {
   type ProviderKind,
   type YjsProvider,
 } from "./provider";
+export { bindKicadCollab, moduleItemsBridge };
+export type { KicadBinding, KicadItemsModule, KicadItemsWindow };
+export type { KicadItemsBridge } from "./kicad-binding";
 
 /** The subset of the Emscripten Module the collab bridge needs (embind functions). */
 export interface CollabModule {
@@ -85,6 +95,47 @@ export async function startCollab(
     provider,
     destroy() {
       reconciler.destroy();
+      provider.destroy();
+      doc.destroy();
+    },
+  };
+}
+
+export interface KicadCollabHandle {
+  doc: Y.Doc;
+  binding: KicadBinding;
+  provider: YjsProvider;
+  destroy(): void;
+}
+
+/**
+ * The Slot-model counterpart of `startCollab` (ysync 0008): wires the v2 items
+ * bridge (kicadCollabSnapshotItems / ApplyItems / onItems — Stage C exports) into
+ * a Y.Doc holding the canonical `KicadDoc` representation. Same provider +
+ * seed-once flow as the legacy path; supersedes it once the wasm speaks the
+ * items wire (Stage D).
+ */
+export async function startKicadCollab(
+  mod: KicadItemsModule,
+  win: KicadItemsWindow,
+  opts: StartCollabOptions,
+): Promise<KicadCollabHandle> {
+  clog("startKicadCollab:", opts.provider.kind, "room =", opts.room);
+  const doc = new Y.Doc();
+  const bridge = moduleItemsBridge(mod, win);
+  const binding = bindKicadCollab(doc, bridge);
+  const provider = await connectProvider(doc, opts.provider, { room: opts.room });
+
+  await provider.whenSynced();
+  binding.seed();
+  clog("startKicadCollab: ready; doc items =", binding.items.size);
+
+  return {
+    doc,
+    binding,
+    provider,
+    destroy() {
+      binding.destroy();
       provider.destroy();
       doc.destroy();
     },
