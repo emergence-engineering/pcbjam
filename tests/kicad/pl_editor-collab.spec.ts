@@ -195,7 +195,7 @@ test.describe("pl_editor collab bridge — two tabs (BroadcastChannel)", () => {
           Module: unknown;
           __collab?: unknown;
         };
-        w.__collab = await w.KicadCollab.start(w.Module, window, { channel: ch, settleMs: 500 });
+        w.__collab = await w.KicadCollab.start(w.Module, window, { provider: { kind: "broadcastchannel", settleMs: 500 }, room: ch });
       }, channel);
     await startCollab(tabA);
     await startCollab(tabB);

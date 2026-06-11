@@ -240,7 +240,7 @@ test.describe("eeschema collab bridge — two tabs (BroadcastChannel)", () => {
           KicadCollab: { start: (m: unknown, win: unknown, o: unknown) => Promise<unknown> };
           Module: unknown;
         };
-        await w.KicadCollab.start(w.Module, window, { channel: ch, settleMs: 500 });
+        await w.KicadCollab.start(w.Module, window, { provider: { kind: "broadcastchannel", settleMs: 500 }, room: ch });
       }, channel);
     await startCollab(tabA);
     await startCollab(tabB);

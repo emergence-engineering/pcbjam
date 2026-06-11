@@ -16,11 +16,12 @@ import {
 function start(
   mod: CollabModule,
   win: CollabWindow,
-  opts: { channel: string; settleMs?: number },
+  // Same opts as startCollab itself (ysync 0004: { provider, room }).
+        opts: Parameters<typeof startCollab>[2],
 ): ReturnType<typeof startCollab> {
   return startCollab(mod, win, {
     provider: { kind: "broadcastchannel", settleMs: opts.settleMs },
-    room: opts.channel,
+    room: opts.room,
   });
 }
 
