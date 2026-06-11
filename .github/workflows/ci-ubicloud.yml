@@ -82,11 +82,13 @@ jobs:
         working-directory: tests
         run: npm run setup:kicad
 
-      - name: KiCad e2e (npm run test:kicad)
+      - name: KiCad e2e (npm run test:kicad:ci)
         working-directory: tests
         # xvfb-run: headed Firefox on a virtual display — WebGL needs GLX + Mesa
         # llvmpipe, which headless Firefox can't reach on a GPU-less VM.
-        run: xvfb-run -a npm run test:kicad
+        # test:kicad:ci adds the chromium-ci project: pcbnew's wasm exceeds
+        # SpiderMonkey's x86-64 code budget, so those specs run on Chromium.
+        run: xvfb-run -a npm run test:kicad:ci
 
       - name: Upload test logs & screenshots
         if: always()
