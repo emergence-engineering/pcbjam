@@ -67,3 +67,9 @@ output/
 # Curated design docs live under docs/features/ and ARE committed.
 /features/
 
+# wasm-opt benchmark local artifacts. The harness scripts under scripts/bench/
+# ARE committed; the fixtures/results (/bench) and the QEMU VM image
+# (scripts/bench/vm) are local-only.
+/bench/
+/scripts/bench/vm/
+
