@@ -54,7 +54,10 @@ jobs:
           # asyncify+-O2 with the next tool's container compile — same tuning
           # as the Hetzner workflow (rationale in ci-full-build.yml and
           # docs/ci-build-slowness-findings.md). standard-30: 30 vcpu / 120 GB.
-          export KICAD_DOCKER_CPUS="$(nproc)" KICAD_DOCKER_MEM=110G
+          # nproc-1: Ubicloud's preinstalled docker daemon rejects a cpus limit
+          # equal to the host CPU count ("range of CPUs is from 0.01 to 30.00",
+          # run 27330725978); the Hetzner box accepted 32-of-32.
+          export KICAD_DOCKER_CPUS="$(( $(nproc) - 1 ))" KICAD_DOCKER_MEM=110G
           export KICAD_PIPELINE=1 BINARYEN_CORES=16
           # Self-built wasm-opt: official x86_64-linux tarballs run asyncify
           # ~4x slower than a stock gcc -O3+LTO build (A/B run 27276830256).
