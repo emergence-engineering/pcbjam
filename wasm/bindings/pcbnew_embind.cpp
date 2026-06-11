@@ -314,6 +314,29 @@ BOARD_ITEM* makeFromBlob( BOARD& aBoard, const std::string& aBlob )
     return found;
 }
 
+// Wrap a BARE item s-expr (e.g. one rendered from the Y.Doc Slot body) in the fake
+// `(kicad_pcb …)` envelope CLIPBOARD_IO's parser requires for non-footprint items. The
+// envelope carries the LIVE board's layer table so the item's layer names resolve — peers
+// in a collab session share the same board, so names map 1:1. (Peer-emitted blobs already
+// arrive enveloped by blobForItem; this is only for bare payloads.)
+std::string wrapInBoardEnvelope( BOARD& aBoard, const std::string& aItemSexpr )
+{
+    std::string s = "(kicad_pcb (version " + std::to_string( SEXPR_BOARD_FILE_VERSION )
+                    + ") (generator \"pcbnew\") (layers";
+
+    for( PCB_LAYER_ID id : aBoard.GetEnabledLayers().Seq() )
+    {
+        const char* type = IsCopperLayer( id ) ? LAYER::ShowType( aBoard.GetLayerType( id ) )
+                                               : "user";
+
+        s += " (" + std::to_string( (int) id ) + " \""
+             + std::string( aBoard.GetLayerName( id ).utf8_str() ) + "\" " + type + ")";
+    }
+
+    s += ") " + aItemSexpr + ")";
+    return s;
+}
+
 // Construct a new BOARD_ITEM from a delta item (for `added`), with the delta's uuid (m_Uuid is
 // const → const_cast, exactly as the s-expr parser does). PCB_TRACK segments reconstruct natively
 // from their fields (cheap, trap-free); every other type goes through the s-expr clipboard blob
@@ -444,6 +467,18 @@ void emit( const json& aDelta )
     }, s.c_str() );
 }
 
+// v2 "items" wire emit (ysync 0008): per-item s-expr blobs instead of decomposed
+// scalars. A JS runtime registers window.kicadCollab.onItems to opt in; both wires
+// are emitted side by side until the scalar path is retired.
+void emitItems( const json& aWire )
+{
+    std::string s = aWire.dump();
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onItems )
+            window.kicadCollab.onItems( UTF8ToString( $0 ) );
+    }, s.c_str() );
+}
+
 // ── Emit via post-settle snapshot diff (mirrors eeschema 0007) ───────────────────────────────
 //
 // A local edit is one BOARD_COMMIT::Push that fires the listener callbacks synchronously and
@@ -495,12 +530,47 @@ void flushDiff()
 
     json added = json::array(), changed = json::array(), removed = json::array();
 
+    // v2 items wire (per-item s-expr blobs): each touched id LIFTS to its root live
+    // item (footprint children → the footprint), deduped, and the root is blobbed
+    // whole — so containment travels and a child edit re-sends its parent subtree.
+    json                  wAdded = json::array(), wChanged = json::array();
+    std::set<std::string> wDone;
+
+    auto liftBlob = [&]( const std::string& id, json& aArr )
+    {
+        BOARD_ITEM* live =
+                board->ResolveItem( KIID( wxString::FromUTF8( id.c_str() ) ), /*allowNull*/ true );
+
+        if( !live )
+            return;
+
+        bool lifted = false;
+
+        if( FOOTPRINT* fp = live->GetParentFootprint() )
+        {
+            live = fp;
+            lifted = true;
+        }
+
+        std::string rootId = toUtf8( live->m_Uuid.AsString() );
+
+        if( !wDone.insert( rootId ).second )
+            return;
+
+        json w = json{ { "sexpr", blobForItem( board, live ) }, { "parent", nullptr } };
+
+        // A lifted child means its (pre-existing) parent's CONTENT changed.
+        ( lifted ? wChanged : aArr ).push_back( w );
+    };
+
     for( const auto& [id, j] : cur )
     {
         auto it = g_baseline.find( id );
 
         if( it == g_baseline.end() )
         {
+            liftBlob( id, wAdded );
+
             // Skip a newly-added footprint's text CHILDREN: the footprint's own add carries them,
             // and emitting a lone child would (for a field) wrap it in a spurious footprint. (A
             // child-only add onto an existing footprint is therefore not synced yet — rare.)
@@ -524,6 +594,7 @@ void flushDiff()
         }
         else if( it->second != j )
         {
+            liftBlob( id, wChanged );
             changed.push_back( j );
         }
     }
@@ -537,11 +608,18 @@ void flushDiff()
     g_baseline = std::move( cur );
 
     if( !added.empty() || !changed.empty() || !removed.empty() )
+    {
         emit( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
+        emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", removed } } );
+    }
 }
 
 // Coalesce all the listener callbacks of one commit (and any other edits in the same loop
 // turn) into a single post-settle diff.
+// flushDiff runs inside a COROUTINE: the v2 items emit serializes ROOT items via
+// CLIPBOARD_IO Format (blobForItem), whose virtual dispatch is only reliable on the
+// libcontext fiber stack — on the bare CallAfter stack it can trap and silently kill
+// the whole flush, legacy emit included (same lesson as doApply / eeschema 0007).
 void scheduleFlush()
 {
     if( g_flushScheduled )
@@ -550,9 +628,20 @@ void scheduleFlush()
     g_flushScheduled = true;
 
     if( PCB_EDIT_FRAME* fr = pcbFrame() )
-        fr->CallAfter( []() { flushDiff(); } );
+    {
+        fr->CallAfter( []() {
+            COROUTINE<int, int> cor( []( int ) -> int
+                                     {
+                                         flushDiff();
+                                         return 0;
+                                     } );
+            cor.Call( 0 );
+        } );
+    }
     else
+    {
         flushDiff();
+    }
 }
 
 // ChangeSource: the native BOARD_LISTENER is just a trigger — the actual change set comes from
@@ -672,6 +761,84 @@ void doApply( PCB_EDIT_FRAME* aFrame, const json& aDelta )
     s_applyingRemote = false;
 }
 
+// v2 items apply: removed by uuid; added/changed are an idempotent per-item upsert —
+// parse the blob (wrapping bare non-footprint payloads in a live-board envelope),
+// then replace any existing item sharing the parsed uuid. Runs inside the apply
+// COROUTINE (see kicadCollabApplyItems), via BOARD_COMMIT like every remote op.
+void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
+{
+    BOARD* board = aFrame->GetBoard();
+
+    s_applyingRemote = true;
+
+    BOARD_COMMIT commit( aFrame );
+    bool         staged = false;
+
+    for( const json& rid : aWire.value( "removed", json::array() ) )
+    {
+        KIID id( wxString::FromUTF8( rid.get<std::string>().c_str() ) );
+
+        if( BOARD_ITEM* item = board->ResolveItem( id, /*allowNullptr*/ true ) )
+        {
+            // A child uuid in `removed` is covered by its parent's replace/remove.
+            if( item->GetParentFootprint() )
+                continue;
+
+            commit.Remove( item );
+            staged = true;
+        }
+    }
+
+    auto upsert = [&]( const json& w )
+    {
+        std::string sexpr = w.value( "sexpr", "" );
+        size_t      p     = sexpr.find_first_not_of( " \t\r\n" );
+
+        if( p == std::string::npos )
+            return;
+
+        std::string trimmed = sexpr.substr( p );
+
+        // Peer-emitted blobs are already enveloped (or a bare footprint, which the
+        // parser accepts top-level); bare Y.Doc-rendered items need the envelope.
+        if( trimmed.rfind( "(kicad_pcb", 0 ) != 0 && trimmed.rfind( "(footprint", 0 ) != 0 )
+            trimmed = wrapInBoardEnvelope( *board, trimmed );
+
+        BOARD_ITEM* parsed = makeFromBlob( *board, trimmed );
+
+        if( !parsed )
+        {
+            EM_ASM( { console.log( "[collab] pcbnew applyItems: blob parse failed" ); } );
+            return;
+        }
+
+        if( BOARD_ITEM* existing = board->ResolveItem( parsed->m_Uuid, /*allowNullptr*/ true ) )
+        {
+            // Replacing by uuid; a (shouldn't-happen) child match replaces its parent.
+            if( FOOTPRINT* fp = existing->GetParentFootprint() )
+                existing = fp;
+
+            commit.Remove( existing );
+        }
+
+        commit.Add( parsed );
+        staged = true;
+    };
+
+    for( const json& w : aWire.value( "added", json::array() ) )
+        upsert( w );
+    for( const json& w : aWire.value( "changed", json::array() ) )
+        upsert( w );
+
+    if( staged )
+        commit.Push( wxT( "Collaborative edit (items)" ) );
+
+    // Fold the applied state into the baseline so the post-apply listener flush
+    // doesn't re-broadcast it as a local diff (echo).
+    rebaseline();
+    s_applyingRemote = false;
+}
+
 // Test/PoC move (the BOARD_COMMIT body for kicadCollabTestMoveFirst). Run inside a COROUTINE by
 // the caller: `BOARD_ITEM::Move` is virtual, and dispatched off the app main stack (a bare
 // CallAfter) it hits the asyncify call_indirect mis-dispatch and silently NO-OPS — the commit
@@ -722,6 +889,31 @@ void kicadCollabApply( std::string aJson )
 }
 
 
+// JS → C++, v2 items wire. Same CallAfter + COROUTINE context as kicadCollabApply
+// (the blob parse + commit must run where native edits run — see above).
+void kicadCollabApplyItems( std::string aJson )
+{
+    json wire = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
+
+    if( wire.is_discarded() )
+        return;
+
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    fr->CallAfter( [fr, wire]() {
+        COROUTINE<int, int> cor( [fr, wire]( int ) -> int
+                                 {
+                                     doApplyItems( fr, wire );
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
+}
+
+
 // JS pull of the full current model as an all-"added" delta (seed/baseline). Also registers the
 // change listener on first call.
 std::string kicadCollabSnapshot()
@@ -737,6 +929,35 @@ std::string kicadCollabSnapshot()
 
     // Seed the diff baseline to exactly the model we're handing out, so the first local edit
     // diffs against this snapshot (and we don't re-broadcast the whole model).
+    rebaseline();
+
+    return json{ { "added", added }, { "changed", json::array() },
+                 { "removed", json::array() } }.dump();
+}
+
+
+// JS pull of the full current model as an all-"added" v2 items wire: one blob per ROOT
+// item (a footprint's blob embeds its children — the TS side flattens). Registers the
+// listener + rebaselines exactly like kicadCollabSnapshot.
+std::string kicadCollabSnapshotItems()
+{
+    BOARD* board = ensureBridge();
+
+    json added = json::array();
+
+    if( board )
+    {
+        auto push = [&]( BOARD_ITEM* item )
+        {
+            added.push_back( json{ { "sexpr", blobForItem( board, item ) }, { "parent", nullptr } } );
+        };
+
+        for( FOOTPRINT* fp : board->Footprints() )  push( fp );
+        for( PCB_TRACK* t : board->Tracks() )       push( t );
+        for( ZONE* z : board->Zones() )             push( z );
+        for( BOARD_ITEM* d : board->Drawings() )    push( d );
+    }
+
     rebaseline();
 
     return json{ { "added", added }, { "changed", json::array() },
@@ -922,6 +1143,9 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     // Yjs collaborative bridge entry points (same contract as pl_editor / eeschema).
     function("kicadCollabApply", &kicadCollabApply);
     function("kicadCollabSnapshot", &kicadCollabSnapshot);
+    // v2 items bridge: per-item s-expr payloads (ysync 0008).
+    function("kicadCollabApplyItems", &kicadCollabApplyItems);
+    function("kicadCollabSnapshotItems", &kicadCollabSnapshotItems);
     function("kicadCollabTestMoveFirst", &kicadCollabTestMoveFirst);
     function("kicadCollabGetPos", &kicadCollabGetPos);
     function("kicadCollabTestItemBlob", &kicadCollabTestItemBlob);

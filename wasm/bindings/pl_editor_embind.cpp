@@ -22,6 +22,7 @@
 #include <font/text_attributes.h>
 #include <drawing_sheet/ds_data_model.h>
 #include <drawing_sheet/ds_data_item.h>
+#include <drawing_sheet/ds_file_versions.h>
 
 using namespace emscripten;
 using json = nlohmann::json;
@@ -182,6 +183,26 @@ void emit( const json& aDelta )
     }, s.c_str() );
 }
 
+// v2 "items" wire emit (ysync 0008): per-item s-expr blobs instead of decomposed
+// scalars. A JS runtime registers window.kicadCollab.onItems to opt in; both wires
+// are emitted side by side until the scalar path is retired.
+void emitItems( const json& aWire )
+{
+    std::string s = aWire.dump();
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onItems )
+            window.kicadCollab.onItems( UTF8ToString( $0 ) );
+    }, s.c_str() );
+}
+
+// One items-wire entry for a live item: its native blob (SaveInString — a
+// self-contained `(kicad_wks …)` envelope; the TS side unwraps). pl_editor's
+// model is flat, so parent is always null.
+json wireItemFor( DS_DATA_ITEM* aItem )
+{
+    return json{ { "sexpr", itemBlob( aItem ) }, { "parent", nullptr } };
+}
+
 // Apply scalar fields from json onto an existing scalar item (text/segment/rect).
 void applyFields( DS_DATA_ITEM* aItem, const json& j )
 {
@@ -331,14 +352,30 @@ extern "C" void kicadCollabOnModify()
     json changed = json::array();
     json removed = json::array();
 
+    // v2 items wire (per-item s-expr blobs), built from the same diff.
+    json wAdded   = json::array();
+    json wChanged = json::array();
+
+    DS_DATA_MODEL& model = DS_DATA_MODEL::GetTheInstance();
+
     for( const auto& [id, j] : cur )
     {
         auto prev = s_snapshot.find( id );
 
         if( prev == s_snapshot.end() )
+        {
             added.push_back( j );
+
+            if( DS_DATA_ITEM* item = findByUuid( model, id ) )
+                wAdded.push_back( wireItemFor( item ) );
+        }
         else if( prev->second != j )
+        {
             changed.push_back( j );
+
+            if( DS_DATA_ITEM* item = findByUuid( model, id ) )
+                wChanged.push_back( wireItemFor( item ) );
+        }
     }
 
     for( const auto& [id, j] : s_snapshot )
@@ -353,6 +390,7 @@ extern "C" void kicadCollabOnModify()
         return;
 
     emit( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
+    emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", removed } } );
 }
 
 
@@ -371,6 +409,107 @@ std::string kicadCollabSnapshot()
 
     return json{ { "added", added }, { "changed", json::array() },
                  { "removed", json::array() } }.dump();
+}
+
+
+// ── v2 "items" bridge: per-item s-expr (ysync 0008 Stage C) ─────────────────────────
+//
+// Same contract as the scalar bridge but the payload is each item's full native
+// s-expr blob: { added: [{sexpr, parent}], changed: [...], removed: [uuid] }.
+// Blobs are SaveInString envelopes; apply accepts both enveloped and bare items.
+
+// JS pull of the full current model as an all-"added" items wire. Rebaselines the
+// differ exactly like kicadCollabSnapshot, so a v2 consumer gets no echo either.
+std::string kicadCollabSnapshotItems()
+{
+    DS_DATA_MODEL& model = DS_DATA_MODEL::GetTheInstance();
+
+    json added = json::array();
+
+    for( DS_DATA_ITEM* item : model.GetItems() )
+        added.push_back( wireItemFor( item ) );
+
+    s_snapshot = snapshotMap();
+
+    return json{ { "added", added }, { "changed", json::array() },
+                 { "removed", json::array() } }.dump();
+}
+
+
+// JS → C++. Apply a remote items wire: removed by uuid; added/changed are an
+// idempotent per-item upsert — append the blob through the normal parser, then
+// drop any pre-existing item that shares an appended uuid (replace-by-uuid).
+void kicadCollabApplyItems( std::string aJson )
+{
+    json wire = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
+
+    if( wire.is_discarded() )
+        return;
+
+    s_applyingRemote = true;
+
+    DS_DATA_MODEL& model = DS_DATA_MODEL::GetTheInstance();
+
+    for( const json& rid : wire.value( "removed", json::array() ) )
+    {
+        if( DS_DATA_ITEM* item = findByUuid( model, rid.get<std::string>() ) )
+        {
+            model.Remove( item );
+            delete item;
+        }
+    }
+
+    auto upsert = [&]( const json& w )
+    {
+        std::string sexpr = w.value( "sexpr", "" );
+
+        if( sexpr.empty() )
+            return;
+
+        // Bare items (e.g. rendered from the Y.Doc Slot body) get the envelope the
+        // drawing-sheet parser requires; peer-emitted blobs already carry it.
+        if( sexpr.rfind( "(kicad_wks", 0 ) != 0 )
+        {
+            sexpr = "(kicad_wks (version " + std::to_string( SEXPR_WORKSHEET_FILE_VERSION )
+                    + ") (generator \"pl_editor\") " + sexpr + ")";
+        }
+
+        // Snapshot the pre-append item pointers, then append through the parser.
+        std::vector<DS_DATA_ITEM*> before = model.GetItems();
+        model.SetPageLayout( sexpr.c_str(), /*aAppend*/ true, wxT( "collab-items" ) );
+
+        // Replace-by-uuid: drop any pre-existing item sharing a newly appended uuid.
+        // Work on pointer snapshots — model.Remove() mutates the live vector.
+        std::vector<DS_DATA_ITEM*> appended( model.GetItems().begin() + before.size(),
+                                             model.GetItems().end() );
+
+        for( DS_DATA_ITEM* neu : appended )
+        {
+            for( DS_DATA_ITEM* old : before )
+            {
+                if( old->m_Uuid == neu->m_Uuid )
+                {
+                    model.Remove( old );
+                    delete old;
+                    break;
+                }
+            }
+        }
+    };
+
+    for( const json& w : wire.value( "added", json::array() ) )
+        upsert( w );
+    for( const json& w : wire.value( "changed", json::array() ) )
+        upsert( w );
+
+    // Rebase the differ on the post-apply state so our own mutations aren't echoed,
+    // then rebuild the GAL view from the model.
+    s_snapshot = snapshotMap();
+
+    if( EDA_DRAW_FRAME* fr = topFrame() )
+        fr->HardRedraw();
+
+    s_applyingRemote = false;
 }
 
 
@@ -405,6 +544,9 @@ EMSCRIPTEN_BINDINGS(pl_editor) {
     // Yjs collaborative bridge entry points.
     function("kicadCollabApply", &kicadCollabApply);
     function("kicadCollabSnapshot", &kicadCollabSnapshot);
+    // v2 items bridge: per-item s-expr payloads (ysync 0008).
+    function("kicadCollabApplyItems", &kicadCollabApplyItems);
+    function("kicadCollabSnapshotItems", &kicadCollabSnapshotItems);
     function("kicadCollabTestAddText", &kicadCollabTestAddText);
 }
 #endif

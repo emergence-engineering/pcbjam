@@ -25,6 +25,9 @@
 #include <sch_edit_frame.h>
 #include <sch_io/kicad_sexpr/sch_io_kicad_sexpr.h>
 #include <sch_sheet.h>
+#include <richio.h>
+#include <lib_symbol.h>
+#include <tools/sch_selection.h>
 #include <sch_commit.h>
 #include <sch_item.h>
 #include <sch_line.h>
@@ -287,6 +290,35 @@ void emit( const json& aDelta )
     }, s.c_str() );
 }
 
+// v2 "items" wire emit (ysync 0008): per-item s-expr blobs instead of decomposed
+// scalars. A JS runtime registers window.kicadCollab.onItems to opt in; both wires
+// are emitted side by side until the scalar path is retired.
+void emitItems( const json& aWire )
+{
+    std::string s = aWire.dump();
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onItems )
+            window.kicadCollab.onItems( UTF8ToString( $0 ) );
+    }, s.c_str() );
+}
+
+// Serialize one live schematic item to its native s-expr via the clipboard
+// formatter (the exact path Ctrl-C uses: a one-item SCH_SELECTION through
+// SCH_IO_KICAD_SEXPR::Format). For a symbol the output also carries its
+// (lib_symbols …) definition, just like a copy does.
+std::string itemBlob( SCH_EDIT_FRAME* aFrame, SCH_ITEM* aItem )
+{
+    SCH_SELECTION sel;
+    sel.SetScreen( aFrame->GetScreen() );
+    sel.Add( aItem );
+
+    STRING_FORMATTER   fmt;
+    SCH_IO_KICAD_SEXPR plugin;
+    plugin.Format( &sel, &aFrame->GetCurrentSheet(), aFrame->Schematic(), &fmt,
+                   /*aForClipboard*/ true );
+    return fmt.GetString();
+}
+
 // ── Emit via post-settle snapshot diff ───────────────────────────────────────────────────
 //
 // A local edit is a single SCH_COMMIT::Push that fires OnItemsAdded/Removed/Changed
@@ -352,14 +384,32 @@ void flushDiff()
 
     json added = json::array(), changed = json::array(), removed = json::array();
 
+    // v2 items wire (per-item s-expr blobs), built from the same diff. Screen items
+    // are already root-level (fields live inside their symbols), so no lifting.
+    json wAdded = json::array(), wChanged = json::array();
+
+    auto blobFor = [&]( const std::string& id, json& aArr )
+    {
+        KIID kid( wxString::FromUTF8( id.c_str() ) );
+
+        if( SCH_ITEM* item = fr->Schematic().ResolveItem( kid, nullptr, /*allowNull*/ true ) )
+            aArr.push_back( json{ { "sexpr", itemBlob( fr, item ) }, { "parent", nullptr } } );
+    };
+
     for( const auto& [id, j] : cur )
     {
         auto it = g_baseline.find( id );
 
         if( it == g_baseline.end() )
+        {
             added.push_back( j );
+            blobFor( id, wAdded );
+        }
         else if( it->second != j )
+        {
             changed.push_back( j );
+            blobFor( id, wChanged );
+        }
     }
 
     for( const auto& [id, j] : g_baseline )
@@ -371,11 +421,17 @@ void flushDiff()
     g_baseline = std::move( cur );
 
     if( !added.empty() || !changed.empty() || !removed.empty() )
+    {
         emit( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
+        emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", removed } } );
+    }
 }
 
 // Coalesce all the listener callbacks of one commit (and any other edits in the same loop
-// turn) into a single post-settle diff.
+// turn) into a single post-settle diff. flushDiff runs inside a COROUTINE: its v2 items
+// emit serializes items via SCH_IO_KICAD_SEXPR::Format (itemBlob), whose virtual dispatch
+// is only reliable on the libcontext fiber stack — on the bare CallAfter stack it traps
+// and silently kills the whole flush, legacy emit included (same lesson as doApply, 0007).
 void scheduleFlush()
 {
     if( g_flushScheduled )
@@ -384,9 +440,20 @@ void scheduleFlush()
     g_flushScheduled = true;
 
     if( SCH_EDIT_FRAME* fr = schFrame() )
-        fr->CallAfter( []() { flushDiff(); } );
+    {
+        fr->CallAfter( []() {
+            COROUTINE<int, int> cor( []( int ) -> int
+                                     {
+                                         flushDiff();
+                                         return 0;
+                                     } );
+            cor.Call( 0 );
+        } );
+    }
     else
+    {
         flushDiff();
+    }
 }
 
 // ChangeSource: the native SCHEMATIC_LISTENER is just a trigger — the actual change set comes
@@ -565,6 +632,125 @@ void doApply( SCH_EDIT_FRAME* aFrame, const json& aDelta )
     s_applyingRemote = false;
 }
 
+// v2 items apply: removed by uuid; added/changed are an idempotent per-item upsert.
+// Each blob is parsed through the clipboard-paste path — LoadContent into a throwaway
+// sheet (sch_editor_control.cpp Paste pattern) — then the loaded items are detached,
+// matched by uuid against the live model (replace), lib-relinked for symbols, and
+// committed. Runs inside the apply COROUTINE (see kicadCollabApplyItems).
+void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
+{
+    SCHEMATIC& sch = aFrame->Schematic();
+
+    s_applyingRemote = true;
+
+    SCH_COMMIT commit( aFrame );
+    bool       staged = false;
+
+    for( const json& rid : aWire.value( "removed", json::array() ) )
+    {
+        SCH_SHEET_PATH path;
+        KIID           id( wxString::FromUTF8( rid.get<std::string>().c_str() ) );
+
+        if( SCH_ITEM* item = sch.ResolveItem( id, &path, /*allowNull*/ true ) )
+        {
+            commit.Remove( item, path.LastScreen() );
+            staged = true;
+        }
+    }
+
+    auto upsert = [&]( const json& w )
+    {
+        std::string sexpr = w.value( "sexpr", "" );
+
+        if( sexpr.find_first_not_of( " \t\r\n" ) == std::string::npos )
+            return;
+
+        // Parse into a throwaway sheet exactly like clipboard paste does. The screen
+        // is heap-allocated and owned by the sheet (freed with it).
+        SCH_SHEET   tempSheet;
+        SCH_SCREEN* tempScreen = new SCH_SCREEN( &sch );
+        tempSheet.SetScreen( tempScreen );
+
+        STRING_LINE_READER reader( sexpr, wxT( "collab-items" ) );
+        SCH_IO_KICAD_SEXPR plugin;
+
+        try
+        {
+            plugin.LoadContent( reader, &tempSheet );
+        }
+        catch( ... )
+        {
+            EM_ASM( { console.log( "[collab] eeschema applyItems: blob parse failed" ); } );
+            return;
+        }
+
+        // Resolve a symbol's LIB_SYMBOL: prefer the blob's own (lib_symbols …) cache
+        // (a clipboard-style blob carries it), else the live screen's — peers share
+        // the same document so the definition is normally already present.
+        auto findLib = [&]( SCH_SYMBOL* aSym ) -> LIB_SYMBOL*
+        {
+            wxString lookup = aSym->GetLibId().Format().wx_str();
+
+            if( !aSym->UseLibIdLookup() )
+                lookup = aSym->GetSchSymbolLibraryName();
+
+            auto& tlibs = tempScreen->GetLibSymbols();
+            auto  ti    = tlibs.find( lookup );
+
+            if( ti != tlibs.end() )
+                return new LIB_SYMBOL( *ti->second );
+
+            auto& libs = aFrame->GetScreen()->GetLibSymbols();
+            auto  li   = libs.find( lookup );
+
+            if( li != libs.end() )
+                return new LIB_SYMBOL( *li->second );
+
+            return nullptr;
+        };
+
+        std::vector<SCH_ITEM*> loaded;
+
+        for( SCH_ITEM* item : tempScreen->Items() )
+            loaded.push_back( item );
+
+        for( SCH_ITEM* item : loaded )
+        {
+            tempScreen->Remove( item );     // detach: tempSheet's dtor must not free it
+
+            SCH_SHEET_PATH path;
+
+            if( SCH_ITEM* existing = sch.ResolveItem( item->m_Uuid, &path, /*allowNull*/ true ) )
+                commit.Remove( existing, path.LastScreen() );
+
+            if( item->Type() == SCH_SYMBOL_T )
+            {
+                auto* sym = static_cast<SCH_SYMBOL*>( item );
+
+                if( LIB_SYMBOL* lib = findLib( sym ) )
+                    sym->SetLibSymbol( lib );
+            }
+
+            item->SetParent( &sch );
+            commit.Add( item, aFrame->GetScreen() );
+            staged = true;
+        }
+    };
+
+    for( const json& w : aWire.value( "added", json::array() ) )
+        upsert( w );
+    for( const json& w : aWire.value( "changed", json::array() ) )
+        upsert( w );
+
+    if( staged )
+        commit.Push( wxT( "Collaborative edit (items)" ) );
+
+    // Fold the applied state into the baseline so the post-apply listener flush
+    // doesn't re-broadcast it as a local diff (echo).
+    rebaseline();
+    s_applyingRemote = false;
+}
+
 // Test/PoC move (the SCH_COMMIT body for kicadCollabTestMoveFirst, deferred via CallAfter).
 void collabTestMove( SCH_EDIT_FRAME* aFrame, SCH_ITEM* aItem, SCH_SCREEN* aScreen, int aDx,
                      int aDy )
@@ -628,6 +814,68 @@ std::string kicadCollabSnapshot()
     // Seed the diff baseline to exactly the model we're handing out, so the first local edit
     // diffs against this snapshot (and we don't re-broadcast the whole model).
     rebaseline();
+
+    return json{ { "added", added }, { "changed", json::array() },
+                 { "removed", json::array() } }.dump();
+}
+
+
+// JS → C++, v2 items wire. Same CallAfter + COROUTINE context as kicadCollabApply
+// (LoadContent + SCH_COMMIT must run where native edits run).
+void kicadCollabApplyItems( std::string aJson )
+{
+    json wire = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
+
+    if( wire.is_discarded() )
+        return;
+
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    fr->CallAfter( [fr, wire]() {
+        COROUTINE<int, int> cor( [fr, wire]( int ) -> int
+                                 {
+                                     doApplyItems( fr, wire );
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
+}
+
+
+// JS pull of the full current model as an all-"added" v2 items wire: one clipboard-
+// style blob per screen item across the hierarchy (deduped by uuid). Registers the
+// listener + rebaselines exactly like kicadCollabSnapshot.
+std::string kicadCollabSnapshotItems()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    json added = json::array();
+
+    if( fr )
+    {
+        ensureBridge();
+
+        std::set<std::string> seen;
+
+        for( const SCH_SHEET_PATH& path : fr->Schematic().Hierarchy() )
+        {
+            SCH_SCREEN* screen = const_cast<SCH_SHEET_PATH&>( path ).LastScreen();
+
+            if( !screen )
+                continue;
+
+            for( SCH_ITEM* item : screen->Items() )
+            {
+                if( seen.insert( toUtf8( item->m_Uuid.AsString() ) ).second )
+                    added.push_back( json{ { "sexpr", itemBlob( fr, item ) }, { "parent", nullptr } } );
+            }
+        }
+
+        rebaseline();
+    }
 
     return json{ { "added", added }, { "changed", json::array() },
                  { "removed", json::array() } }.dump();
@@ -730,6 +978,9 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     // Yjs collaborative bridge entry points (same contract as pl_editor).
     function("kicadCollabApply", &kicadCollabApply);
     function("kicadCollabSnapshot", &kicadCollabSnapshot);
+    // v2 items bridge: per-item s-expr payloads (ysync 0008).
+    function("kicadCollabApplyItems", &kicadCollabApplyItems);
+    function("kicadCollabSnapshotItems", &kicadCollabSnapshotItems);
     function("kicadCollabTestMoveFirst", &kicadCollabTestMoveFirst);
     function("kicadCollabGetPos", &kicadCollabGetPos);
 }
