@@ -25,6 +25,15 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # v130 (see docs/ci-build-slowness-findings.md). Validate any bump with the e2e
 # suite: a Binaryen/emsdk skew can corrupt asyncify metadata ("func is not a function").
 EMSDK_WASM_OPT="${PROJECT_ROOT}/tools/emsdk/upstream/bin/wasm-opt"
+# build-kicad-target.sh replaces emsdk's wasm-opt with a no-op stub (moving the
+# real binary to wasm-opt.real) so emcc skips the in-link asyncify. That's meant
+# for the container emsdk, but a host-mode run leaves the HOST emsdk stubbed —
+# and the stub fakes --version and exits 0, so the host-side asyncify/-O2
+# "succeed" while doing NOTHING (broken wasm: "asyncify_stop_unwind is not a
+# function"). Always prefer the preserved real binary when it exists.
+if [ -x "${EMSDK_WASM_OPT}.real" ]; then
+    EMSDK_WASM_OPT="${EMSDK_WASM_OPT}.real"
+fi
 if [ -z "${BINARYEN_VERSION:-}" ] && [ -x "${EMSDK_WASM_OPT}" ]; then
     EMSDK_VERSION=$("${EMSDK_WASM_OPT}" --version 2>&1 || true)
     echo "Using emsdk-bundled Binaryen: ${EMSDK_VERSION}" >&2

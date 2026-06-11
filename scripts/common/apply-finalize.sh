@@ -13,6 +13,12 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 WASM_OPT=$("${SCRIPT_DIR}/get-wasm-opt.sh")
 BINARYEN_BIN=$(dirname "${WASM_OPT}")
 FINALIZE="${BINARYEN_BIN}/wasm-emscripten-finalize"
+# Same stub hazard as wasm-opt (see get-wasm-opt.sh): a host-mode kicad build
+# leaves the emsdk finalize stubbed with the real binary at .real — prefer it,
+# the stub exits 0 having done nothing.
+if [ -x "${FINALIZE}.real" ]; then
+    FINALIZE="${FINALIZE}.real"
+fi
 
 INPUT_WASM="${1:-output/pcbnew.wasm}"
 OUTPUT_WASM="${2:-${INPUT_WASM}}"
