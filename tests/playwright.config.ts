@@ -84,7 +84,16 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        // CI runners have no GPU and several wx specs use WebGL
+        // (gal-webgl.spec.ts etc.): newer headless Chromium refuses software
+        // WebGL without --enable-unsafe-swiftshader. CI-gated so local runs
+        // keep stock behavior (same pattern as playwright-kicad.config.ts).
+        ...(process.env.CI ? {
+          launchOptions: { args: ['--enable-unsafe-swiftshader'] },
+        } : {}),
+      },
     },
   ],
 
