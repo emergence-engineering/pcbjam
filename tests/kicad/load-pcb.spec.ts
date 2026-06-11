@@ -78,6 +78,13 @@ async function dismissWizardIfPresent(page: Page): Promise<void> {
 async function waitForPcbnew(page: Page): Promise<void> {
     await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
     await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
+    // Registry object ≠ app booted: wait for real UI entries (wizard or main
+    // frame) before dismissing — CI boots slower (baseline-JIT wasm + software
+    // GL under xvfb) and the dismiss loop below is bounded.
+    await page.waitForFunction(() => {
+        const registry = window.wxElementRegistry;
+        return !!registry && registry.findAll({}).length > 0;
+    }, null, { timeout: 150000 });
     await page.waitForTimeout(2500);
     await dismissWizardIfPresent(page);
     await page.waitForFunction(() => {

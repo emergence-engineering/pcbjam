@@ -52,7 +52,10 @@ jobs:
         run: |
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update
-          sudo apt-get install -y ca-certificates curl git libjemalloc2
+          # xvfb: kicad e2e runs headed Firefox under a virtual display — headless
+          # Firefox cannot create any GL context on the GPU-less VM (see
+          # tests/playwright-kicad.config.ts CI prefs).
+          sudo apt-get install -y ca-certificates curl git libjemalloc2 xvfb
           sudo install -m 0755 -d /etc/apt/keyrings
           curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
           sudo chmod a+r /etc/apt/keyrings/docker.gpg
@@ -107,7 +110,9 @@ jobs:
 
       - name: KiCad e2e (npm run test:kicad)
         working-directory: tests
-        run: npm run test:kicad
+        # xvfb-run: headed Firefox on a virtual display — WebGL needs GLX + Mesa
+        # llvmpipe, which headless Firefox can't reach on a GPU-less VM.
+        run: xvfb-run -a npm run test:kicad
 
       - name: Upload test logs & screenshots
         if: always()

@@ -344,6 +344,14 @@ async function getRegistryMetrics(page: Page): Promise<RegistryMetrics> {
 async function completeWizard(page: Page): Promise<void> {
     await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
     await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
+    // The registry OBJECT exists as soon as wx.js initializes — long before the
+    // app wasm boots (slow on CI: ~190M module on baseline-JIT + software GL).
+    // Wait for actual UI entries (the wizard is the first window) before the
+    // bounded click loop below, which otherwise starts too early and gives up.
+    await page.waitForFunction(() => {
+        const registry = window.wxElementRegistry;
+        return !!registry && registry.findAll({}).length > 0;
+    }, null, { timeout: 150000 });
     await page.waitForTimeout(2000);
 
     await page.screenshot({ path: 'test-results/wizard-00-initial.png', scale: 'device' });

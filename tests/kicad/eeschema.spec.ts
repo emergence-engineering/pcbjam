@@ -220,6 +220,13 @@ async function getRegistryMetrics(page: Page): Promise<RegistryMetrics> {
 async function completeWizard(page: Page): Promise<void> {
     await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
     await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
+    // Registry object ≠ app booted: wait for real UI entries (the wizard is the
+    // first window) so the bounded click loop below doesn't start too early.
+    // CI boots slower (baseline-JIT wasm + software GL under xvfb).
+    await page.waitForFunction(() => {
+        const registry = window.wxElementRegistry;
+        return !!registry && registry.findAll({}).length > 0;
+    }, null, { timeout: 150000 });
     await page.waitForTimeout(2000);
 
     await page.screenshot({ path: 'test-results/eeschema-wizard-00-initial.png', scale: 'device' });

@@ -76,7 +76,10 @@ jobs:
           # wxWidgets + wasm-test builds drive emconfigure/emmake/make directly.
           # All of this runs on the bare host (not in Docker), and the Hetzner
           # ubuntu-24.04 cloud image is minimal, so these must be installed here.
-          sudo apt-get install -y ca-certificates curl git libjemalloc2 autoconf automake make
+          # xvfb: kicad e2e runs headed Firefox under a virtual display — headless
+          # Firefox cannot create any GL context on the GPU-less VM (see
+          # tests/playwright-kicad.config.ts CI prefs).
+          sudo apt-get install -y ca-certificates curl git libjemalloc2 autoconf automake make xvfb
           # toolchain for BINARYEN_BUILD_FROM_SOURCE (get-wasm-opt.sh)
           sudo apt-get install -y cmake ninja-build g++
           sudo install -m 0755 -d /etc/apt/keyrings
@@ -153,7 +156,9 @@ jobs:
 
       - name: KiCad e2e (npm run test:kicad)
         working-directory: tests
-        run: npm run test:kicad
+        # xvfb-run: headed Firefox on a virtual display — WebGL needs GLX + Mesa
+        # llvmpipe, which headless Firefox can't reach on a GPU-less VM.
+        run: xvfb-run -a npm run test:kicad
 
       # 6) Always capture logs/screenshots for post-mortem.
       - name: Upload test logs & results

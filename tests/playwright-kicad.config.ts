@@ -88,6 +88,28 @@ export default defineConfig({
       use: {
         ...devices['Desktop Firefox'],
         viewport: { width: 1280, height: 720 },
+        // CI-only prefs: GPU-less CI VMs hit two Firefox blockers (identical on
+        // Hetzner ccx53 and ubicloud-standard-30, runs 27329612719/27330989479).
+        // Gated on CI so local runs keep stock Firefox behavior.
+        ...(process.env.CI ? {
+          // Headless Firefox cannot create any GL context on the GPU-less CI
+          // VMs (blocklist bypass still ends in FEATURE_FAILURE_WEBGL_EXHAUSTED_
+          // DRIVERS) — run headed under Xvfb instead, where GLX + Mesa llvmpipe
+          // provides software WebGL. CI invokes the suite via `xvfb-run`.
+          headless: false,
+          launchOptions: {
+            firefoxUserPrefs: {
+              // Skip the no-GPU blocklist ("AllowWebgl2:false restricts
+              // context creation") so the GAL canvas gets a WebGL context.
+              'webgl.force-enabled': true,
+              // pcbnew.wasm (~190M) OOMs the optimizing wasm JIT at compile
+              // time ("InternalError: out of memory") and the app never boots.
+              // Baseline-only compilation trades runtime speed for a compile
+              // that fits in memory.
+              'javascript.options.wasm_optimizingjit': false,
+            },
+          },
+        } : {}),
       },
     },
     {
