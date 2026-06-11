@@ -39,7 +39,9 @@ jobs:
           # xvfb: kicad e2e runs headed Firefox under a virtual display — headless
           # Firefox cannot create any GL context on the GPU-less VM (see
           # tests/playwright-kicad.config.ts CI prefs).
-          sudo apt-get install -y cmake ninja-build g++ libjemalloc2 xvfb
+          # autoconf/automake/make: the host-side wxWidgets + wx test-app builds
+          # (build-wxuniversal-wasm.sh regenerates ./configure on fresh checkouts).
+          sudo apt-get install -y cmake ninja-build g++ libjemalloc2 xvfb autoconf automake make
 
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -70,6 +72,15 @@ jobs:
           echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
           ls -lh output/*.wasm
 
+      # Host-side wxWidgets build producing the wx test apps for `npm run test`
+      # (separate from the in-docker wxWidgets that KiCad links against).
+      # Auto-installs emsdk into tools/ on first run.
+      - name: Build wxWidgets (wxUniversal WASM)
+        run: ./scripts/build-wxuniversal-wasm.sh
+
+      - name: Build wxWidgets test apps
+        run: ./scripts/build-wasm-test.sh
+
       - name: Install test deps
         working-directory: tests
         run: npm ci
@@ -81,6 +92,12 @@ jobs:
       - name: Stage KiCad WASM for tests
         working-directory: tests
         run: npm run setup:kicad
+
+      # wxWidgets e2e: bundled headless Chromium + SwiftShader (CI-gated launch
+      # arg in tests/playwright.config.ts).
+      - name: wxWidgets e2e (npm run test)
+        working-directory: tests
+        run: npm run test
 
       - name: KiCad e2e (npm run test:kicad:ci)
         working-directory: tests
