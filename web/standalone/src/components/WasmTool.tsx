@@ -3,20 +3,22 @@ import {
   collabRoomId,
   EXTENSION_TOOL,
   FILELESS_TOOLS,
+  fileToDoc,
   toolSchema,
+  type KicadDoc,
   type Tool,
 } from "@pcbjam/shared";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { WASM_ASSET_BASE_URL, yjsProviderConfig } from "@/lib/config";
 import { bootKicadTool } from "@/wasm/boot";
-import { memfsProjectDir } from "@/wasm/constants";
+import { memfsFilePath, memfsProjectDir } from "@/wasm/constants";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
-import type { CollabWindow } from "@/wasm/collab";
+import type { KicadItemsWindow } from "@/wasm/collab";
 import { clog, cwarn } from "@/wasm/collab/debug";
 import { createOomWatch, respawnInNewTab } from "@/recovery/oom-watch";
 import { MemoryExhaustedDialog } from "@/recovery/MemoryExhaustedDialog";
 
-// Tools with a working collab bridge (kicadCollabSnapshot/Apply embind exports).
+// Tools with the v2 items bridge (kicadCollabSnapshotItems/ApplyItems embind exports).
 const COLLAB_TOOLS = new Set<Tool>(["pl_editor", "eeschema", "pcbnew"]);
 const LEGACY_EXTENSION_TOOL: Record<string, Tool> = {
   ".sch": "eeschema",
@@ -170,10 +172,35 @@ function installToolNavigationHook(
 }
 
 /**
- * Collaborative editing (features/yjs-bridge), ON BY DEFAULT for any tool that has the
- * collab bridge. Open the same project URL in two tabs to edit together: the channel is
- * keyed to project+file, so both tabs share one Y.Doc over BroadcastChannel. Editor edits
- * (add/move items) fire the tool's change hook → the bridge → the peer tab.
+ * Read the opened file back from MEMFS (what the editor actually loaded) and
+ * parse it into the full `KicadDoc` (ysync 0007 `fileToDoc`). Used to seed the
+ * Y.Doc LOSSLESSLY when this client opens an empty room (ysync 0005): the doc
+ * then carries meta + layout + items, so the file is recoverable from the Y.Doc
+ * alone. Falls back to undefined (→ editor-snapshot seed, items only) when the
+ * file is absent or doesn't parse as a KiCad s-expr document.
+ */
+function seedDocFromMemfs(
+  win: ToolWindow,
+  slug: string,
+  targetPath?: string,
+): KicadDoc | undefined {
+  if (!targetPath) return undefined;
+  try {
+    const text = win.FS?.readFile(memfsFilePath(slug, targetPath), { encoding: "utf8" });
+    if (typeof text !== "string") return undefined;
+    return fileToDoc(text);
+  } catch (err) {
+    cwarn("seed: fileToDoc failed — falling back to editor-snapshot seed", err);
+    return undefined;
+  }
+}
+
+/**
+ * Collaborative editing (ysync 0008, Slot-model items wire), ON BY DEFAULT for any
+ * tool that has the collab bridge. Open the same project URL in two tabs to edit
+ * together: the channel is keyed to project+file, so both tabs share one Y.Doc over
+ * BroadcastChannel. Editor edits (add/move items) fire the tool's change hook → the
+ * bridge → the peer tab.
  *
  * Opt OUT with `?collab=0` (or `collab=false`). Tools without a bridge are skipped anyway.
  */
@@ -181,6 +208,7 @@ async function maybeStartCollab(
   win: ToolWindow,
   opts: {
     tool: Tool;
+    slug: string;
     projectId: string;
     targetPath?: string;
     log: (m: string) => void;
@@ -193,8 +221,8 @@ async function maybeStartCollab(
     collabParam,
     tool: opts.tool,
     hasModule: !!mod,
-    hasSnapshot: typeof mod?.kicadCollabSnapshot,
-    hasApply: typeof mod?.kicadCollabApply,
+    hasSnapshotItems: typeof mod?.kicadCollabSnapshotItems,
+    hasApplyItems: typeof mod?.kicadCollabApplyItems,
     url: win.location.href,
   });
 
@@ -207,23 +235,28 @@ async function maybeStartCollab(
     clog(`tool ${opts.tool} has no collab bridge — skipping`);
     return;
   }
-  if (typeof mod?.kicadCollabSnapshot !== "function") {
+  if (typeof mod?.kicadCollabSnapshotItems !== "function") {
     cwarn(
-      "BRIDGE NOT PRESENT: Module.kicadCollabSnapshot is",
-      typeof mod?.kicadCollabSnapshot,
-      `— the loaded ${opts.tool}.wasm predates the collab bridge. Rebuild + \`npm run setup:kicad\` and restart the dev server.`,
+      "BRIDGE NOT PRESENT: Module.kicadCollabSnapshotItems is",
+      typeof mod?.kicadCollabSnapshotItems,
+      `— the loaded ${opts.tool}.wasm predates the v2 items bridge (ysync 0008 Stage C). Rebuild + \`npm run setup:kicad\` and restart the dev server.`,
     );
     return;
   }
 
-  const { startCollab } = await import("@/wasm/collab");
+  const { startKicadCollab } = await import("@/wasm/collab");
   const provider = yjsProviderConfig();
   // One room per (project, document). Two tabs of the same build compute the
   // same id, so cross-tab BroadcastChannel still works; network providers use it
   // verbatim to namespace + persist (see @pcbjam/shared collabRoomId).
   const room = collabRoomId(opts.projectId, opts.targetPath ?? opts.tool);
-  clog("starting collab", provider.kind, "room", room);
-  await startCollab(mod, win as unknown as CollabWindow, { provider, room });
+  const seedDoc = seedDocFromMemfs(win, opts.slug, opts.targetPath);
+  clog("starting collab", provider.kind, "room", room, "seedDoc:", !!seedDoc);
+  await startKicadCollab(mod, win as unknown as KicadItemsWindow, {
+    provider,
+    room,
+    seedDoc,
+  });
   opts.log(`[collab] ${provider.kind} connected on ${room}`);
   opts.onStatus("Collab: connected");
   clog("connected ✓");
@@ -324,7 +357,7 @@ export function WasmTool({
           log: append,
           onStatus: setStatus,
         });
-        await maybeStartCollab(win, { tool, projectId, targetPath, log: append, onStatus: setStatus });
+        await maybeStartCollab(win, { tool, slug, projectId, targetPath, log: append, onStatus: setStatus });
       } catch (err) {
         append(`[fatal] ${String(err)}`);
         setStatus(`Error: ${String(err)}`);

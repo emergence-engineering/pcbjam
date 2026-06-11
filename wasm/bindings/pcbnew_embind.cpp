@@ -26,6 +26,8 @@
 #include <eda_text.h>
 #include <pcb_edit_frame.h>
 #include <kicad_clipboard.h>
+#include <io/kicad/kicad_io_utils.h>
+#include <richio.h>
 #include <tools/pcb_selection.h>
 #include <geometry/shape_poly_set.h>
 #include <geometry/shape_line_chain.h>
@@ -253,8 +255,52 @@ json itemToJson( BOARD_ITEM* aItem )
 
 // Serialize one live board item to a clipboard blob (used only for `added` payloads — NOT the
 // diff unit, so `changed`/`removed` stay light and the blob never drives change detection).
+//
+// Footprints DON'T go through SaveSelection: its "make safe to transfer" step copies the
+// footprint, and FOOTPRINT's copy ctor ASSIGNS the mandatory fields into the new footprint's
+// freshly-constructed ones (`*existingField = *field`; EDA_ITEM::operator= keeps the target's
+// uuid) — so Reference/Value/Datasheet/Description would carry NEW uuids in every blob,
+// breaking the wire's identity-by-uuid (every emit would read as field remove+add, and round
+// trips lose the field uuids). Instead we make the same safety copy ourselves, RESTORE the
+// mandatory-field uuids from the source, and Format it directly — the same Format machinery
+// SaveSelection uses internally, so asyncify behavior is identical.
 std::string blobForItem( BOARD* aBoard, BOARD_ITEM* aItem )
 {
+    if( aItem->Type() == PCB_FOOTPRINT_T )
+    {
+        const FOOTPRINT* src = static_cast<const FOOTPRINT*>( aItem );
+        FOOTPRINT        copy( *src );
+
+        for( PCB_FIELD* field : copy.GetFields() )
+        {
+            if( field->IsMandatory() )
+            {
+                if( const PCB_FIELD* srcField = src->GetField( field->GetId() ) )
+                    const_cast<KIID&>( field->m_Uuid ) = srcField->m_Uuid;
+            }
+        }
+
+        // The rest of SaveSelection's footprint safety steps, minus the refPoint move
+        // (the wire carries absolute positions).
+        for( PAD* pad : copy.Pads() )
+            pad->SetNetCode( 0 );
+
+        copy.SetLocked( false );
+
+        CLIPBOARD_IO     io;
+        STRING_FORMATTER fmt;
+        io.SetBoard( aBoard );
+        io.SetOutputFormatter( &fmt );
+        io.Format( &copy );
+
+        copy.SetParent( nullptr );
+        copy.SetParentGroup( nullptr );
+
+        std::string out = fmt.GetString();
+        KICAD_FORMAT::Prettify( out, KICAD_FORMAT::FORMAT_MODE::COMPACT_TEXT_PROPERTIES );
+        return out;
+    }
+
     PCB_SELECTION sel;
     sel.Add( aItem );                       // pointer-only insert; no mutation of the live item
 

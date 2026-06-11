@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import type { KicadDoc } from "@pcbjam/shared";
 import { clog } from "./debug";
 import {
   connectProvider,
@@ -55,6 +56,13 @@ export interface StartCollabOptions {
   provider: ProviderConfig;
   /** Room id — see @pcbjam/shared `collabRoomId`. Identifies one shared doc. */
   room: string;
+  /**
+   * The full `KicadDoc` parsed from the opened file (`fileToDoc`) — when the
+   * room is empty, the Y.Doc is seeded from THIS (meta + layout + items, so the
+   * file is recoverable from the doc alone — ysync 0005) instead of the editor
+   * snapshot. Ignored by the legacy scalar `startCollab`.
+   */
+  seedDoc?: KicadDoc;
 }
 
 export interface CollabHandle {
@@ -127,7 +135,7 @@ export async function startKicadCollab(
   const provider = await connectProvider(doc, opts.provider, { room: opts.room });
 
   await provider.whenSynced();
-  binding.seed();
+  binding.seed(opts.seedDoc);
   clog("startKicadCollab: ready; doc items =", binding.items.size);
 
   return {

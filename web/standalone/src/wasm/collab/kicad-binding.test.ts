@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import {
+  docToFile,
+  fileToDoc,
   itemsWireToDelta,
   parseItemsWireDelta,
   renderItem,
   sexprToItems,
+  yToDoc,
   type KicadItem,
 } from "@pcbjam/shared";
 import { bindKicadCollab, type KicadItemsBridge } from "./kicad-binding";
@@ -148,6 +151,61 @@ describe("bindKicadCollab — two editors over relayed Y.Docs", () => {
 
     expect(edB.store["fp-DIVERGENT"]).toBeUndefined(); // dropped
     expect(edB.store["fp-1"]).toBeDefined(); // adopted
+  });
+
+  it("seed(seedDoc) writes the FULL doc — file recoverable from the Y.Doc; peer adopts", () => {
+    const { a, edA, edB, bindA, bindB } = setup();
+    const file = `(kicad_wks (version 20220228) (generator "pl_editor")
+  (setup (textsize 1.5 1.5) (linewidth 0.15))
+  (rect (uuid "r-1") (name "border") (start 0 0 ltcorner) (end 0 0 rbcorner))
+)
+`;
+    const seedDoc = fileToDoc(file);
+    // Editor A opened the same file: its model holds the same flattened items.
+    Object.assign(edA.store, seedDoc.items);
+
+    bindA.seed(seedDoc); // empty room → file-seeds meta + layout + items
+    bindB.seed(); // joins → adopts
+
+    // The peer's editor received the items via adopt.
+    expect(edB.store["r-1"]).toBeDefined();
+    // Lossless: the file is recoverable from the Y.Doc ALONE (ysync 0005/0007),
+    // which the editor-snapshot seed (items only, no layout/meta) cannot do.
+    expect(docToFile(yToDoc(a))).toBe(docToFile(seedDoc));
+    // The file-seed must not have echoed an apply into the seeding editor.
+    expect(edA.applied.length).toBe(0);
+  });
+
+  it("seed(seedDoc) on a populated room still ADOPTS (doc authority wins over the file)", () => {
+    const { edA, edB, bindA, bindB } = setup();
+    seedEditor(edA, FP);
+    bindA.seed(); // A seeds the room from its editor
+
+    // B cold-opens a divergent copy of the file and offers it as seedDoc.
+    const fileB = `(kicad_wks (version 20220228)
+  (rect (uuid "fp-DIVERGENT") (name "border"))
+)
+`;
+    const seedDocB = fileToDoc(fileB);
+    Object.assign(edB.store, seedDocB.items);
+    bindB.seed(seedDocB);
+
+    expect(edB.store["fp-DIVERGENT"]).toBeUndefined(); // dropped
+    expect(edB.store["fp-1"]).toBeDefined(); // adopted
+  });
+
+  it("pre-seed remote state does NOT stream into the editor (adopt covers it)", () => {
+    const { edA, edB, bindA, bindB } = setup();
+    seedEditor(edA, FP);
+    bindA.seed(); // relays the full state into B's Y.Doc immediately
+
+    // B has NOT seeded yet: the initial state sync must not have been applied
+    // item-by-item (in the real app that's a redundant full blob apply into an
+    // editor that already opened the file).
+    expect(edB.applied.length).toBe(0);
+
+    bindB.seed(); // the adopt delivers the same state, once
+    expect(Object.keys(edB.store).sort()).toEqual(["fld-1", "fp-1", "pad-1"]);
   });
 
   it("destroy() detaches the editor from further remote changes", () => {

@@ -3,6 +3,7 @@ import {
   applyDeltaToY,
   deltaFromYEvents,
   deltaToItemsWire,
+  docToY,
   isEmptyItemsWireDelta,
   isEmptyKicadDelta,
   itemsWireToDelta,
@@ -11,6 +12,7 @@ import {
   renderItem,
   yToItem,
   type ItemsWireDelta,
+  type KicadDoc,
   type KicadItem,
   type KicadYItems,
 } from "@pcbjam/shared";
@@ -46,12 +48,15 @@ export interface KicadItemsBridge {
 
 export interface KicadBinding {
   /**
-   * Seed-once join: if the shared doc holds no items this client seeds it from
-   * the editor snapshot; otherwise the editor adopts the doc (doc authority —
-   * local-only roots are removed, doc roots applied). Call once after the
-   * doc/provider are connected.
+   * Seed-once join: if the shared doc holds no items this client seeds it —
+   * from `seedDoc` (the FULL `KicadDoc` parsed from the opened file via
+   * `fileToDoc`; writes meta + layout + items so `docToFile` can regenerate the
+   * file from the Y.Doc alone — ysync 0005/0007) when given, else from the
+   * editor snapshot (items only). Otherwise the editor adopts the doc (doc
+   * authority — local-only roots are removed, doc roots applied). Call once
+   * after the doc/provider are connected.
    */
-  seed(): void;
+  seed(seedDoc?: KicadDoc): void;
   destroy(): void;
   /** The underlying kdoc items map (exposed for tests/inspection). */
   readonly items: KicadYItems;
@@ -61,6 +66,12 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
   const items = kicadItemsMap(doc);
   // Opaque per-instance origin tag so we can distinguish our own writes from peers'.
   const ORIGIN = { local: true };
+  // Remote events arriving BEFORE seed() (e.g. the provider's initial state sync)
+  // must not stream into the editor item-by-item: the editor already holds the
+  // opened file, so that would be a redundant full-document blob apply (observed
+  // to trap eeschema's paste path in the real app). seed()'s adopt branch covers
+  // everything those early events contained.
+  let seeded = false;
 
   /** Plain snapshot of the Y items (the `current`/`view` the conversions need). */
   const itemsView = (): Record<string, KicadItem> => {
@@ -94,6 +105,7 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
   // (the runtime); the event→delta computation is the shared default impl.
   const observer = (events: Y.YEvent<Y.Map<unknown>>[], txn: Y.Transaction) => {
     if (txn.origin === ORIGIN) return; // our own echo — ignore
+    if (!seeded) return; // pre-seed state sync — seed()'s adopt covers it
     const delta = deltaFromYEvents(items, events);
     if (isEmptyKicadDelta(delta)) return;
     const wire = deltaToItemsWire(delta, itemsView());
@@ -107,7 +119,20 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
   };
   items.observeDeep(observer);
 
-  function seed(): void {
+  function seed(seedDoc?: KicadDoc): void {
+    seeded = true; // open the UP gate; everything below runs synchronously
+    if (items.size === 0 && seedDoc) {
+      // First tab, file-seeded: write the FULL doc (meta + layout + items) so
+      // the Y.Doc — not the editor snapshot — is the lossless source of truth
+      // (the file is recoverable via docToFile). The editor already opened the
+      // same file, so no applyItems is needed.
+      clog(
+        `seed: doc empty → SEEDING from file (${Object.keys(seedDoc.items).length} item(s), root ${seedDoc.root})`,
+      );
+      docToY(seedDoc, doc, ORIGIN);
+      return;
+    }
+
     let wire: ItemsWireDelta;
     try {
       wire = parseItemsWireDelta(bridge.snapshotItems());
@@ -123,7 +148,7 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
     );
 
     if (items.size === 0) {
-      // First tab: seed the shared doc from the editor model.
+      // First tab, no file source: seed the shared doc from the editor model.
       applyDeltaToY(doc, local, ORIGIN);
       return;
     }

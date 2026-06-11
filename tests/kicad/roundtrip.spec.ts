@@ -3,13 +3,14 @@ import { test, expect } from "./fixtures";
 import { sexprDiff } from "../../web/standalone/src/wasm/collab/sexpr-diff";
 
 /**
- * Round-trip integration tests (feature 0004): for each collab-capable, file-
- * bearing tool prove the Y.Doc representation is lossless —
+ * Round-trip integration tests (feature 0004; v2 items wire since ysync 0008
+ * Stage D): for each collab-capable, file-bearing tool prove the Y.Doc
+ * representation is lossless —
  *
  *   load a fixture file  →  save it (ORIG, normalized through the serializer)
- *   →  kicadCollabSnapshot (the yjs item representation)
+ *   →  kicadCollabSnapshotItems (per-item s-expr blobs, the Slot-model wire)
  *   →  RELOAD the page (fresh process-global wasm; boot.ts) → open an EMPTY doc
- *   →  kicadCollabApply(snapshot)  (rebuild the model purely from the yjs items)
+ *   →  kicadCollabApplyItems(snapshot)  (rebuild the model purely from the blobs)
  *   →  save (REGEN)
  *   →  assert sexprDiff(ORIG, REGEN).equal
  *
@@ -40,8 +41,8 @@ interface ToolCfg {
 
 type Mod = {
   kicadOpenFile(p: string): unknown;
-  kicadCollabSnapshot(): string;
-  kicadCollabApply(j: string): unknown;
+  kicadCollabSnapshotItems(): string;
+  kicadCollabApplyItems(j: string): unknown;
 } & Record<string, (p: string) => unknown>;
 type FS = {
   mkdirTree(p: string): void;
@@ -67,8 +68,8 @@ async function bootOpen(page: Page, cfg: ToolCfg, content: string, name: string)
       const m = (window as unknown as { Module?: Mod }).Module;
       return (
         typeof m?.kicadOpenFile === "function" &&
-        typeof m?.kicadCollabSnapshot === "function" &&
-        typeof m?.kicadCollabApply === "function" &&
+        typeof m?.kicadCollabSnapshotItems === "function" &&
+        typeof m?.kicadCollabApplyItems === "function" &&
         typeof m?.[saveFn] === "function"
       );
     },
@@ -131,16 +132,18 @@ async function roundTrip(
   const extract = await context.newPage();
   await bootOpen(extract, cfg, cfg.fixture, "rt");
   const orig = await saveRead(extract, cfg, "orig_dump");
-  const snap = await extract.evaluate(() => window.Module.kicadCollabSnapshot());
+  const snap = await extract.evaluate(() => window.Module.kicadCollabSnapshotItems());
   await extract.close();
 
-  const ids: string[] = JSON.parse(snap).added.map((i: { id: string }) => i.id);
+  // v2 wire: { added: [{ sexpr, parent }] } — uuids live inside the blobs.
+  const blobs: string[] = JSON.parse(snap).added.map((w: { sexpr: string }) => w.sexpr);
+  const ids = [...new Set(blobs.flatMap((s) => [...s.matchAll(/\(uuid "([^"]+)"\)/g)].map((m) => m[1]!)))];
   expect(ids.length, "fixture must contain uuid items").toBeGreaterThan(0);
 
   // 4–5: fresh page (fresh wasm), open an empty doc, rebuild the model from the snapshot.
   const rebuild = await context.newPage();
   await bootOpen(rebuild, cfg, cfg.empty, "rt");
-  await rebuild.evaluate((s) => window.Module.kicadCollabApply(s), snap);
+  await rebuild.evaluate((s) => window.Module.kicadCollabApplyItems(s), snap);
 
   // apply() runs async for eeschema/pcbnew (CallAfter + coroutine). Best-effort wait
   // for the first applied item to materialize — but DON'T fail here: proceed to save
@@ -268,6 +271,46 @@ const PCB: ToolCfg = {
   ignoreTokens: ["generator_version"],
 };
 
+// Footprint-only board: the v2 items wire's PROVEN pcbnew apply path (bare
+// footprint blob parse + children — the 0004 containment win). Kept separate
+// from PCB so the fragile-envelope types (via/text/segment, see the fixme
+// below) don't mask the passing footprint coverage.
+const PCB_FP: ToolCfg = {
+  ...PCB,
+  fixture: `(kicad_pcb
+	(version 20241229)
+	(generator "pcbnew")
+	(generator_version "9.0")
+	(general (thickness 1.6))
+	(paper "A4")
+	(layers
+		(0 "F.Cu" signal)
+		(2 "B.Cu" signal)
+		(37 "F.SilkS" user)
+		(25 "Edge.Cuts" user)
+	)
+	(setup)
+	(net 0 "")
+	(footprint "TestLib:R"
+		(layer "F.Cu")
+		(uuid "66666666-0000-0000-0000-000000000001")
+		(at 100 100)
+		(attr smd)
+		(property "Reference" "R1" (at 0 -4.2 0) (layer "F.SilkS") (uuid "66666666-0000-0000-0000-0000000000aa") (effects (font (size 1 1) (thickness 0.15))))
+		(property "Value" "R" (at 0 4.6 0) (layer "F.Fab") (uuid "66666666-0000-0000-0000-0000000000bb") (effects (font (size 1 1) (thickness 0.15))))
+		(fp_text user "HELLO" (at 0 0 0) (layer "F.SilkS") (uuid "66666666-0000-0000-0000-0000000000cc") (effects (font (size 1 1) (thickness 0.15))))
+	)
+	(footprint "TestLib:C"
+		(layer "F.Cu")
+		(uuid "99999999-0000-0000-0000-000000000009")
+		(at 50 50)
+		(attr smd)
+		(property "Reference" "C1" (at 0 -2 0) (layer "F.SilkS") (uuid "99999999-0000-0000-0000-0000000000aa") (effects (font (size 1 1) (thickness 0.15))))
+	)
+)
+`,
+};
+
 test.beforeAll(() => {
   // No reconciler bundle needed — the round trip drives only the C++ Module.*
   // exports (open / snapshot / apply / save).
@@ -298,15 +341,29 @@ test.describe("round trip: file → yjs → file", () => {
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
 
-  // KNOWN BRIDGE GAPS (0004 phase-4 findings — tracked, not test bugs). The harness
-  // boots, round-trips, and the comparator reports precisely what pcbnew's
-  // kicadCollabApply does NOT yet reconstruct from a snapshot:
-  //   - footprints + their fields are not recreated (FP removed entirely);
-  //   - a footprint-child fp_text comes back as a board gr_text at absolute position;
-  //   - segment `width` and via `size` are lost (default 0);
-  //   - zones are not reconstructed.
-  // Un-fixme as each apply converter lands. Run with --grep-invert skipped to see the
-  // live diff.
+  // THE 0004 CONTAINMENT WIN (ysync 0008 Stage C/D): footprints round-trip via the
+  // items wire — the bare-footprint blob parse recreates the footprint WITH its
+  // children (properties, fp_text) in place, which the scalar wire never could.
+  test("pcbnew preserves footprint containment through a yjs round trip", async ({
+    context,
+    testLogger,
+  }) => {
+    const { orig, regen } = await roundTrip(context, PCB_FP);
+    const diff = sexprDiff(orig, regen, { ignoreTokens: PCB_FP.ignoreTokens });
+    expect(
+      diff.equal,
+      `round trip lost data:\n${JSON.stringify(diff, null, 2)}`,
+    ).toBe(true);
+    expect(hasAbort(testLogger), "no WASM abort").toBe(false);
+  });
+
+  // REMAINING KNOWN GAP (ysync 0008 status, known limit 1 — tracked, not a test
+  // bug): pcbnew track/via/zone/text APPLY rides the `(kicad_pcb …)` envelope
+  // parse, the codebase's documented asyncify-fragile path (even a verbatim
+  // SaveSelection envelope for a segment dies silently in the commit). The full
+  // fixture (via + gr_text + segments) therefore still loses those items on the
+  // rebuild side. Un-fixme when the envelope parse is solved. Run with
+  // --grep-invert skipped to see the live diff.
   test.fixme(
     "pcbnew preserves items through a yjs round trip",
     async ({ context, testLogger }) => {

@@ -14,7 +14,7 @@ import type { ProviderConfig, ProviderKind } from "@/wasm/collab";
  * Which Yjs collab provider this deployment uses (one active per env), and its
  * endpoint/token. Defaults to `broadcastchannel` so a vanilla checkout keeps
  * the cross-tab-only behavior with no backend. Built here at the composition
- * root and passed into `startCollab`, so `wasm/collab` stays env-agnostic.
+ * root and passed into `startKicadCollab`, so `wasm/collab` stays env-agnostic.
  */
 export function yjsProviderConfig(): ProviderConfig {
   const kind = (import.meta.env.VITE_YJS_PROVIDER ?? "broadcastchannel") as ProviderKind;
