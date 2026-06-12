@@ -5,6 +5,10 @@ import {
   TOOL_ARGV0,
   TOOL_NEEDS_CONFIG_SEED,
 } from "./constants";
+import {
+  installSpikeLibsProvider,
+  SPIKE_LIB_TABLE_ROW,
+} from "./libs/spike-provider";
 
 /**
  * Boot a KiCad tool directly in the main React document — no iframe.
@@ -87,6 +91,9 @@ async function doBoot(opts: BootOptions): Promise<void> {
   // we must do the same or the wasm falls back to a hardcoded 1280x720 frame that
   // mismatches the viewport, breaking the whole AUI layout (toolbars/panels).
   (w as unknown as { mainWindow: HTMLElement }).mainWindow = container;
+
+  // libs 0002 spike: must exist before any plugin call can suspend on it.
+  installSpikeLibsProvider(log);
 
   onStatus("Downloading…");
 
@@ -174,9 +181,11 @@ async function doBoot(opts: BootOptions): Promise<void> {
         2,
       ),
     );
+    // libs 0002 spike: one remote lib row; the PCBJAM plugin resolves it
+    // through window.kicadLibs (installed in doBoot).
     writeIfAbsent(
       `${KICAD_CONFIG_DIR}/sym-lib-table`,
-      "(sym_lib_table\n  (version 7)\n)\n",
+      `(sym_lib_table\n  (version 7)\n${SPIKE_LIB_TABLE_ROW}\n)\n`,
     );
     writeIfAbsent(
       `${KICAD_CONFIG_DIR}/fp-lib-table`,
