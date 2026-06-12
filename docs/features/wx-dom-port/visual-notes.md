@@ -214,3 +214,24 @@ pre-consolidation tree, which failed identically):
       page.mouse. The minimal-app comprehensive spec drives the wxChoice
       through its native <select> (browsers own that popup; it cannot be
       coordinate-clicked).
+  29. wxClipboard::IsSupported suspended for up to 2 s per call
+      (EM_ASYNC_JS readText raced vs timeout) on KiCad's idle path;
+      overlapping suspensions clobber Asyncify.currData → "indirect call
+      to null"/"signature mismatch" storms after a document loads (bug 2
+      of features/async on main; fix was designed in May, landed now).
+      The predicate answers from the cache, else "Clipboard API
+      available".
+
+### Known-red kicad specs (asyncify scope, NOT this feature)
+
+The 10 file-loading kicad specs (load-pcb, pcbnew-collab, eeschema-collab,
+eeschema-ui Backspace/Delete/text-dialog) sit on the unfixed asyncify
+substrate: a single corrupting fault still fires at document load (fiber
+swap crossing the parked main loop — bug 3 / per-context currData
+authority in features/async designs A/B) and breaks subsequent keyboard
+and collab-commit processing. Bisect-verified pre-existing: eeschema
+binaries built from BOTH the pre-consolidation and post-consolidation wx
+trees fault identically; binary timing decides whether the race is lost,
+so any rebuild can flip these specs. They were red before this
+consolidation (the "31 passed" gates) and stay red after it; greening
+them is the async feature's exit criterion.
