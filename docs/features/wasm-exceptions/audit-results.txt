@@ -1,0 +1,135 @@
+{
+ "total": 636,
+ "trivial": 458,
+ "needs_review": 93,
+ "direct_suspend": 85
+}
+
+== per top-level dir (direct/review/trivial/infobar):
+  eeschema                 direct= 37 review= 17 trivial=127 infobar= 0
+  pcbnew                   direct= 32 review= 29 trivial=128 infobar= 0
+  common                   direct=  9 review= 35 trivial=126 infobar= 0
+  cvpcb                    direct=  3 review=  1 trivial=  0 infobar= 0
+  pcb_calculator           direct=  2 review=  0 trivial=  2 infobar= 0
+  kicad                    direct=  1 review=  1 trivial= 21 infobar= 0
+  pagelayout_editor        direct=  1 review=  1 trivial=  3 infobar= 0
+  scripting                direct=  0 review=  0 trivial=  1 infobar= 0
+  plugins                  direct=  0 review=  1 trivial=  4 infobar= 0
+  3d-viewer                direct=  0 review=  2 trivial=  6 infobar= 0
+  utils                    direct=  0 review=  4 trivial= 27 infobar= 0
+  libs                     direct=  0 review=  2 trivial=  7 infobar= 0
+  gerbview                 direct=  0 review=  0 trivial=  6 infobar= 0
+
+== top 25 unknown callees inside needs_review catches (freq):
+    4  clearOutlines
+    4  message
+    4  wxASSERT_MSG
+    4  handleException
+    4  tl::unexpected
+    3  wxLogFatalError
+    3  GetFullFilename
+    3  std::string
+    3  ReportMsg
+    3  line_at
+    3  positions
+    3  LIBRARY_PARSE_ERROR
+    3  move_push
+    3  wxRemoveFile
+    3  IsTooRecent
+    3  Contents
+    3  GetFieldValue
+    3  ToOrigString
+    3  SetValue
+    2  GetFilename
+    2  ClearShapes
+    2  GetFPIDAsString
+    2  wxString::FromUTF8
+    2  GetFormatName
+    2  nan
+
+== direct-suspend sites (85):
+  cvpcb/display_footprints_frame.cpp:310
+  cvpcb/cvpcb_mainframe.cpp:977
+  cvpcb/readwrite_dlgs.cpp:163
+  pcb_calculator/datafile_read_write.cpp:69
+  pcb_calculator/calculator_panels/panel_r_calculator.cpp:130
+  kicad/kicad_manager_frame.cpp:822
+  common/draw_panel_gal.cpp:325
+  common/draw_panel_gal.cpp:561
+  common/drawing_sheet/ds_data_model_io.cpp:100
+  common/drawing_sheet/ds_data_model_io.cpp:131
+  common/widgets/design_block_pane.cpp:121
+  common/widgets/design_block_pane.cpp:212
+  common/widgets/design_block_pane.cpp:315
+  common/widgets/design_block_pane.cpp:356
+  common/widgets/design_block_pane.cpp:418
+  pcbnew/load_select_footprint.cpp:378
+  pcbnew/pcb_base_frame.cpp:1111
+  pcbnew/pcb_base_frame.cpp:1239
+  pcbnew/pcb_edit_frame.cpp:2209
+  pcbnew/files.cpp:670
+  pcbnew/files.cpp:678
+  pcbnew/files.cpp:689
+  pcbnew/files.cpp:1024
+  pcbnew/files.cpp:1108
+  pcbnew/footprint_libraries_utils.cpp:198
+  pcbnew/footprint_libraries_utils.cpp:288
+  pcbnew/footprint_libraries_utils.cpp:401
+  pcbnew/footprint_libraries_utils.cpp:545
+  pcbnew/footprint_libraries_utils.cpp:613
+  pcbnew/footprint_libraries_utils.cpp:673
+  pcbnew/footprint_libraries_utils.cpp:817
+  pcbnew/pcb_design_block_utils.cpp:107
+  pcbnew/pcb_design_block_utils.cpp:168
+  pcbnew/pcb_design_block_utils.cpp:198
+  pcbnew/pcb_design_block_utils.cpp:226
+  pcbnew/pcb_design_block_utils.cpp:332
+  pcbnew/pcb_design_block_utils.cpp:429
+  pcbnew/pcb_draw_panel_gal.cpp:781
+  pcbnew/tools/board_editor_control.cpp:751
+  pcbnew/tools/footprint_editor_control.cpp:529
+  pcbnew/tools/pcb_control.cpp:1990
+  pcbnew/netlist_reader/netlist.cpp:74
+  pcbnew/exporters/export_idf.cpp:662
+  pcbnew/exporters/export_idf.cpp:670
+  pcbnew/dialogs/dialog_board_setup.cpp:385
+  pcbnew/specctra_import_export/specctra_import.cpp:71
+  pcbnew/widgets/pcb_design_block_preview_widget.cpp:191
+  eeschema/project_rescue.cpp:671
+  eeschema/project_rescue.cpp:819
+  eeschema/sch_draw_panel.cpp:200
+  eeschema/project_sch.cpp:108
+  eeschema/project_sch.cpp:122
+  eeschema/sch_design_block_utils.cpp:139
+  eeschema/sch_design_block_utils.cpp:179
+  eeschema/sch_design_block_utils.cpp:222
+  eeschema/sch_design_block_utils.cpp:364
+  eeschema/sch_design_block_utils.cpp:446
+  eeschema/sch_design_block_utils.cpp:526
+  eeschema/sch_edit_frame.cpp:1528
+  eeschema/sch_base_frame.cpp:96
+  eeschema/sheet.cpp:231
+  eeschema/files-io.cpp:356
+  eeschema/files-io.cpp:365
+  eeschema/files-io.cpp:374
+  eeschema/files-io.cpp:911
+  eeschema/files-io.cpp:1410
+  eeschema/files-io.cpp:1423
+  eeschema/symbol_library_manager.cpp:376
+  eeschema/symbol_library_manager.cpp:553
+  eeschema/tools/sch_editor_control.cpp:569
+  eeschema/tools/sch_editor_control.cpp:1703
+  eeschema/dialogs/dialog_edit_symbols_libid.cpp:742
+  eeschema/dialogs/dialog_sheet_properties.cpp:597
+  eeschema/dialogs/dialog_sim_model.cpp:1526
+  eeschema/dialogs/dialog_bom.cpp:361
+  eeschema/sim/spice_simulator.cpp:44
+  eeschema/sim/spice_value.cpp:415
+  eeschema/sim/simulator_frame_ui.cpp:1672
+  eeschema/symbol_editor/symbol_editor.cpp:170
+  eeschema/symbol_editor/symbol_editor.cpp:236
+  eeschema/symbol_editor/symbol_editor.cpp:1147
+  eeschema/symbol_editor/symbol_editor.cpp:1187
+  eeschema/symbol_editor/symbol_editor_import_export.cpp:104
+  eeschema/symbol_editor/symbol_editor_import_export.cpp:110
+  pagelayout_editor/tools/pl_edit_tool.cpp:531
