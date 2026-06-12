@@ -418,6 +418,16 @@ export function WasmTool({
     const { proceed } = oom.start();
     if (!proceed) return;
 
+    // Cmd/Ctrl+S belongs to the editor: preventDefault suppresses ONLY the
+    // browser's "save page" dialog (observed in Firefox) — the keydown still
+    // propagates to the wx canvas handler, which performs the actual save.
+    const swallowBrowserSave = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+      }
+    };
+    win.addEventListener("keydown", swallowBrowserSave, true);
+
     void (async () => {
       try {
         await bootKicadTool({
@@ -469,7 +479,10 @@ export function WasmTool({
       }
     })();
 
-    return () => oom.stop();
+    return () => {
+      win.removeEventListener("keydown", swallowBrowserSave, true);
+      oom.stop();
+    };
     // Boot is one-shot per mount; deps intentionally exclude files/targetPath so
     // they don't retrigger a (rejected) second boot.
     // eslint-disable-next-line react-hooks/exhaustive-deps

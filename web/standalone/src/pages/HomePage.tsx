@@ -1,24 +1,18 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
-import {
-  EXTENSION_TOOL,
-  FILELESS_TOOLS,
-  TOOL_LABELS,
-  TOOLS,
-  type Tool,
-} from "@pcbjam/shared";
+import type { Tool } from "@pcbjam/shared";
 import { FolderOpen, Loader2 } from "lucide-react";
 import { useProjects } from "@/lib/api";
 import { downloadBytes } from "@/lib/download";
 import { Button } from "@/components/ui/button";
-import type { ToolFile } from "@/wasm/kicad-runner";
 import type { SaveBytes } from "@/wasm/save-flow";
+import { LocalProjectView, type LocalFile } from "@/components/LocalProjectView";
 import { WasmTool } from "@/components/WasmTool";
 
 /** A KiCad project picked from the local filesystem (no backend involved). */
 interface LocalProject {
   name: string;
-  files: ToolFile[];
+  files: LocalFile[];
   fetchBytes: (relPath: string) => Promise<Uint8Array>;
   /**
    * Where editor saves land: write-back through File System Access handles
@@ -26,22 +20,6 @@ interface LocalProject {
    * (webkitdirectory fallback — its FileList grants no write access).
    */
   saveBytes: SaveBytes;
-  defaultTool?: Tool;
-  defaultTarget?: string;
-}
-
-function toolForPath(path: string): Tool | null {
-  const dot = path.lastIndexOf(".");
-  if (dot < 0) return null;
-  return EXTENSION_TOOL[path.slice(dot).toLowerCase()] ?? null;
-}
-
-function defaultOpenTarget(files: ToolFile[]): { defaultTool?: Tool; defaultTarget?: string } {
-  for (const { path } of files) {
-    const tool = toolForPath(path);
-    if (tool) return { defaultTool: tool, defaultTarget: path };
-  }
-  return {};
 }
 
 /**
@@ -51,18 +29,22 @@ function defaultOpenTarget(files: ToolFile[]): { defaultTool?: Tool; defaultTarg
  */
 async function buildFsaProject(root: FileSystemDirectoryHandle): Promise<LocalProject> {
   const handles = new Map<string, FileSystemFileHandle>();
+  const files: LocalFile[] = [];
   async function walk(dir: FileSystemDirectoryHandle, prefix: string): Promise<void> {
     for await (const [name, handle] of dir.entries()) {
-      if (handle.kind === "file") handles.set(prefix + name, handle as FileSystemFileHandle);
-      else await walk(handle as FileSystemDirectoryHandle, `${prefix}${name}/`);
+      if (handle.kind === "file") {
+        const fh = handle as FileSystemFileHandle;
+        handles.set(prefix + name, fh);
+        files.push({ path: prefix + name, size: (await fh.getFile()).size });
+      } else {
+        await walk(handle as FileSystemDirectoryHandle, `${prefix}${name}/`);
+      }
     }
   }
   await walk(root, "");
-  const files: ToolFile[] = [...handles.keys()].map((path) => ({ path }));
   return {
     name: root.name,
     files,
-    ...defaultOpenTarget(files),
     fetchBytes: async (relPath) => {
       const handle = handles.get(relPath);
       if (!handle) throw new Error(`local file not found: ${relPath}`);
@@ -98,11 +80,13 @@ function buildLocalProject(fileList: FileList): LocalProject {
     const rel = f.webkitRelativePath || f.name;
     map.set(rel.startsWith(topPrefix) ? rel.slice(topPrefix.length) : rel, f);
   }
-  const files: ToolFile[] = [...map.keys()].map((path) => ({ path }));
+  const files: LocalFile[] = [...map.entries()].map(([path, f]) => ({
+    path,
+    size: f.size,
+  }));
   return {
     name: topPrefix ? topPrefix.slice(0, -1) : "local",
     files,
-    ...defaultOpenTarget(files),
     fetchBytes: async (relPath) => {
       const f = map.get(relPath);
       if (!f) throw new Error(`local file not found: ${relPath}`);
@@ -117,8 +101,9 @@ export function HomePage() {
   const { data: projects, isLoading, error } = useProjects();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [local, setLocal] = React.useState<LocalProject | null>(null);
-  const [tool, setTool] = React.useState<Tool | "">("");
-  const [launched, setLaunched] = React.useState(false);
+  const [launched, setLaunched] = React.useState<{ tool: Tool; target?: string } | null>(
+    null,
+  );
 
   // <input webkitdirectory> is non-standard; set it imperatively.
   React.useEffect(() => {
@@ -127,17 +112,28 @@ export function HomePage() {
 
   // Once launched, the WASM runtime is process-global and one-shot for this page
   // load — render the editor full-screen and nothing else (no going back).
-  if (launched && local && tool) {
-    const target = tool === local.defaultTool ? local.defaultTarget : undefined;
+  if (local && launched) {
     return (
       <WasmTool
-        tool={tool}
+        tool={launched.tool}
         slug="local"
         projectId="local"
         files={local.files}
-        targetPath={FILELESS_TOOLS.has(tool) ? undefined : target}
+        targetPath={launched.target}
         fetchBytes={local.fetchBytes}
         saveBytes={local.saveBytes}
+      />
+    );
+  }
+
+  // Folder picked but no tool launched yet: the local twin of ProjectView.
+  if (local) {
+    return (
+      <LocalProjectView
+        name={local.name}
+        files={local.files}
+        onOpen={(tool, path) => setLaunched({ tool, target: path })}
+        onBack={() => setLocal(null)}
       />
     );
   }
@@ -170,9 +166,7 @@ export function HomePage() {
                 } catch {
                   return; // user cancelled the picker / denied write access
                 }
-                const proj = await buildFsaProject(root);
-                setLocal(proj);
-                setTool(proj.defaultTool ?? "");
+                setLocal(await buildFsaProject(root));
               })();
             }}
           >
@@ -189,34 +183,9 @@ export function HomePage() {
             onChange={(e) => {
               const fl = e.target.files;
               if (!fl || fl.length === 0) return;
-              const proj = buildLocalProject(fl);
-              setLocal(proj);
-              setTool(proj.defaultTool ?? "");
+              setLocal(buildLocalProject(fl));
             }}
           />
-        )}
-
-        {local && (
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <span className="text-sm text-muted-foreground">
-              {local.files.length} files
-            </span>
-            <select
-              className="rounded-md border px-2 py-1.5 text-sm"
-              value={tool}
-              onChange={(e) => setTool(e.target.value as Tool)}
-            >
-              <option value="">Select a tool…</option>
-              {TOOLS.map((t) => (
-                <option key={t} value={t}>
-                  {TOOL_LABELS[t]}
-                </option>
-              ))}
-            </select>
-            <Button disabled={!tool} onClick={() => setLaunched(true)}>
-              Open editor
-            </Button>
-          </div>
         )}
       </section>
 
