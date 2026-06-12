@@ -15,7 +15,16 @@
  */
 
 export const SPIKE_LIB_NICKNAME = "pcbjam-spike";
-export const SPIKE_LIB_URI = "pcbjam://spike";
+
+/**
+ * pcbjam lib URIs are absolute POSIX paths under this prefix. Absolute so that
+ * KiCad's lib-table URI expansion (ExpandURI -> wxFileName::MakeAbsolute) is a
+ * no-op and the path reaches the plugin/provider unmangled — a "scheme://" URI
+ * gets rewritten to "/scheme:/..." against the cwd, which differs per project.
+ */
+export const PCBJAM_LIB_MOUNT = "/mnt/pcbjam";
+export const PCBJAM_LIB_PREFIX = `${PCBJAM_LIB_MOUNT}/`;
+export const SPIKE_LIB_URI = `${PCBJAM_LIB_PREFIX}spike`;
 
 /** sym-lib-table row seeded at boot (see boot.ts seedKicadConfig). */
 export const SPIKE_LIB_TABLE_ROW = `  (lib (name "${SPIKE_LIB_NICKNAME}")(type "PCBJAM")(uri "${SPIKE_LIB_URI}")(options "")(descr "pcbjam libs 0002 spike"))`;
@@ -84,16 +93,11 @@ function artificialDelayMs(): number {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * KiCad's lib-table path handling normalizes URIs as if they were file paths:
- * "pcbjam://spike" arrives as "/pcbjam:/spike" or even
- * "<project-dir>/pcbjam:/spike" (made absolute against the cwd). Recover the
- * lib id after the "pcbjam:" marker. Finding for 0003: give the real plugin a
- * path shape that survives normalization, or normalize C++-side.
- */
-function libIdFromMangledUri(lib: string): string | null {
-  const m = lib.match(/pcbjam:\/*(.+)$/);
-  return m ? m[1] : null;
+/** Recover the lib id from a "/mnt/pcbjam/<id>" URI (arrives unmangled). */
+function libIdFromUri(lib: string): string | null {
+  return lib.startsWith(PCBJAM_LIB_PREFIX)
+    ? lib.slice(PCBJAM_LIB_PREFIX.length)
+    : null;
 }
 
 export function installSpikeLibsProvider(log: (msg: string) => void): void {
@@ -104,7 +108,7 @@ export function installSpikeLibsProvider(log: (msg: string) => void): void {
   const request: KicadLibsRequest = async (op, lib, arg) => {
     log(`[libs] request op=${op} lib=${lib} arg=${arg} (delay=${delay}ms)`);
 
-    if (libIdFromMangledUri(lib) !== "spike") return null;
+    if (libIdFromUri(lib) !== "spike") return null;
     if (delay) await sleep(delay);
 
     switch (op) {

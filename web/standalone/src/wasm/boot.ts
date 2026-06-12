@@ -7,6 +7,7 @@ import {
 } from "./constants";
 import {
   installSpikeLibsProvider,
+  PCBJAM_LIB_MOUNT,
   SPIKE_LIB_TABLE_ROW,
 } from "./libs/spike-provider";
 
@@ -163,6 +164,10 @@ async function doBoot(opts: BootOptions): Promise<void> {
   const seedKicadConfig = () => {
     const FS = moduleFS();
     FS.mkdirTree(KICAD_CONFIG_DIR);
+    // libs: the mount point that pcbjam lib URIs (/mnt/pcbjam/<lib>) live under.
+    // A real dir so any incidental existence check on the URI passes; the lib
+    // contents themselves are served virtually via window.kicadLibs.
+    FS.mkdirTree(PCBJAM_LIB_MOUNT);
     const writeIfAbsent = (path: string, contents: string) => {
       if (FS.analyzePath(path).exists) return;
       FS.writeFile(path, contents);
