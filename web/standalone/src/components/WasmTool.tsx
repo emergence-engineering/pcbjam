@@ -12,7 +12,12 @@ import {
   type Tool,
 } from "@pcbjam/shared";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { WASM_ASSET_BASE_URL, yjsProviderConfig, type DocSource } from "@/lib/config";
+import {
+  libsSourceConfig,
+  WASM_ASSET_BASE_URL,
+  yjsProviderConfig,
+  type DocSource,
+} from "@/lib/config";
 import { bootKicadTool } from "@/wasm/boot";
 import { memfsFilePath, memfsProjectDir } from "@/wasm/constants";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
@@ -437,6 +442,7 @@ export function WasmTool({
           log: append,
           onStatus: setStatus,
           onAbort: oom.onAbort,
+          libsSource: libsSourceConfig(),
         });
         // Register the save sink before the file opens: from here on, every
         // editor File→Save (MEMFS write) is routed onward through saveBytes.

@@ -19,6 +19,13 @@ import {
   type Project,
   type ProjectFile,
 } from "@pcbjam/shared";
+import {
+  itemBodyPath,
+  type LibsConfig,
+  libsConfig,
+  listLibItems,
+  listLibs,
+} from "./libs.js";
 
 const PROJECT_DIR = path.resolve(
   process.cwd(),
@@ -121,6 +128,8 @@ async function main(): Promise<void> {
   });
   app.get("/health", async () => ({ ok: true }));
 
+  const libs: LibsConfig = libsConfig();
+
   const s = initServer();
   const router = s.router(contract, {
     listProjects: async () => ({ status: 200, body: [await project()] }),
@@ -139,8 +148,32 @@ async function main(): Promise<void> {
       }
       return { status: 200 as const, body: await walk(PROJECT_DIR) };
     },
+    listLibs: async () => ({ status: 200 as const, body: await listLibs(libs) }),
+    listLibItems: async ({ params }) => {
+      const items = await listLibItems(libs, params.lib);
+      if (items === null) {
+        return { status: 404 as const, body: { message: "library not found" } };
+      }
+      return { status: 200 as const, body: items };
+    },
   });
   await app.register(s.plugin(router));
+
+  // Streamed item-body fetch (text; intentionally not a ts-rest endpoint).
+  app.get<{ Params: { lib: string; kind: string; name: string } }>(
+    "/api/libs/:lib/items/:kind/:name",
+    async (req, reply) => {
+      const abs = itemBodyPath(libs, req.params.lib, req.params.kind, req.params.name);
+      if (!abs) return reply.code(400).send({ message: "invalid item" });
+      const st = await fs.stat(abs).catch(() => null);
+      if (!st?.isFile()) {
+        return reply.code(404).send({ message: "item not found" });
+      }
+      reply.header("Content-Type", "text/plain; charset=utf-8");
+      reply.header("Content-Length", st.size);
+      return reply.send(createReadStream(abs));
+    },
+  );
 
   // Streamed file-byte download (binary; intentionally not a ts-rest endpoint).
   app.get<{ Params: { project: string; "*": string } }>(

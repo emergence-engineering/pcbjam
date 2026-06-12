@@ -5,11 +5,8 @@ import {
   TOOL_ARGV0,
   TOOL_NEEDS_CONFIG_SEED,
 } from "./constants";
-import {
-  installSpikeLibsProvider,
-  PCBJAM_LIB_MOUNT,
-  SPIKE_LIB_TABLE_ROW,
-} from "./libs/spike-provider";
+import { buildSymLibTable, installLibsProvider, type LibsSource } from "./libs/source";
+import { PCBJAM_LIB_MOUNT } from "./libs/uri";
 
 /**
  * Boot a KiCad tool directly in the main React document — no iframe.
@@ -45,6 +42,9 @@ export interface BootOptions {
   /** OOM recovery hook (feature 0002): emscripten `abort()` routes here so a
    *  soft OOM can respawn a fresh tab. Optional — boot works without it. */
   onAbort?: (what: string) => void;
+  /** Library source backing `window.kicadLibs`. Null/omitted disables libs
+   *  (an empty sym-lib-table is seeded). Its libs become sym-lib-table rows. */
+  libsSource?: LibsSource | null;
 }
 
 let booted: { tool: Tool; promise: Promise<void> } | null = null;
@@ -83,7 +83,7 @@ function loadScript(src: string): Promise<void> {
 }
 
 async function doBoot(opts: BootOptions): Promise<void> {
-  const { tool, base, container, log, onStatus, onAbort } = opts;
+  const { tool, base, container, log, onStatus, onAbort, libsSource } = opts;
   const w = window as ToolWindow;
 
   // The wasm reads the top-level frame geometry from a GLOBAL `mainWindow`
@@ -93,8 +93,21 @@ async function doBoot(opts: BootOptions): Promise<void> {
   // mismatches the viewport, breaking the whole AUI layout (toolbars/panels).
   (w as unknown as { mainWindow: HTMLElement }).mainWindow = container;
 
-  // libs 0002 spike: must exist before any plugin call can suspend on it.
-  installSpikeLibsProvider(log);
+  // libs: install the provider (must exist before any plugin call can suspend
+  // on it) and generate the sym-lib-table from the source's libs — both before
+  // the wasm boots (the table is seeded in preRun below). No source → empty
+  // table, libs disabled.
+  let symLibTable = "(sym_lib_table\n  (version 7)\n)\n";
+  if (libsSource) {
+    installLibsProvider(libsSource, log);
+    try {
+      const libsList = await libsSource.listLibs();
+      symLibTable = buildSymLibTable(libsList);
+      log(`[libs] seeded ${libsList.length} lib(s) into sym-lib-table`);
+    } catch (e) {
+      log(`[libs] listLibs failed, seeding empty table: ${String(e)}`);
+    }
+  }
 
   onStatus("Downloading…");
 
@@ -186,12 +199,9 @@ async function doBoot(opts: BootOptions): Promise<void> {
         2,
       ),
     );
-    // libs 0002 spike: one remote lib row; the PCBJAM plugin resolves it
-    // through window.kicadLibs (installed in doBoot).
-    writeIfAbsent(
-      `${KICAD_CONFIG_DIR}/sym-lib-table`,
-      `(sym_lib_table\n  (version 7)\n${SPIKE_LIB_TABLE_ROW}\n)\n`,
-    );
+    // libs: rows generated in doBoot from the lib source; the PCBJAM plugin
+    // resolves each via window.kicadLibs.
+    writeIfAbsent(`${KICAD_CONFIG_DIR}/sym-lib-table`, symLibTable);
     writeIfAbsent(
       `${KICAD_CONFIG_DIR}/fp-lib-table`,
       "(fp_lib_table\n  (version 7)\n)\n",

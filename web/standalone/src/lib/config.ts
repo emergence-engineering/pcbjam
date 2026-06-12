@@ -9,6 +9,9 @@ export const WASM_ASSET_BASE_URL =
   import.meta.env.VITE_WASM_ASSET_BASE_URL ?? "/wasm";
 
 import type { ProviderConfig, ProviderKind } from "@/wasm/collab";
+import { remoteLibsSource } from "@/wasm/libs/remote-source";
+import type { LibsSource } from "@/wasm/libs/source";
+import { staticLibsSource } from "@/wasm/libs/static-source";
 
 /**
  * Which Yjs collab provider this deployment uses (one active per env), and its
@@ -42,4 +45,19 @@ export type DocSource = "api" | "ydoc";
 
 export function docSourceConfig(): DocSource {
   return import.meta.env.VITE_DOC_SOURCE === "ydoc" ? "ydoc" : "api";
+}
+
+/**
+ * Which library source backs the editor's symbol chooser (env `VITE_LIBS_SOURCE`):
+ *   "remote" (default) — fetch from the backend at `API_BASE_URL` over the
+ *                        shared contract (origins served by the registry, or the
+ *                        GPL example backend).
+ *   "static"           — built-in offline example symbols (no backend).
+ *   "off"              — disable libs (empty sym-lib-table).
+ */
+export function libsSourceConfig(): LibsSource | null {
+  const kind = import.meta.env.VITE_LIBS_SOURCE ?? "remote";
+  if (kind === "off") return null;
+  if (kind === "static") return staticLibsSource();
+  return remoteLibsSource(API_BASE_URL);
 }
