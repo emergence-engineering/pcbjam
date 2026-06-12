@@ -39,6 +39,7 @@ or **hang** (a swap unwinds but is never rewound).
 | [`04-decisions-tests-open-questions.md`](04-decisions-tests-open-questions.md) | How the fix options relate (what's subsumed vs. genuinely separate), the one diagnostic that decides scope, the combinatorial test matrix, and open questions. |
 | [`05-design-a-js-asyncify-arbiter.md`](05-design-a-js-asyncify-arbiter.md) | Incremental design: keep current `EM_ASYNC_JS` sleeps and fibers, but put one JS arbiter in charge of `currData`, transition queueing, and the trampoline. Includes concept explanations. |
 | [`06-design-b-fiber-first-runtime.md`](06-design-b-fiber-first-runtime.md) | Cleaner long-term design: make modals, clipboard, fonts, nested loops, and tools all scheduler-owned fiber-like contexts. Explains how this relates to de-parking and app lifetime. |
+| [`07-decisions-and-outcome.md`](07-decisions-and-outcome.md) | **What was decided and shipped (2026-06-12):** root cause, red-green ledger, the arbiter NOT built and why, roads not taken with revisit triggers. |
 
 ## The single decisive next step
 
@@ -47,3 +48,32 @@ Before designing anything, **measure whether `Asyncify.currData` is clean (null)
 post-startup `emscripten_fiber_swap`). That one fact determines whether the universal fix must
 also reshape the main loop ("de-parking") or whether a per-context `currData` authority alone
 suffices. Details in [`04-decisions-tests-open-questions.md`](04-decisions-tests-open-questions.md).
+
+---
+
+## RESOLUTION (2026-06-12) — see [`07-decisions-and-outcome.md`](07-decisions-and-outcome.md) and `docs/features/asyncify-arbiter/`
+
+The decisive measurement was answered **by code trace and then pinned by a deterministic
+test** (`tests/asyncify/asyncify-races.spec.ts` + `tests/apps/standalone/asyncify-races/`):
+
+- At the park throw, Asyncify state IS clean (`currData==null`, `state==Normal`) — **but the
+  JS stack is necessarily still inside `Fibers.trampoline()`'s `do/while`** (any OnInit-era
+  fiber swap means main is trampoline-resumed from then on). The throw skips the
+  `trampolineRunning = false` reset → the guard wedges → the first post-idle swap hangs.
+  That IS the §5 hang; "orphaned currData" (mechanism #1) is structurally impossible.
+  The self-heal (`inject-dyncall-shims.sh` §3c, commit `18a9de0`) is therefore the
+  *structural cure*, not a band-aid — **no de-parking needed**.
+- When main's last pre-park suspension is a *sleep*, the same throw instead escapes through
+  the sleep's wakeUp promise reaction → the long-mystifying `uncaught exception: unwind`
+  rejections. Fixed in `scripts/common/shims/handlesleep.js` (catches the sentinel like
+  `callMain` does).
+- The full Design-A arbiter was NOT needed: at production semantics (`-sASSERTIONS=0`),
+  out-of-order and overlapping-sleep scenarios are already handled by the per-sleep buffer
+  capture in `handlesleep.js`. The remaining bugs were wx-layer: single-slot
+  `Module._endModal` broke 3-deep nested modals (now a LIFO resolver stack), and the
+  modal/nested-loop pumps stalled silently on ProcessEvents rejection (now resolve-on-error).
+  Clipboard `IsSupported` no longer runs the 2 s async probe.
+- De-parking (02 §7) and Design B remain documented options, unneeded for correctness today.
+- Upstream status (researched): the Fibers/Asyncify code is unchanged since 2020; the
+  single-slot family is WONTFIX (#9153, #12270, #13302, #16291, #18412). The trampoline
+  try/finally would be a good upstream PR.

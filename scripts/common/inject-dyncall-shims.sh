@@ -122,7 +122,11 @@ echo "Total: Fixed $TOTAL_FIXED empty callback(s)"
 
 # --- 3. Nested-Asyncify handleSleep fix ---------------------------------------
 # Injected after Emscripten's fiber glue (the _emscripten_fiber_swap.isAsync marker).
-if grep -q '__nestedHandleSleepInstalled' "$JS_FILE"; then
+# SHIM_DISABLE_HANDLESLEEP=1 skips it: used by the asyncify-races red-green harness
+# to keep the historical "sleep buffer clobbered by fiber swap" crash reproducible.
+if [ "${SHIM_DISABLE_HANDLESLEEP:-0}" = "1" ]; then
+    echo "handleSleep fix DISABLED (SHIM_DISABLE_HANDLESLEEP=1) - ablation build"
+elif grep -q '__nestedHandleSleepInstalled' "$JS_FILE"; then
     echo "handleSleep fix already present - skipping"
 else
     HS_MARKER=$(grep -n '^_emscripten_fiber_swap\.isAsync = true;$' "$JS_FILE" | head -1 | cut -d: -f1)
@@ -163,7 +167,12 @@ fi
 # so every later fiber swap silently fails to switch — the schematic load and all
 # post-idle tool actions hang. Wrap the loop in try/finally so the flag is always
 # reset (self-healing).
-if grep -qF '} finally { Fibers.trampolineRunning = false; }' "$JS_FILE"; then
+# SHIM_DISABLE_TRAMPOLINE_HEAL=1 skips it: used by the asyncify-races red-green
+# harness to keep the historical "park throw wedges the trampoline guard" hang
+# reproducible.
+if [ "${SHIM_DISABLE_TRAMPOLINE_HEAL:-0}" = "1" ]; then
+    echo "fiber trampoline self-heal DISABLED (SHIM_DISABLE_TRAMPOLINE_HEAL=1) - ablation build"
+elif grep -qF '} finally { Fibers.trampolineRunning = false; }' "$JS_FILE"; then
     echo "fiber trampoline self-heal already present - skipping"
 elif grep -qF 'Fibers.trampolineRunning = true;' "$JS_FILE"; then
     perl -0pi -e 's/(Fibers\.trampolineRunning = true;)(\s*)(do \{.*?\} while \(Fibers\.nextFiber\);)(\s*)(Fibers\.trampolineRunning = false;)/$1$2try {$3} finally { $5 }/s' "$JS_FILE"

@@ -509,7 +509,7 @@ test.describe('PCBnew WASM', () => {
 
         const realErrors = testLogger.errors
             .slice(baselineErrorCount)
-            .filter((error) => !error.includes('favicon') && !error.includes('uncaught exception: unwind'));
+            .filter((error) => !error.includes('favicon'));
         expect(realErrors).toEqual([]);
     });
 });

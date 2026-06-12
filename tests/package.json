@@ -36,7 +36,9 @@
     "test:gerbview": "npm run test:gerbview:firefox",
     "test:gerbview:headed": "npm run test:gerbview:chrome",
     "test:coroutine:firefox": "playwright test --config=playwright-coroutine.config.ts --project=firefox",
-    "test:coroutine:chrome": "playwright test --config=playwright-coroutine.config.ts --project=chromium --headed"
+    "test:coroutine:chrome": "playwright test --config=playwright-coroutine.config.ts --project=chromium --headed",
+    "test:asyncify:firefox": "playwright test --config=playwright-asyncify.config.ts --project=firefox",
+    "test:asyncify:chrome": "playwright test --config=playwright-asyncify.config.ts --project=chromium --headed"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",

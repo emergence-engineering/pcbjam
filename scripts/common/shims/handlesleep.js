@@ -52,7 +52,20 @@ if (typeof Asyncify !== "undefined") {
               Asyncify.currData = sleepCtx.capturedData;
             }
             cleanup();
-            return wakeUp(result);
+            try {
+              return wakeUp(result);
+            } catch (e) {
+              // emscripten_set_main_loop(...,1) parks main() by throwing the
+              // "unwind" sentinel. When main's LAST pre-park suspension was a
+              // sleep, main is resumed from THIS wakeUp, so the sentinel
+              // propagates here instead of into callMain's catch — surfacing as
+              // an uncaught "unwind" promise rejection. Swallow it exactly like
+              // callMain/handleException do on the direct path.
+              if (e === "unwind") {
+                return;
+              }
+              throw e;
+            }
           });
         });
       } catch (e) {

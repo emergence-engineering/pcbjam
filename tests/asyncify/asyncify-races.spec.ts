@@ -1,0 +1,259 @@
+import { test, expect, tryLoadApp } from '../e2e/utils/fixtures';
+
+// Red-green specs for the Asyncify race-condition harness
+// (tests/apps/standalone/asyncify-races/races_test.cpp — see docs/features/async/).
+//
+// Two kinds of tests here:
+//  - GREEN-target tests assert the desired end state (clean pass, clean console).
+//    While a fix is missing they FAIL — that failing run is the recorded "red".
+//  - ABLATION tests run the shim-ablated builds (races_test_noheal.js /
+//    races_test_nosleepfix.js) and assert the historical bug REPRODUCES.
+//    They pin the disease so the shim fixes stay testable forever.
+
+const BATTERY = [
+  'post_park_fiber_swap',
+  'sleep_inside_fiber_inside_modal',
+  'out_of_order_sleep_resolution',
+  'long_parked_sleep_clobbered_by_swap',
+];
+
+const CRASH_SIGNATURES = [
+  'index out of bounds',
+  'indirect call to null',
+  'invalid state',
+  'unwind',
+  // assertion-free builds surface a clobbered doRewind as a TypeError
+  'is not a function',
+];
+
+function findSummary(logs: string[]) {
+  return logs.find((log) => log.includes('[ASYNCIFY_RACES] SUMMARY'));
+}
+
+function parseSummary(summary: string) {
+  const match = summary.match(/total=(\d+)\s+passed=(\d+)\s+failed=(\d+)/);
+  expect(match, 'summary line should be parseable').not.toBeNull();
+  return { total: Number(match![1]), passed: Number(match![2]), failed: Number(match![3]) };
+}
+
+function crashLines(testLogger: { consoleLogs: string[]; errors: string[] }) {
+  const all = [...testLogger.consoleLogs, ...testLogger.errors];
+  return all.filter(
+    (line) =>
+      CRASH_SIGNATURES.some((sig) => line.toLowerCase().includes(sig)) &&
+      // The harness's own meta-output mentions these words legitimately.
+      !line.includes('[ASYNCIFY_RACES]')
+  );
+}
+
+function realErrors(testLogger: { errors: string[] }) {
+  return testLogger.errors.filter((e) => !e.includes('favicon'));
+}
+
+test.describe('Asyncify races — green targets (full shims)', () => {
+  test('battery: all chained scenarios pass with a clean console', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto('/standalone/asyncify-races/races_test.html');
+    const loaded = await tryLoadApp(page, 30000);
+    expect(loaded, 'races harness should load').toBe(true);
+
+    await expect
+      .poll(() => findSummary(testLogger.consoleLogs) ?? null, {
+        timeout: 60000,
+        message: 'battery should emit a final SUMMARY line (a missing one means a wedge/hang)',
+      })
+      .not.toBeNull();
+
+    const { total, passed, failed } = parseSummary(findSummary(testLogger.consoleLogs)!);
+    const failLogs = testLogger.consoleLogs.filter((l) => l.includes('[ASYNCIFY_RACES] FAIL '));
+    const passLogs = testLogger.consoleLogs.filter((l) => l.includes('[ASYNCIFY_RACES] PASS '));
+
+    expect(total).toBe(BATTERY.length);
+    expect(passed).toBe(BATTERY.length);
+    expect(failed).toBe(0);
+    expect(failLogs, `FAIL lines: ${failLogs.join(' || ')}`).toHaveLength(0);
+    expect(passLogs).toHaveLength(BATTERY.length);
+
+    for (const name of BATTERY) {
+      expect.soft(
+        testLogger.consoleLogs.some((l) => l.includes(`[ASYNCIFY_RACES] PASS ${name}`)),
+        `scenario ${name} should PASS`
+      ).toBe(true);
+    }
+
+    expect(crashLines(testLogger), 'no crash signatures in console').toHaveLength(0);
+    expect(realErrors(testLogger), 'no page errors').toHaveLength(0);
+  });
+
+  test('modal_in_modal_in_modal: three nested ShowModals resolve LIFO', async ({
+    page,
+    testLogger,
+  }) => {
+    // RED today: wx dialog.cpp keeps the modal resolver in a single slot
+    // (Module._endModal = fn; delete after use), so with three nested modals
+    // the middle EndModal resolves nothing and its ShowModal parks forever.
+    // GREEN after the Stage-3 wx fix (LIFO resolver stack).
+    await page.goto('/standalone/asyncify-races/races_test.html#only=modal_in_modal_in_modal');
+    await tryLoadApp(page, 30000);
+
+    await expect
+      .poll(() => findSummary(testLogger.consoleLogs) ?? null, {
+        timeout: 45000,
+        message: 'triple modal should complete (middle EndModal must not be lost)',
+      })
+      .not.toBeNull();
+
+    const { passed, failed } = parseSummary(findSummary(testLogger.consoleLogs)!);
+    expect(passed).toBe(1);
+    expect(failed).toBe(0);
+    expect(crashLines(testLogger), 'no crash signatures in console').toHaveLength(0);
+  });
+
+  test('wakeup_during_transition: modal teardown over parked sleeps stays clean', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto('/standalone/asyncify-races/races_test.html#only=wakeup_during_transition');
+    await tryLoadApp(page, 30000);
+
+    await expect
+      .poll(() => findSummary(testLogger.consoleLogs) ?? null, { timeout: 45000 })
+      .not.toBeNull();
+
+    const { passed, failed } = parseSummary(findSummary(testLogger.consoleLogs)!);
+    expect(passed).toBe(1);
+    expect(failed).toBe(0);
+    expect(crashLines(testLogger), 'no crash signatures in console').toHaveLength(0);
+    expect(realErrors(testLogger), 'no page errors').toHaveLength(0);
+  });
+
+  test('nested_quasi_modal_pump_error: pump rejection must not leak the parked DoRun', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto(
+      '/standalone/asyncify-races/races_test.html#only=nested_quasi_modal_pump_error'
+    );
+    await tryLoadApp(page, 30000);
+
+    await expect
+      .poll(() => findSummary(testLogger.consoleLogs) ?? null, {
+        timeout: 45000,
+        message:
+          'nested loop must exit after a pump error (silent stall = the c27fe8bf bug, fixed in wx evtloop.cpp)',
+      })
+      .not.toBeNull();
+
+    const { passed, failed } = parseSummary(findSummary(testLogger.consoleLogs)!);
+    expect(passed).toBe(1);
+    expect(failed).toBe(0);
+  });
+
+  test('sleep-park mode: park throw must not escape as an unhandled "unwind" rejection', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto('/standalone/asyncify-races/races_test.html#mode=sleep-park');
+    await tryLoadApp(page, 30000);
+
+    await expect
+      .poll(() => findSummary(testLogger.consoleLogs) ?? null, { timeout: 45000 })
+      .not.toBeNull();
+
+    const { passed, failed } = parseSummary(findSummary(testLogger.consoleLogs)!);
+    expect(passed).toBe(1);
+    expect(failed).toBe(0);
+
+    const unwindLeaks = [...testLogger.errors, ...testLogger.consoleLogs].filter(
+      (l) =>
+        l.toLowerCase().includes('unwind') &&
+        !l.includes('[ASYNCIFY_RACES]') &&
+        // console *log* lines about unwind from our own shims are fine; errors are not
+        (testLogger.errors.includes(l) || l.toLowerCase().includes('uncaught'))
+    );
+    expect(unwindLeaks, `unwind escaped the park: ${unwindLeaks.join(' || ')}`).toHaveLength(0);
+  });
+});
+
+test.describe('Asyncify races — ablation pins (the disease stays reproducible)', () => {
+  test('no trampoline heal: the park wedges the guard and the post-park swap hangs', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto(
+      '/standalone/asyncify-races/races_test_noheal.html#only=post_park_fiber_swap'
+    );
+    await tryLoadApp(page, 30000);
+
+    // The scenario's JS watchdog fires after 2.5s with a state dump.
+    await expect
+      .poll(
+        () =>
+          testLogger.consoleLogs.find((l) =>
+            l.includes('[ASYNCIFY_RACES] WATCHDOG post_park_fiber_swap')
+          ) ?? null,
+        { timeout: 30000, message: 'watchdog should fire in the ablated build' }
+      )
+      .not.toBeNull();
+
+    const watchdog = testLogger.consoleLogs.find((l) =>
+      l.includes('[ASYNCIFY_RACES] WATCHDOG post_park_fiber_swap')
+    )!;
+
+    // The exact stuck-guard signature traced in docs/features/async/: the park throw
+    // tore through Fibers.trampoline()'s do/while, leaving the guard true.
+    expect(watchdog, 'stuck trampoline guard should be visible').toContain(
+      'trampolineRunning=true'
+    );
+
+    expect(
+      testLogger.consoleLogs.some((l) =>
+        l.includes('[ASYNCIFY_RACES] FAIL post_park_fiber_swap')
+      ),
+      'scenario should be reported FAILED by the watchdog'
+    ).toBe(true);
+
+    // And the suite never completes — the swap is stranded forever.
+    expect(findSummary(testLogger.consoleLogs)).toBeUndefined();
+  });
+
+  test('no handleSleep fix: fiber swaps clobber the parked sleep buffer', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto(
+      '/standalone/asyncify-races/races_test_nosleepfix.html#only=long_parked_sleep_clobbered_by_swap'
+    );
+    await tryLoadApp(page, 30000);
+
+    // Either the wakeUp crashes (index out of bounds family) or the rewind is
+    // lost and the watchdog reports the stall — both are the recorded disease.
+    await expect
+      .poll(
+        () => {
+          const crashed = [...testLogger.errors, ...testLogger.consoleLogs].some(
+            (l) =>
+              l.toLowerCase().includes('index out of bounds') ||
+              l.toLowerCase().includes('indirect call to null') ||
+              l.toLowerCase().includes('invalid state')
+          );
+          const stalled = testLogger.consoleLogs.some((l) =>
+            l.includes('[ASYNCIFY_RACES] FAIL long_parked_sleep_clobbered_by_swap')
+          );
+          return crashed || stalled ? 'reproduced' : null;
+        },
+        { timeout: 30000, message: 'ablated build should reproduce the clobber bug' }
+      )
+      .not.toBeNull();
+
+    // It must NOT have quietly passed.
+    expect(
+      testLogger.consoleLogs.some((l) =>
+        l.includes('[ASYNCIFY_RACES] PASS long_parked_sleep_clobbered_by_swap')
+      ),
+      'ablated build must not pass the clobber scenario'
+    ).toBe(false);
+  });
+});

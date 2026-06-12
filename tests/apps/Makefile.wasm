@@ -97,6 +97,12 @@ COROUTINE_BASE_LDFLAGS = -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
                -sASYNCIFY_IMPORTS=['startModal','js_writeTextToClipboard','js_readTextFromClipboard','js_clipboardHasText','js_clearClipboard','js_enumerateFonts','emscripten_fiber_swap']
 LDFLAGS_COROUTINE = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) $(WX_LDFLAGS_NOGL)
 
+# The asyncify-races harness must match PRODUCTION asyncify semantics: the KiCad
+# apps ship with assertions off and rely on the shim layer, while emscripten's
+# debug assert ("We cannot start an async operation when one is already flight")
+# forbids the very multi-parked-sleep states the harness exists to exercise.
+LDFLAGS_RACES = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -sASSERTIONS=0 $(WX_LDFLAGS_NOGL)
+
 JS = $(TOOLS_ROOT)/wx.js
 HTML = $(TOOLS_ROOT)/template.html
 
@@ -157,6 +163,9 @@ all: minimal_test.html \
      $(S)/retinascale/retinascale_test.html \
      $(S)/coroutine/coroutine_test.html \
      $(S)/coroutine-nested/nested_test.html \
+     $(S)/asyncify-races/races_test.html \
+     $(S)/asyncify-races/races_test_noheal.html \
+     $(S)/asyncify-races/races_test_nosleepfix.html \
      $(S)/coroutine-pthread/coroutine_test_wxpt.html \
      $(S)/coroutine-pthread/embind_repro.html \
      $(S)/coroutine-pthread/gl_repro.html \
@@ -487,6 +496,25 @@ $(S)/coroutine-nested/nested_test.html: $(S)/coroutine-nested/nested_test.o $(S)
 	$(CXX) $^ $(LDFLAGS_COROUTINE) --pre-js $(JS) --shell-file $(HTML) -o $@
 	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
 
+# Asyncify race-condition red-green harness (tests/asyncify/). Three variants of
+# the same app: full shims, trampoline-heal ablated, handleSleep-fix ablated.
+# The ablated builds keep the historical bugs reproducible (red) so the shim
+# fixes stay pinned by tests. Same .o, three link+inject passes.
+$(S)/asyncify-races/races_test.o: $(S)/asyncify-races/races_test.cpp $(S)/coroutine/kicad_coroutine_harness.h
+	$(CXX) -c $(CXXFLAGS) -I$(KICAD_ROOT)/thirdparty/libcontext -I$(S)/coroutine $< -o $@
+
+$(S)/asyncify-races/races_test.html: $(S)/asyncify-races/races_test.o $(S)/coroutine/libcontext.o $(WX_CORE_LIB)
+	$(CXX) $^ $(LDFLAGS_RACES) --pre-js $(JS) --shell-file $(HTML) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+$(S)/asyncify-races/races_test_noheal.html: $(S)/asyncify-races/races_test.o $(S)/coroutine/libcontext.o $(WX_CORE_LIB)
+	$(CXX) $^ $(LDFLAGS_RACES) --pre-js $(JS) --shell-file $(HTML) -o $@
+	SHIM_DISABLE_TRAMPOLINE_HEAL=1 ../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+$(S)/asyncify-races/races_test_nosleepfix.html: $(S)/asyncify-races/races_test.o $(S)/coroutine/libcontext.o $(WX_CORE_LIB)
+	$(CXX) $^ $(LDFLAGS_RACES) --pre-js $(JS) --shell-file $(HTML) -o $@
+	SHIM_DISABLE_HANDLESLEEP=1 ../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
 # Convenience targets
 menu: $(S)/menu/menu_test.html
 clipboard: $(S)/clipboard/clipboard_test.html
@@ -541,6 +569,7 @@ $(S)/retinascale/retinascale_test.html: $(S)/retinascale/retinascale_test.o $(WX
 retinascale: $(S)/retinascale/retinascale_test.html
 coroutine: $(S)/coroutine/coroutine_test.html
 coroutine-nested: $(S)/coroutine-nested/nested_test.html
+asyncify-races: $(S)/asyncify-races/races_test.html $(S)/asyncify-races/races_test_noheal.html $(S)/asyncify-races/races_test_nosleepfix.html
 
 # Only delete generated app files (*_test*, *_repro*) — a bare $(S)/*/*.js would
 # also delete checked-in sources like coroutine-pthread/worker_dom_stub.js.
@@ -550,7 +579,7 @@ clean:
 	rm -f $(S)/*/*_test*.html $(S)/*/*_test*.js $(S)/*/*_test*.wasm
 	rm -f $(S)/*/*_repro*.html $(S)/*/*_repro*.js $(S)/*/*_repro*.wasm
 
-.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize threadpool logerror retinascale coroutine coroutine-nested
+.PHONY: all clean menu clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize threadpool logerror retinascale coroutine coroutine-nested asyncify-races
 
 # === Coroutine pthread variant — reproduces the KiCad Asyncify-fiber x pthreads crash ===
 # Same modal-free harness as `coroutine`, but compiled/linked with pthreads to match

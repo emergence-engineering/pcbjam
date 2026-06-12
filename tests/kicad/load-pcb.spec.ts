@@ -190,11 +190,6 @@ function runLoadPcbTest(demo: DemoCfg): void {
             scale: 'device',
         });
 
-        // ── The two things this spike actually asserts: no rtree assert,
-        //    no WASM Aborted during the load. The clipboard-polling
-        //    asyncify RuntimeErrors that fire AFTER the board is rendered
-        //    are a separate, pre-existing wasm-port limitation that we
-        //    do not regress on here. ────────────────────────────────────
         const allLines = [...testLogger.consoleLogs, ...testLogger.errors];
         const rtreeDiag = allLines.filter((l) => l.includes('[RTREE-DIAG]'));
         expect(
@@ -205,6 +200,26 @@ function runLoadPcbTest(demo: DemoCfg): void {
         expect(
             aborts,
             `WASM aborted during ${demo.name} load:\n${aborts.join('\n\n')}`,
+        ).toEqual([]);
+
+        // ── Clean-console gate: NO asyncify corruption may surface anywhere in
+        //    the load — not before, not after the board renders. The formerly
+        //    tolerated post-load clipboard/unwind RuntimeErrors are fixed
+        //    (sync clipboard IsSupported in wx; "unwind" sentinel handling in
+        //    scripts/common/shims/handlesleep.js; see docs/features/asyncify-arbiter/).
+        const asyncifySignatures = [
+            'index out of bounds',
+            'indirect call to null',
+            'uncaught exception: unwind',
+            'invalid state',
+            'is not a function',
+        ];
+        const asyncifyErrors = allLines.filter((l) =>
+            asyncifySignatures.some((sig) => l.toLowerCase().includes(sig)),
+        );
+        expect(
+            asyncifyErrors,
+            `Asyncify corruption surfaced during ${demo.name} load:\n${asyncifyErrors.join('\n\n')}`,
         ).toEqual([]);
     });
 }
