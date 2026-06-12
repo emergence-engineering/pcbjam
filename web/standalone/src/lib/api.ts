@@ -8,10 +8,11 @@ import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL } from "./config";
 
 /**
- * Read-only client over the shared contract. The standalone editor only ever
- * READS projects from a backend (enumerate, get file tree, stream bytes) — it
- * never creates/deletes/uploads. Those management concerns live in the closed
- * application that hosts this editor.
+ * Client over the shared contract. The standalone editor READS projects from a
+ * backend (enumerate, get file tree, stream bytes) and writes back exactly one
+ * thing: the bytes of a file the user explicitly saved in the editor (see
+ * uploadFileBytes). Project management (create/delete/bulk upload) stays in the
+ * closed application that hosts this editor.
  */
 export const client = initClient(contract, {
   baseUrl: API_BASE_URL,
@@ -58,4 +59,25 @@ export async function fetchFileBytes(
   const res = await fetch(fileBytesUrl(slug, relPath));
   if (!res.ok) throw new Error(`download failed (${res.status}): ${relPath}`);
   return new Uint8Array(await res.arrayBuffer());
+}
+
+/**
+ * Persist one saved file back to the backend via the multipart upload route
+ * (POST /api/projects/:project/files — upserts by (project, path); the form
+ * FIELD NAME carries the project-relative path, same convention as the
+ * management app's folder upload).
+ */
+export async function uploadFileBytes(
+  slug: string,
+  relPath: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  const name = relPath.split("/").pop() ?? relPath;
+  const form = new FormData();
+  form.append(relPath, new File([bytes as BlobPart], name));
+  const res = await fetch(
+    `${API_BASE_URL}/api/projects/${encodeURIComponent(slug)}/files`,
+    { method: "POST", body: form },
+  );
+  if (!res.ok) throw new Error(`upload failed (${res.status}): ${relPath}`);
 }

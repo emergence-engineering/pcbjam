@@ -45,6 +45,11 @@ declare global {
     FS?: EmscriptenFS;
     wxElementRegistry?: WxElementRegistry;
     kicadWebOpenTool?: (toolName: string, fileName: string) => boolean;
+    /** File System Access API (Chromium): writable local-folder sessions. */
+    showDirectoryPicker?(options?: {
+      mode?: "read" | "readwrite";
+      id?: string;
+    }): Promise<FileSystemDirectoryHandle>;
   }
 
   // The browsing-context window the tool runs in — now the top-level `window`

@@ -116,6 +116,56 @@ export interface KicadCollabHandle {
   destroy(): void;
 }
 
+/** A provider-connected, initial-state-synced Y.Doc, not yet bound to an editor. */
+export interface KicadDocSession {
+  doc: Y.Doc;
+  provider: YjsProvider;
+}
+
+/**
+ * Connect a fresh Y.Doc to a provider room and wait for its authoritative
+ * initial state. Used standalone by the Y.Doc-load path (materialize the file
+ * from the doc BEFORE any editor exists), and as the first half of
+ * `startKicadCollab`.
+ */
+export async function connectKicadDoc(opts: {
+  provider: ProviderConfig;
+  room: string;
+}): Promise<KicadDocSession> {
+  const doc = new Y.Doc();
+  const provider = await connectProvider(doc, opts.provider, { room: opts.room });
+  await provider.whenSynced();
+  return { doc, provider };
+}
+
+/**
+ * Bind a running editor to an already-synced doc session (second half of
+ * `startKicadCollab`). `editorMatchesDoc` marks the Y.Doc-load path: the open
+ * file was materialized from this very doc, so seed only baselines the differ
+ * instead of re-applying the full document.
+ */
+export function attachKicadCollab(
+  mod: KicadItemsModule,
+  win: KicadItemsWindow,
+  session: KicadDocSession,
+  opts?: { seedDoc?: KicadDoc; editorMatchesDoc?: boolean },
+): KicadCollabHandle {
+  const binding = bindKicadCollab(session.doc, moduleItemsBridge(mod, win));
+  binding.seed(opts?.seedDoc, { editorMatchesDoc: opts?.editorMatchesDoc });
+  clog("attachKicadCollab: ready; doc items =", binding.items.size);
+
+  return {
+    doc: session.doc,
+    binding,
+    provider: session.provider,
+    destroy() {
+      binding.destroy();
+      session.provider.destroy();
+      session.doc.destroy();
+    },
+  };
+}
+
 /**
  * The Slot-model counterpart of `startCollab` (ysync 0008): wires the v2 items
  * bridge (kicadCollabSnapshotItems / ApplyItems / onItems — Stage C exports) into
@@ -129,23 +179,6 @@ export async function startKicadCollab(
   opts: StartCollabOptions,
 ): Promise<KicadCollabHandle> {
   clog("startKicadCollab:", opts.provider.kind, "room =", opts.room);
-  const doc = new Y.Doc();
-  const bridge = moduleItemsBridge(mod, win);
-  const binding = bindKicadCollab(doc, bridge);
-  const provider = await connectProvider(doc, opts.provider, { room: opts.room });
-
-  await provider.whenSynced();
-  binding.seed(opts.seedDoc);
-  clog("startKicadCollab: ready; doc items =", binding.items.size);
-
-  return {
-    doc,
-    binding,
-    provider,
-    destroy() {
-      binding.destroy();
-      provider.destroy();
-      doc.destroy();
-    },
-  };
+  const session = await connectKicadDoc({ provider: opts.provider, room: opts.room });
+  return attachKicadCollab(mod, win, session, { seedDoc: opts.seedDoc });
 }

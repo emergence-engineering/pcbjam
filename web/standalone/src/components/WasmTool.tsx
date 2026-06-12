@@ -1,19 +1,23 @@
 import * as React from "react";
 import {
   collabRoomId,
+  docToFile,
   EXTENSION_TOOL,
   FILELESS_TOOLS,
   fileToDoc,
+  kicadItemsMap,
   toolSchema,
+  yToDoc,
   type KicadDoc,
   type Tool,
 } from "@pcbjam/shared";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { WASM_ASSET_BASE_URL, yjsProviderConfig } from "@/lib/config";
+import { WASM_ASSET_BASE_URL, yjsProviderConfig, type DocSource } from "@/lib/config";
 import { bootKicadTool } from "@/wasm/boot";
 import { memfsFilePath, memfsProjectDir } from "@/wasm/constants";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
-import type { KicadItemsWindow } from "@/wasm/collab";
+import { registerSaveHook, type SaveBytes } from "@/wasm/save-flow";
+import type { KicadDocSession, KicadItemsWindow } from "@/wasm/collab";
 import { clog, cwarn } from "@/wasm/collab/debug";
 import { createOomWatch, respawnInNewTab } from "@/recovery/oom-watch";
 import { MemoryExhaustedDialog } from "@/recovery/MemoryExhaustedDialog";
@@ -196,6 +200,45 @@ function seedDocFromMemfs(
 }
 
 /**
+ * The `docSource: "ydoc"` pre-step (config/env-selected — same /p/ URLs as "api"
+ * mode): connect the document's collab room BEFORE the file opens and, when the
+ * room already holds the doc, materialize the file from it (docToFile) so the
+ * editor opens the doc's state instead of the API's copy. An empty room (first
+ * ever open) falls back to the API fetch — the seed() that follows file-seeds
+ * the room from it. Returns the session for `maybeStartCollab` to attach to.
+ */
+async function maybeConnectDocSession(
+  win: ToolWindow,
+  opts: {
+    docSource?: DocSource;
+    tool: Tool;
+    projectId: string;
+    targetPath?: string;
+    log: (m: string) => void;
+  },
+): Promise<{ session?: KicadDocSession; targetBytes?: Uint8Array }> {
+  if (opts.docSource !== "ydoc") return {};
+  if (!opts.targetPath || !COLLAB_TOOLS.has(opts.tool)) return {};
+
+  const { connectKicadDoc } = await import("@/wasm/collab");
+  const room = collabRoomId(opts.projectId, opts.targetPath);
+  const session = await connectKicadDoc({ provider: yjsProviderConfig(), room });
+
+  if (kicadItemsMap(session.doc).size === 0) {
+    opts.log(`[ydoc] room ${room} is empty — falling back to the API fetch (will file-seed)`);
+    return { session };
+  }
+  try {
+    const text = docToFile(yToDoc(session.doc));
+    opts.log(`[ydoc] materialized ${opts.targetPath} from room ${room} (${text.length} chars)`);
+    return { session, targetBytes: new TextEncoder().encode(text) };
+  } catch (err) {
+    cwarn("ydoc: materialize failed — falling back to the API fetch", err);
+    return { session };
+  }
+}
+
+/**
  * Collaborative editing (ysync 0008, Slot-model items wire), ON BY DEFAULT for any
  * tool that has the collab bridge. Open the same project URL in two tabs to edit
  * together: the channel is keyed to project+file, so both tabs share one Y.Doc over
@@ -211,6 +254,9 @@ async function maybeStartCollab(
     slug: string;
     projectId: string;
     targetPath?: string;
+    collabSession?: KicadDocSession;
+    /** The opened file was materialized from collabSession's doc (ydoc source). */
+    editorMatchesDoc?: boolean;
     log: (m: string) => void;
     onStatus: (t: string) => void;
   },
@@ -226,8 +272,10 @@ async function maybeStartCollab(
     url: win.location.href,
   });
 
-  // On by default; only an explicit opt-out disables it.
-  if (collabParam === "0" || collabParam === "false") {
+  // On by default; only an explicit opt-out disables it. A pre-connected doc
+  // session (Y.Doc-load path) ignores the opt-out: the doc IS the data source,
+  // so detaching would silently drop every edit.
+  if (!opts.collabSession && (collabParam === "0" || collabParam === "false")) {
     clog("disabled (?collab=0) — skipping");
     return;
   }
@@ -244,13 +292,29 @@ async function maybeStartCollab(
     return;
   }
 
-  const { startKicadCollab } = await import("@/wasm/collab");
+  const { startKicadCollab, attachKicadCollab } = await import("@/wasm/collab");
+  const seedDoc = seedDocFromMemfs(win, opts.slug, opts.targetPath);
+
+  if (opts.collabSession) {
+    // docSource "ydoc": the provider is already connected. When the editor
+    // opened the file materialized from this very doc, attach + baseline only;
+    // when the room was empty (API fallback), seed() file-seeds it as usual.
+    clog("attaching to pre-connected doc session; editorMatchesDoc:", !!opts.editorMatchesDoc);
+    attachKicadCollab(mod, win as unknown as KicadItemsWindow, opts.collabSession, {
+      seedDoc,
+      editorMatchesDoc: opts.editorMatchesDoc,
+    });
+    opts.log(`[collab] attached to Y.Doc session`);
+    opts.onStatus("Collab: connected");
+    clog("connected ✓");
+    return;
+  }
+
   const provider = yjsProviderConfig();
   // One room per (project, document). Two tabs of the same build compute the
   // same id, so cross-tab BroadcastChannel still works; network providers use it
   // verbatim to namespace + persist (see @pcbjam/shared collabRoomId).
   const room = collabRoomId(opts.projectId, opts.targetPath ?? opts.tool);
-  const seedDoc = seedDocFromMemfs(win, opts.slug, opts.targetPath);
   clog("starting collab", provider.kind, "room", room, "seedDoc:", !!seedDoc);
   await startKicadCollab(mod, win as unknown as KicadItemsWindow, {
     provider,
@@ -276,6 +340,8 @@ export function WasmTool({
   files,
   targetPath,
   fetchBytes,
+  saveBytes,
+  docSource,
   assetBaseUrl,
 }: {
   tool: Tool;
@@ -286,6 +352,20 @@ export function WasmTool({
   targetPath?: string;
   /** Fetch one project-relative file's bytes (contract loader or local folder). */
   fetchBytes: (relPath: string) => Promise<Uint8Array>;
+  /**
+   * Persist one file the user saved in the editor (File→Save writes MEMFS, then
+   * the wasm fires window.kicadCollab.onSave → this). API upload for backend
+   * projects, disk write-back/download for local folders; omit to keep saves
+   * MEMFS-only (e.g. Y.Doc-backed sessions).
+   */
+  saveBytes?: SaveBytes;
+  /**
+   * Where this project's DOCUMENT lives (see lib/config docSourceConfig):
+   * "ydoc" materializes the target file from its collab room when the room has
+   * state, with `fetchBytes` as the first-open fallback that seeds it. Defaults
+   * to "api" (plain fetch + open). Local-folder sessions don't pass this.
+   */
+  docSource?: DocSource;
   /** Where the WASM glue/artifacts are served from; defaults to VITE_WASM_ASSET_BASE_URL. */
   assetBaseUrl?: string;
 }) {
@@ -348,16 +428,41 @@ export function WasmTool({
           onStatus: setStatus,
           onAbort: oom.onAbort,
         });
+        // Register the save sink before the file opens: from here on, every
+        // editor File→Save (MEMFS write) is routed onward through saveBytes.
+        registerSaveHook(win, { slug, saveBytes, log: append, onStatus: setStatus });
+        const { session, targetBytes } = await maybeConnectDocSession(win, {
+          docSource,
+          tool,
+          projectId,
+          targetPath,
+          log: append,
+        });
         await driveProjectIntoTool(win, {
           tool,
           slug,
           files,
           targetPath,
-          fetchBytes,
+          // ydoc source with a populated room: the target file's bytes come
+          // from the doc; everything else (sibling files) still fetches.
+          fetchBytes:
+            targetBytes && targetPath
+              ? (relPath) =>
+                  relPath === targetPath ? Promise.resolve(targetBytes) : fetchBytes(relPath)
+              : fetchBytes,
           log: append,
           onStatus: setStatus,
         });
-        await maybeStartCollab(win, { tool, slug, projectId, targetPath, log: append, onStatus: setStatus });
+        await maybeStartCollab(win, {
+          tool,
+          slug,
+          projectId,
+          targetPath,
+          collabSession: session,
+          editorMatchesDoc: !!targetBytes,
+          log: append,
+          onStatus: setStatus,
+        });
       } catch (err) {
         append(`[fatal] ${String(err)}`);
         setStatus(`Error: ${String(err)}`);

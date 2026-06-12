@@ -55,8 +55,12 @@ export interface KicadBinding {
    * editor snapshot (items only). Otherwise the editor adopts the doc (doc
    * authority — local-only roots are removed, doc roots applied). Call once
    * after the doc/provider are connected.
+   *
+   * `editorMatchesDoc`: the editor's open file WAS materialized from this doc
+   * (docToFile — the Y.Doc-load path), so the adopt re-apply would be a no-op
+   * full-document blob apply; skip it and just baseline the wasm differ.
    */
-  seed(seedDoc?: KicadDoc): void;
+  seed(seedDoc?: KicadDoc, opts?: { editorMatchesDoc?: boolean }): void;
   destroy(): void;
   /** The underlying kdoc items map (exposed for tests/inspection). */
   readonly items: KicadYItems;
@@ -119,8 +123,20 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
   };
   items.observeDeep(observer);
 
-  function seed(seedDoc?: KicadDoc): void {
+  function seed(seedDoc?: KicadDoc, opts?: { editorMatchesDoc?: boolean }): void {
     seeded = true; // open the UP gate; everything below runs synchronously
+    if (opts?.editorMatchesDoc && items.size > 0) {
+      // The editor opened exactly this doc's content (Y.Doc-load path): no
+      // adopt apply needed. snapshotItems() still runs to BASELINE the wasm
+      // differ — otherwise the first local edit would re-emit the full model.
+      clog(`seed: editor matches doc (${items.size} item(s)) → baseline only, no apply`);
+      try {
+        bridge.snapshotItems();
+      } catch (err) {
+        cwarn("seed: snapshotItems baseline failed", err);
+      }
+      return;
+    }
     if (items.size === 0 && seedDoc) {
       // First tab, file-seeded: write the FULL doc (meta + layout + items) so
       // the Y.Doc — not the editor snapshot — is the lossless source of truth

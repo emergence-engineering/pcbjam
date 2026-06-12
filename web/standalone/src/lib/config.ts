@@ -25,3 +25,21 @@ export function yjsProviderConfig(): ProviderConfig {
     params: token ? { token } : undefined,
   };
 }
+
+/**
+ * Where a backend project's DOCUMENT content lives (per deployment, not per
+ * route — /p/<project> URLs behave the same either way):
+ *
+ *   "api"  — file bytes are fetched from the REST backend and a user save is
+ *            uploaded back to it (the Y.Doc, when collab is on, mirrors the file).
+ *   "ydoc" — the collab room is the source of truth: when it holds the document
+ *            it is materialized client-side (docToFile) instead of fetching the
+ *            file, and saves stay in MEMFS (the provider persists the doc). The
+ *            REST backend still serves project metadata + sibling files, and the
+ *            file fetch remains the first-open fallback that seeds the room.
+ */
+export type DocSource = "api" | "ydoc";
+
+export function docSourceConfig(): DocSource {
+  return import.meta.env.VITE_DOC_SOURCE === "ydoc" ? "ydoc" : "api";
+}

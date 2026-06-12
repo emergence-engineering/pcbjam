@@ -938,6 +938,19 @@ std::string kicadCollabGetPos( std::string aId )
 // writer eeschema uses, so a test can read the file back from MEMFS and assert the
 // file ⇄ Y.Doc round trip (README §A; feature 0004). Single-sheet scope: the round-
 // trip fixtures are flat schematics; saving the root sheet writes the whole model.
+// C++ → JS save notification (standalone-hardening save routing). Called from the
+// kicad fork's save chokepoint (SCH_EDIT_FRAME::saveSchematicFile) after a
+// successful write to MEMFS, so the web app can route the saved bytes onward
+// (API upload, local-disk write-back, download). No-op without a JS listener.
+extern "C" void kicadCollabOnSave( const char* aPath )
+{
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onSave )
+            window.kicadCollab.onSave( UTF8ToString( $0 ) );
+    }, aPath );
+}
+
+
 void kicadSaveSchematic( std::string path )
 {
     SCH_EDIT_FRAME* fr = schFrame();

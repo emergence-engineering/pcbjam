@@ -208,6 +208,28 @@ describe("bindKicadCollab — two editors over relayed Y.Docs", () => {
     expect(Object.keys(edB.store).sort()).toEqual(["fld-1", "fp-1", "pad-1"]);
   });
 
+  it("seed(editorMatchesDoc) skips the adopt apply but still binds both ways", () => {
+    const { edA, edB, bindA, bindB } = setup();
+    seedEditor(edA, FP);
+    bindA.seed(); // A seeds the room
+
+    // B is the Y.Doc-load path: its editor opened the file materialized from
+    // the doc, so its store ALREADY matches — no adopt apply must happen.
+    seedEditor(edB, FP);
+    bindB.seed(undefined, { editorMatchesDoc: true });
+    expect(edB.applied.length).toBe(0);
+
+    // The binding is still live both ways after the apply-less seed.
+    edA.localUpsert(`(pad "1" smd (at 5 5) (uuid "pad-1"))`, "fp-1");
+    expect(edB.store["pad-1"]!.body).toEqual(
+      sexprToItems(`(pad "1" smd (at 5 5) (uuid "pad-1"))`, "fp-1").items["pad-1"]!.body,
+    );
+    edB.localUpsert(`(pad "1" smd (at 6 6) (uuid "pad-1"))`, "fp-1");
+    expect(edA.store["pad-1"]!.body).toEqual(
+      sexprToItems(`(pad "1" smd (at 6 6) (uuid "pad-1"))`, "fp-1").items["pad-1"]!.body,
+    );
+  });
+
   it("destroy() detaches the editor from further remote changes", () => {
     const { edA, edB, bindA, bindB } = setup();
     seedEditor(edA, FP);

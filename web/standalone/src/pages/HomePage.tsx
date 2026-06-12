@@ -9,8 +9,10 @@ import {
 } from "@pcbjam/shared";
 import { FolderOpen, Loader2 } from "lucide-react";
 import { useProjects } from "@/lib/api";
+import { downloadBytes } from "@/lib/download";
 import { Button } from "@/components/ui/button";
 import type { ToolFile } from "@/wasm/kicad-runner";
+import type { SaveBytes } from "@/wasm/save-flow";
 import { WasmTool } from "@/components/WasmTool";
 
 /** A KiCad project picked from the local filesystem (no backend involved). */
@@ -18,6 +20,12 @@ interface LocalProject {
   name: string;
   files: ToolFile[];
   fetchBytes: (relPath: string) => Promise<Uint8Array>;
+  /**
+   * Where editor saves land: write-back through File System Access handles
+   * (folder picked via showDirectoryPicker), or a browser download per save
+   * (webkitdirectory fallback — its FileList grants no write access).
+   */
+  saveBytes: SaveBytes;
   defaultTool?: Tool;
   defaultTarget?: string;
 }
@@ -26,6 +34,56 @@ function toolForPath(path: string): Tool | null {
   const dot = path.lastIndexOf(".");
   if (dot < 0) return null;
   return EXTENSION_TOOL[path.slice(dot).toLowerCase()] ?? null;
+}
+
+function defaultOpenTarget(files: ToolFile[]): { defaultTool?: Tool; defaultTarget?: string } {
+  for (const { path } of files) {
+    const tool = toolForPath(path);
+    if (tool) return { defaultTool: tool, defaultTarget: path };
+  }
+  return {};
+}
+
+/**
+ * Build a LocalProject over File System Access handles (showDirectoryPicker,
+ * Chromium): reads come from the live files, and editor saves are written
+ * straight back to the user's folder on disk.
+ */
+async function buildFsaProject(root: FileSystemDirectoryHandle): Promise<LocalProject> {
+  const handles = new Map<string, FileSystemFileHandle>();
+  async function walk(dir: FileSystemDirectoryHandle, prefix: string): Promise<void> {
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === "file") handles.set(prefix + name, handle as FileSystemFileHandle);
+      else await walk(handle as FileSystemDirectoryHandle, `${prefix}${name}/`);
+    }
+  }
+  await walk(root, "");
+  const files: ToolFile[] = [...handles.keys()].map((path) => ({ path }));
+  return {
+    name: root.name,
+    files,
+    ...defaultOpenTarget(files),
+    fetchBytes: async (relPath) => {
+      const handle = handles.get(relPath);
+      if (!handle) throw new Error(`local file not found: ${relPath}`);
+      return new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    },
+    saveBytes: async (relPath, bytes) => {
+      // Resolve (and create — the editor may save a brand-new file, e.g. a
+      // .kicad_pro next to a board) the path under the picked root.
+      const segs = relPath.split("/");
+      const fileName = segs.pop();
+      if (!fileName) throw new Error(`invalid save path: ${relPath}`);
+      let dir = root;
+      for (const seg of segs) dir = await dir.getDirectoryHandle(seg, { create: true });
+      const handle =
+        handles.get(relPath) ?? (await dir.getFileHandle(fileName, { create: true }));
+      handles.set(relPath, handle);
+      const writable = await handle.createWritable();
+      await writable.write(bytes as unknown as FileSystemWriteChunkType);
+      await writable.close();
+    },
+  };
 }
 
 /** Build a LocalProject from a webkitdirectory FileList, stripping the top folder. */
@@ -41,26 +99,17 @@ function buildLocalProject(fileList: FileList): LocalProject {
     map.set(rel.startsWith(topPrefix) ? rel.slice(topPrefix.length) : rel, f);
   }
   const files: ToolFile[] = [...map.keys()].map((path) => ({ path }));
-  let defaultTool: Tool | undefined;
-  let defaultTarget: string | undefined;
-  for (const { path } of files) {
-    const tool = toolForPath(path);
-    if (tool) {
-      defaultTool = tool;
-      defaultTarget = path;
-      break;
-    }
-  }
   return {
     name: topPrefix ? topPrefix.slice(0, -1) : "local",
     files,
-    defaultTool,
-    defaultTarget,
+    ...defaultOpenTarget(files),
     fetchBytes: async (relPath) => {
       const f = map.get(relPath);
       if (!f) throw new Error(`local file not found: ${relPath}`);
       return new Uint8Array(await f.arrayBuffer());
     },
+    // A webkitdirectory FileList is read-only — saves become downloads.
+    saveBytes: async (relPath, bytes) => downloadBytes(relPath, bytes),
   };
 }
 
@@ -88,6 +137,7 @@ export function HomePage() {
         files={local.files}
         targetPath={FILELESS_TOOLS.has(tool) ? undefined : target}
         fetchBytes={local.fetchBytes}
+        saveBytes={local.saveBytes}
       />
     );
   }
@@ -109,19 +159,42 @@ export function HomePage() {
           No upload — files stay in your browser. Pick a folder containing a
           KiCad project.
         </p>
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          className="block text-sm"
-          onChange={(e) => {
-            const fl = e.target.files;
-            if (!fl || fl.length === 0) return;
-            const proj = buildLocalProject(fl);
-            setLocal(proj);
-            setTool(proj.defaultTool ?? "");
-          }}
-        />
+        {window.showDirectoryPicker ? (
+          <Button
+            variant="outline"
+            onClick={() => {
+              void (async () => {
+                let root: FileSystemDirectoryHandle;
+                try {
+                  root = await window.showDirectoryPicker!({ mode: "readwrite" });
+                } catch {
+                  return; // user cancelled the picker / denied write access
+                }
+                const proj = await buildFsaProject(root);
+                setLocal(proj);
+                setTool(proj.defaultTool ?? "");
+              })();
+            }}
+          >
+            <FolderOpen size={16} /> Choose folder
+          </Button>
+        ) : (
+          // No File System Access API (Firefox/Safari): read-only folder input;
+          // editor saves arrive as browser downloads instead of disk writes.
+          <input
+            ref={inputRef}
+            type="file"
+            multiple
+            className="block text-sm"
+            onChange={(e) => {
+              const fl = e.target.files;
+              if (!fl || fl.length === 0) return;
+              const proj = buildLocalProject(fl);
+              setLocal(proj);
+              setTool(proj.defaultTool ?? "");
+            }}
+          />
+        )}
 
         {local && (
           <div className="mt-4 flex flex-wrap items-center gap-3">

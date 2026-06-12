@@ -1016,6 +1016,19 @@ std::string kicadCollabSnapshotItems()
 // Serializes exactly what the editor has loaded via the same writer eeschema/pcbnew
 // use, so a test can read the file back from MEMFS and assert the file ⇄ Y.Doc
 // round trip (README §A; feature 0004). Uses only public PCB_IO_KICAD_SEXPR API.
+// C++ → JS save notification (standalone-hardening save routing). Called from the
+// kicad fork's save chokepoint (PCB_EDIT_FRAME::SavePcbFile) after a successful
+// write to MEMFS, so the web app can route the saved bytes onward (API upload,
+// local-disk write-back, download). No-op without a JS listener.
+extern "C" void kicadCollabOnSave( const char* aPath )
+{
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onSave )
+            window.kicadCollab.onSave( UTF8ToString( $0 ) );
+    }, aPath );
+}
+
+
 void kicadSaveBoard( std::string path )
 {
     PCB_EDIT_FRAME* fr = pcbFrame();
