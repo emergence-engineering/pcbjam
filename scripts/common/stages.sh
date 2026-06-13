@@ -4,7 +4,7 @@
 # All build output is captured by logging.sh into logs/<script>/<ts>.log, and
 # scripts/build-monitor.sh parses these @KW@ lines to render live progress.
 # These are plain printf so they work identically on the host (docker/build.sh)
-# and inside `docker compose exec` (build-kicad-target.sh, build-wxuniversal-wasm.sh):
+# and inside `docker compose exec` (build-kicad-target.sh, build-wx-wasm.sh):
 # the container's stdout flows back through build.sh's redirected stdout into the
 # same host log, so a single log is the source of truth for the whole build.
 #

@@ -40,7 +40,7 @@ jobs:
           # Firefox cannot create any GL context on the GPU-less VM (see
           # tests/playwright-kicad.config.ts CI prefs).
           # autoconf/automake/make: the host-side wxWidgets + wx test-app builds
-          # (build-wxuniversal-wasm.sh regenerates ./configure on fresh checkouts).
+          # (build-wx-wasm.sh regenerates ./configure on fresh checkouts).
           sudo apt-get install -y cmake ninja-build g++ libjemalloc2 xvfb autoconf automake make
 
       - uses: actions/checkout@v4
@@ -76,7 +76,7 @@ jobs:
       # (separate from the in-docker wxWidgets that KiCad links against).
       # Auto-installs emsdk into tools/ on first run.
       - name: Build wxWidgets (wxUniversal WASM)
-        run: ./scripts/build-wxuniversal-wasm.sh
+        run: ./scripts/build-wx-wasm.sh
 
       - name: Build wxWidgets test apps
         run: ./scripts/build-wasm-test.sh
