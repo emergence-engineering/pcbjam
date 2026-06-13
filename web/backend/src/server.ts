@@ -16,6 +16,7 @@ import Fastify from "fastify";
 import { initServer } from "@ts-rest/fastify";
 import {
   contract,
+  OWNER_HEADER,
   type Project,
   type ProjectFile,
 } from "@pcbjam/shared";
@@ -26,6 +27,26 @@ import {
   listLibItems,
   listLibs,
 } from "./libs.js";
+import {
+  createUserLib,
+  DEFAULT_OWNER,
+  listUserItems,
+  listUserLibs,
+  type UserLibsConfig,
+  UserLibError,
+  userItemBodyPath,
+  userLibsConfig,
+  writeUserItem,
+} from "./user-libs.js";
+
+/** The (thin, pre-auth) owner from OWNER_HEADER; absent ⇒ the default owner. */
+function ownerOf(
+  headers: Record<string, string | string[] | undefined>,
+): string {
+  const v = headers[OWNER_HEADER];
+  const s = Array.isArray(v) ? v[0] : v;
+  return (s && String(s).trim()) || DEFAULT_OWNER;
+}
 
 const PROJECT_DIR = path.resolve(
   process.cwd(),
@@ -129,6 +150,14 @@ async function main(): Promise<void> {
   app.get("/health", async () => ({ ok: true }));
 
   const libs: LibsConfig = libsConfig();
+  const userLibs: UserLibsConfig = userLibsConfig();
+
+  // The editor PUTs item bodies as text/plain (a kicad_symbol_lib s-expr).
+  app.addContentTypeParser(
+    "text/plain",
+    { parseAs: "string" },
+    (_req, body, done) => done(null, body),
+  );
 
   const s = initServer();
   const router = s.router(contract, {
@@ -148,22 +177,50 @@ async function main(): Promise<void> {
       }
       return { status: 200 as const, body: await walk(PROJECT_DIR) };
     },
-    listLibs: async () => ({ status: 200 as const, body: await listLibs(libs) }),
-    listLibItems: async ({ params }) => {
-      const items = await listLibItems(libs, params.lib);
+    listLibs: async ({ headers }) => {
+      const owner = ownerOf(headers);
+      const [origins, user] = await Promise.all([
+        listLibs(libs),
+        listUserLibs(userLibs, owner),
+      ]);
+      return { status: 200 as const, body: [...origins, ...user] };
+    },
+    listLibItems: async ({ params, headers }) => {
+      // User libs win over origins on an id clash (the editor's writable lib).
+      const user = await listUserItems(userLibs, ownerOf(headers), params.lib);
+      const items = user ?? (await listLibItems(libs, params.lib));
       if (items === null) {
         return { status: 404 as const, body: { message: "library not found" } };
       }
       return { status: 200 as const, body: items };
     },
+    createLib: async ({ body, headers }) => {
+      try {
+        const lib = await createUserLib(userLibs, ownerOf(headers), body.name);
+        return { status: 201 as const, body: lib };
+      } catch (e) {
+        if (e instanceof UserLibError && e.status === 409) {
+          return { status: 409 as const, body: { message: e.message } };
+        }
+        return {
+          status: 400 as const,
+          body: { message: e instanceof Error ? e.message : "bad request" },
+        };
+      }
+    },
   });
   await app.register(s.plugin(router));
 
   // Streamed item-body fetch (text; intentionally not a ts-rest endpoint).
+  // User libs are resolved first (owner-scoped), then read-only origins.
   app.get<{ Params: { lib: string; kind: string; name: string } }>(
     "/api/libs/:lib/items/:kind/:name",
     async (req, reply) => {
-      const abs = itemBodyPath(libs, req.params.lib, req.params.kind, req.params.name);
+      const { lib, kind, name } = req.params;
+      const userPath = userItemBodyPath(userLibs, ownerOf(req.headers), lib, kind, name);
+      const userExists =
+        userPath && (await fs.stat(userPath).then((st) => st.isFile()).catch(() => false));
+      const abs = userExists ? userPath! : itemBodyPath(libs, lib, kind, name);
       if (!abs) return reply.code(400).send({ message: "invalid item" });
       const st = await fs.stat(abs).catch(() => null);
       if (!st?.isFile()) {
@@ -172,6 +229,32 @@ async function main(): Promise<void> {
       reply.header("Content-Type", "text/plain; charset=utf-8");
       reply.header("Content-Length", st.size);
       return reply.send(createReadStream(abs));
+    },
+  );
+
+  // Item-body WRITE (text; the mirror of the GET above). Owner from OWNER_HEADER.
+  app.put<{ Params: { lib: string; kind: string; name: string } }>(
+    "/api/libs/:lib/items/:kind/:name",
+    async (req, reply) => {
+      const { lib, kind, name } = req.params;
+      const body = typeof req.body === "string" ? req.body : "";
+      if (!body) return reply.code(400).send({ message: "empty body" });
+      try {
+        const item = await writeUserItem(
+          userLibs,
+          ownerOf(req.headers),
+          lib,
+          kind,
+          name,
+          body,
+        );
+        return reply.code(200).send(item);
+      } catch (e) {
+        const status = e instanceof UserLibError ? e.status : 400;
+        return reply
+          .code(status)
+          .send({ message: e instanceof Error ? e.message : "write failed" });
+      }
     },
   );
 
