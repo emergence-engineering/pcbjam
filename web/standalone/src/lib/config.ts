@@ -69,14 +69,14 @@ export function libsOwner(): string {
   return import.meta.env.VITE_LIBS_OWNER ?? "local-user";
 }
 
-export function libsSourceConfig(): LibsSource | null {
+export function libsSourceConfig(projectId?: string): LibsSource | null {
   const kind = import.meta.env.VITE_LIBS_SOURCE ?? "remote";
   const base =
     kind === "off"
       ? null
       : kind === "static"
         ? staticLibsSource()
-        : remoteLibsSource(API_BASE_URL, libsOwner());
+        : remoteLibsSource(API_BASE_URL, libsOwner(), projectId);
 
   // 0004-A spike: `?libwrite=1` adds one in-memory writable user lib so the
   // editor save path works with no backend (a dev/test aid). The real remote

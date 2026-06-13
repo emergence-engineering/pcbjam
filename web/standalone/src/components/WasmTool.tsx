@@ -442,7 +442,7 @@ export function WasmTool({
           log: append,
           onStatus: setStatus,
           onAbort: oom.onAbort,
-          libsSource: libsSourceConfig(),
+          libsSource: libsSourceConfig(projectId),
         });
         // Register the save sink before the file opens: from here on, every
         // editor File→Save (MEMFS write) is routed onward through saveBytes.
