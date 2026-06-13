@@ -56,6 +56,19 @@ export function docSourceConfig(): DocSource {
  *   "static"           — built-in offline example symbols (no backend).
  *   "off"              — disable libs (empty sym-lib-table).
  */
+/**
+ * The (thin, pre-auth) owner the editor writes libs as, sent on every lib
+ * request via OWNER_HEADER. `?libowner=` (e2e isolation) wins over
+ * `VITE_LIBS_OWNER`, else a stable local default.
+ */
+export function libsOwner(): string {
+  if (typeof window !== "undefined") {
+    const p = new URLSearchParams(window.location.search).get("libowner");
+    if (p) return p;
+  }
+  return import.meta.env.VITE_LIBS_OWNER ?? "local-user";
+}
+
 export function libsSourceConfig(): LibsSource | null {
   const kind = import.meta.env.VITE_LIBS_SOURCE ?? "remote";
   const base =
@@ -63,11 +76,11 @@ export function libsSourceConfig(): LibsSource | null {
       ? null
       : kind === "static"
         ? staticLibsSource()
-        : remoteLibsSource(API_BASE_URL);
+        : remoteLibsSource(API_BASE_URL, libsOwner());
 
   // 0004-A spike: `?libwrite=1` adds one in-memory writable user lib so the
-  // editor save path has a target before the backend exists. Remove once 0004-C
-  // wires real remote writes.
+  // editor save path works with no backend (a dev/test aid). The real remote
+  // write path (0004-C) needs no flag — boot ensures a user lib via createLib.
   if (
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("libwrite") === "1"

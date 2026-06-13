@@ -39,7 +39,7 @@ export function withSpikeWritableLib(
       }
       return [
         ...base,
-        { id: SPIKE_RW_LIB_ID, name: SPIKE_RW_LIB_NAME, writable: true },
+        { id: SPIKE_RW_LIB_ID, name: SPIKE_RW_LIB_NAME, type: "user" },
       ];
     },
 

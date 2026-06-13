@@ -6,13 +6,13 @@ import { libIdFromUri, libUri } from "./uri";
  * local folder); the WASM-facing provider below is the same regardless.
  */
 export interface LibInfo {
-  /** Opaque id used in the lib-table URI (/mnt/pcbjam[-rw]/<id>). */
+  /** Opaque id used in the lib-table URI (/mnt/pcbjam/<id>). */
   id: string;
   /** Display nickname for the sym-lib-table row. */
   name: string;
   description?: string | null;
-  /** Writable (user) lib → mounts under /mnt/pcbjam-rw/ and accepts saves. */
-  writable?: boolean;
+  /** 'origin' | 'mirror' | 'user' — drives "ensure a user lib exists" at boot. */
+  type?: string;
 }
 
 export interface LibItemInfo {
@@ -41,6 +41,11 @@ export interface LibsSource {
     name: string,
     body: string,
   ): Promise<boolean>;
+  /**
+   * Create a user library (returns its `LibInfo`, or null if unsupported / on
+   * conflict). Used by boot to ensure the owner has a writable target.
+   */
+  createLib?(name: string): Promise<LibInfo | null>;
 }
 
 /** The function the WASM `SCH_IO_PCBJAM_LIB` plugin calls via the JS bridge. */
@@ -74,11 +79,8 @@ function sexprEscape(s: string): string {
 export function buildSymLibTable(libsList: LibInfo[]): string {
   const rows = libsList.map((l) => {
     const descr = l.description ? sexprEscape(l.description) : "";
-    // Same plugin type ("PCBJAM") for read-only + writable libs; the rw mount
-    // in the URI is what flips writability (plugin IsLibraryWritable).
     return `  (lib (name "${sexprEscape(l.name)}")(type "PCBJAM")(uri "${libUri(
       l.id,
-      l.writable,
     )}")(options "")(descr "${descr}"))`;
   });
   return `(sym_lib_table\n  (version 7)\n${rows.join("\n")}${
