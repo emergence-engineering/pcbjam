@@ -180,7 +180,9 @@ all: minimal_test.html \
      $(S)/coroutine-pthread/main_repro.html \
      $(S)/coroutine-pthread/mainloop_repro.html \
      $(S)/coroutine-pthread/nested_repro_ex.html \
-     $(S)/coroutine-pthread/vcall_repro.html
+     $(S)/coroutine-pthread/vcall_repro.html \
+     $(S)/textctrl-reentry/textctrl-reentry_test.html \
+     $(S)/tooltip-lifetime/tooltip-lifetime_test.html
 
 # Main test app
 minimal_test.o: minimal_test.cpp
@@ -188,6 +190,27 @@ minimal_test.o: minimal_test.cpp
 
 minimal_test.html: minimal_test.o $(WX_CORE_LIB) $(JS_FILES)
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# --- DOM-port bug reproductions (docs/features/wx-dom-port/branch-review.md) ---
+
+# wxTextCtrl reentry-guard repro. Needs -fexceptions: it throws from a wxEVT_TEXT
+# handler to prove the OnDomEvent m_inDomInput reset must be exception-safe.
+$(S)/textctrl-reentry/textctrl-reentry_test.o: $(S)/textctrl-reentry/textctrl-reentry_test.cpp
+	$(CXX) -c $(CXXFLAGS) -fexceptions $< -o $@
+
+$(S)/textctrl-reentry/textctrl-reentry_test.html: $(S)/textctrl-reentry/textctrl-reentry_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_NOGL) -fexceptions --pre-js $(JS) --shell-file $(HTML) -o $@
+
+textctrl-reentry: $(S)/textctrl-reentry/textctrl-reentry_test.html
+
+# wxToolTip hover-window lifetime repro (relies on wxWasmTooltipDebugHoverWindow).
+$(S)/tooltip-lifetime/tooltip-lifetime_test.o: $(S)/tooltip-lifetime/tooltip-lifetime_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/tooltip-lifetime/tooltip-lifetime_test.html: $(S)/tooltip-lifetime/tooltip-lifetime_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+tooltip-lifetime: $(S)/tooltip-lifetime/tooltip-lifetime_test.html
 
 # Menu test (no GL)
 $(S)/menu/menu_test.o: $(S)/menu/menu_test.cpp
