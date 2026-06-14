@@ -26,6 +26,7 @@ export const TOOL_ARGV0: Record<Tool, string> = {
   calculator: "/usr/bin/pcb_calculator",
   pl_editor: "/usr/bin/pl_editor",
   symbol_editor: "/usr/bin/symbol_editor",
+  footprint_editor: "/usr/bin/footprint_editor",
   gerbview: "/usr/bin/gerbview",
 };
 
@@ -44,7 +45,24 @@ export const TOOL_NEEDS_CONFIG_SEED: Record<Tool, boolean> = {
   calculator: true,
   pl_editor: true,
   symbol_editor: true,
+  footprint_editor: true,
   gerbview: true,
+};
+
+/**
+ * Which library kind a tool consumes — drives which lib-table boot populates
+ * from the lib source (symbol → sym-lib-table; footprint → fp-lib-table). A
+ * user lib is a kind-agnostic container, so the same lib id can land in both
+ * tables depending on the tool. `null` = the tool uses no libraries.
+ */
+export const TOOL_LIB_KIND: Record<Tool, "symbol" | "footprint" | null> = {
+  pcbnew: "footprint",
+  eeschema: "symbol",
+  calculator: null,
+  pl_editor: null,
+  symbol_editor: "symbol",
+  footprint_editor: "footprint",
+  gerbview: null,
 };
 
 /** KiCad user settings dir for this build (PATHS::GetUserSettingsPath()). */

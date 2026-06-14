@@ -3,9 +3,15 @@ import {
   KICAD_CONFIG_DIR,
   RESOURCE_PATH,
   TOOL_ARGV0,
+  TOOL_LIB_KIND,
   TOOL_NEEDS_CONFIG_SEED,
 } from "./constants";
-import { buildSymLibTable, installLibsProvider, type LibsSource } from "./libs/source";
+import {
+  buildFpLibTable,
+  buildSymLibTable,
+  installLibsProvider,
+  type LibsSource,
+} from "./libs/source";
 import { libUri, PCBJAM_LIB_MOUNT } from "./libs/uri";
 
 /** The default user lib boot ensures exists, so there's a writable save target. */
@@ -101,16 +107,20 @@ async function doBoot(opts: BootOptions): Promise<void> {
   // the wasm boots (the table is seeded in preRun below). No source → empty
   // table, libs disabled.
   let symLibTable = "(sym_lib_table\n  (version 7)\n)\n";
+  let fpLibTable = "(fp_lib_table\n  (version 7)\n)\n";
   // Every lib gets an empty placeholder FILE at its URI (not just the mount dir):
-  // the symbol-editor save path stat()s the lib file after a successful save
-  // (SetSymModificationTime -> wxFileName::GetModificationTime), which errors on
-  // a non-existent path. The bytes are virtual (served via window.kicadLibs);
-  // this file only satisfies incidental fs checks.
+  // the editor save path stat()s the lib file after a successful save
+  // (symbol: SetSymModificationTime; footprint: setFPWatcher -> GetModificationTime),
+  // which errors on a non-existent path. The bytes are virtual (served via
+  // window.kicadLibs); this file only satisfies incidental fs checks.
   let libPlaceholderUris: string[] = [];
-  if (libsSource) {
+  // Which lib table this tool consumes: symbol → sym-lib-table, footprint →
+  // fp-lib-table. The same lib source feeds whichever table the tool reads.
+  const libKind = TOOL_LIB_KIND[tool];
+  if (libsSource && libKind) {
     installLibsProvider(libsSource, log);
     try {
-      // Ensure the owner has at least one writable user lib to create symbols in.
+      // Ensure the owner has at least one writable user lib to save items into.
       let libsList = await libsSource.listLibs();
       if (libsSource.createLib && !libsList.some((l) => l.type === "user")) {
         const created = await libsSource.createLib(DEFAULT_USER_LIB_NAME);
@@ -119,9 +129,14 @@ async function doBoot(opts: BootOptions): Promise<void> {
           log(`[libs] created default user lib "${created.name}"`);
         }
       }
-      symLibTable = buildSymLibTable(libsList);
+      if (libKind === "footprint") {
+        fpLibTable = buildFpLibTable(libsList);
+        log(`[libs] seeded ${libsList.length} lib(s) into fp-lib-table`);
+      } else {
+        symLibTable = buildSymLibTable(libsList);
+        log(`[libs] seeded ${libsList.length} lib(s) into sym-lib-table`);
+      }
       libPlaceholderUris = libsList.map((l) => libUri(l.id));
-      log(`[libs] seeded ${libsList.length} lib(s) into sym-lib-table`);
     } catch (e) {
       log(`[libs] listLibs failed, seeding empty table: ${String(e)}`);
     }
@@ -222,13 +237,10 @@ async function doBoot(opts: BootOptions): Promise<void> {
         2,
       ),
     );
-    // libs: rows generated in doBoot from the lib source; the PCBJAM plugin
-    // resolves each via window.kicadLibs.
+    // libs: rows generated in doBoot from the lib source; the PCBJAM / PCBJAM_FP
+    // plugins resolve each via window.kicadLibs.
     writeIfAbsent(`${KICAD_CONFIG_DIR}/sym-lib-table`, symLibTable);
-    writeIfAbsent(
-      `${KICAD_CONFIG_DIR}/fp-lib-table`,
-      "(fp_lib_table\n  (version 7)\n)\n",
-    );
+    writeIfAbsent(`${KICAD_CONFIG_DIR}/fp-lib-table`, fpLibTable);
     writeIfAbsent(
       `${KICAD_CONFIG_DIR}/design-block-lib-table`,
       "(design_block_lib_table\n  (version 7)\n)\n",

@@ -1,30 +1,39 @@
 import type { LibInfo, LibItemInfo, LibsSource } from "./source";
 
 /**
- * 0004-A write-path spike (no backend). Wraps a `LibsSource` with ONE in-memory
- * writable user lib so the editor's save-symbol flow has a target and we can
- * exercise the full save → enumerate → load round-trip through the same WASM
- * bridge — without committing to the backend design first. Gated by
- * `?libwrite=1`. Saved bodies are mirrored onto `window.__pcbjamSaved` so the
- * Playwright probe can inspect them. Replaced in 0004-C by real remote writes.
+ * Write-path spike (no backend). Wraps a `LibsSource` with ONE in-memory writable
+ * user lib so the editor's save flow has a target and we can exercise the full
+ * save → enumerate → load round-trip through the same WASM bridge — without
+ * committing to the backend design first.
+ *
+ * - Symbols (0004-A): `?libwrite=1` → `withSpikeWritableLib`.
+ * - Footprints (0009-S): `?fpwrite=1` → `withSpikeWritableFpLib`.
+ *
+ * Saved bodies are mirrored onto `window.__pcbjamSaved` so the Playwright probe
+ * can inspect them. Replaced by real remote writes once the backend lands.
  */
-const SPIKE_RW_LIB_ID = "spike-user";
-const SPIKE_RW_LIB_NAME = "My Symbols (spike)";
-
 declare global {
   interface Window {
     __pcbjamSaved?: Record<string, string>;
   }
 }
 
-export function withSpikeWritableLib(
+interface SpikeLibSpec {
+  id: string;
+  name: string;
+  kind: "symbol" | "footprint";
+}
+
+function withSpikeKindLib(
   inner: LibsSource | null,
   log: (msg: string) => void,
+  spec: SpikeLibSpec,
 ): LibsSource {
-  const store = new Map<string, string>(); // symbol name -> body
-  window.__pcbjamSaved = Object.create(null) as Record<string, string>;
+  const store = new Map<string, string>(); // item name -> body
+  // Don't clobber an existing capture map (so symbol + footprint spikes coexist).
+  window.__pcbjamSaved ??= Object.create(null) as Record<string, string>;
 
-  const isSpike = (libId: string) => libId === SPIKE_RW_LIB_ID;
+  const isSpike = (libId: string) => libId === spec.id;
 
   return {
     async listLibs(): Promise<LibInfo[]> {
@@ -37,15 +46,12 @@ export function withSpikeWritableLib(
       } catch (e) {
         log(`[libs] spike: inner listLibs failed, origins omitted: ${String(e)}`);
       }
-      return [
-        ...base,
-        { id: SPIKE_RW_LIB_ID, name: SPIKE_RW_LIB_NAME, type: "user" },
-      ];
+      return [...base, { id: spec.id, name: spec.name, type: "user" }];
     },
 
     async listItems(libId: string): Promise<LibItemInfo[]> {
       if (isSpike(libId))
-        return [...store.keys()].map((name) => ({ kind: "symbol", name }));
+        return [...store.keys()].map((name) => ({ kind: spec.kind, name }));
       return inner ? inner.listItems(libId) : [];
     },
 
@@ -71,8 +77,32 @@ export function withSpikeWritableLib(
       }
       store.set(name, body);
       window.__pcbjamSaved![name] = body;
-      log(`[libs] spike saved symbol "${name}" (${body.length} bytes)`);
+      log(`[libs] spike saved ${spec.kind} "${name}" (${body.length} bytes)`);
       return true;
     },
   };
+}
+
+/** 0004-A symbol write spike (`?libwrite=1`). */
+export function withSpikeWritableLib(
+  inner: LibsSource | null,
+  log: (msg: string) => void,
+): LibsSource {
+  return withSpikeKindLib(inner, log, {
+    id: "spike-user",
+    name: "My Symbols (spike)",
+    kind: "symbol",
+  });
+}
+
+/** 0009-S footprint write spike (`?fpwrite=1`). */
+export function withSpikeWritableFpLib(
+  inner: LibsSource | null,
+  log: (msg: string) => void,
+): LibsSource {
+  return withSpikeKindLib(inner, log, {
+    id: "spike-fp-user",
+    name: "My Footprints (spike)",
+    kind: "footprint",
+  });
 }

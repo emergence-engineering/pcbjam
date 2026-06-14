@@ -61,7 +61,7 @@ trap 'kw_fail 130; exit 130' INT TERM
 
 cd "$(dirname "$0")/.."
 
-VALID_APPS="pcbnew | eeschema | calculator | pl_editor | symbol_editor | gerbview | all"
+VALID_APPS="pcbnew | eeschema | calculator | pl_editor | symbol_editor | footprint_editor | gerbview | all"
 
 usage() {
     echo "Usage: ./docker/build.sh <app>[,<app>...] [args...]" >&2
@@ -87,12 +87,12 @@ shift
 # pcbnew first in "all" — its 90-min host-side wasm-opt chain is the critical
 # path, so it must start as early as possible (especially with KICAD_PIPELINE=1).
 if [[ "$APP_NAME" == "all" ]]; then
-    APPS=(pcbnew eeschema calculator pl_editor symbol_editor gerbview)
+    APPS=(pcbnew eeschema calculator pl_editor symbol_editor footprint_editor gerbview)
 else
     IFS=',' read -r -a APPS <<< "$APP_NAME"
     for app in "${APPS[@]}"; do
         case "$app" in
-            pcbnew|eeschema|calculator|pl_editor|symbol_editor|gerbview) ;;
+            pcbnew|eeschema|calculator|pl_editor|symbol_editor|footprint_editor|gerbview) ;;
             *)
                 echo "Error: unknown app '$app' (expected: ${VALID_APPS})" >&2
                 usage
@@ -159,10 +159,11 @@ fi
 # but lives under the pcb_calculator/ subtree.
 kicad_subdir_for() {
     case "$1" in
-        calculator)    echo "pcb_calculator" ;;
-        pl_editor)     echo "pagelayout_editor" ;;
-        symbol_editor) echo "eeschema" ;;
-        *)             echo "$1" ;;
+        calculator)       echo "pcb_calculator" ;;
+        pl_editor)        echo "pagelayout_editor" ;;
+        symbol_editor)    echo "eeschema" ;;
+        footprint_editor) echo "pcbnew" ;;
+        *)                echo "$1" ;;
     esac
 }
 

@@ -11,7 +11,10 @@ export const WASM_ASSET_BASE_URL =
 import type { ProviderConfig, ProviderKind } from "@/wasm/collab";
 import { remoteLibsSource } from "@/wasm/libs/remote-source";
 import type { LibsSource } from "@/wasm/libs/source";
-import { withSpikeWritableLib } from "@/wasm/libs/spike-writable";
+import {
+  withSpikeWritableFpLib,
+  withSpikeWritableLib,
+} from "@/wasm/libs/spike-writable";
 import { staticLibsSource } from "@/wasm/libs/static-source";
 
 /**
@@ -78,14 +81,18 @@ export function libsSourceConfig(projectId?: string): LibsSource | null {
         ? staticLibsSource()
         : remoteLibsSource(API_BASE_URL, libsOwner(), projectId);
 
-  // 0004-A spike: `?libwrite=1` adds one in-memory writable user lib so the
+  // 0004-A spike: `?libwrite=1` adds one in-memory writable user SYMBOL lib so the
   // editor save path works with no backend (a dev/test aid). The real remote
   // write path (0004-C) needs no flag — boot ensures a user lib via createLib.
-  if (
-    typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).get("libwrite") === "1"
-  ) {
-    return withSpikeWritableLib(base, (m) => console.log(m));
+  // 0009-S spike: `?fpwrite=1` does the same for a writable FOOTPRINT lib.
+  if (typeof window !== "undefined") {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("fpwrite") === "1") {
+      return withSpikeWritableFpLib(base, (m) => console.log(m));
+    }
+    if (params.get("libwrite") === "1") {
+      return withSpikeWritableLib(base, (m) => console.log(m));
+    }
   }
 
   return base;

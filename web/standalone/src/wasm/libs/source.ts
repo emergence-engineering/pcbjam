@@ -48,11 +48,18 @@ export interface LibsSource {
   createLib?(name: string): Promise<LibInfo | null>;
 }
 
-/** The function the WASM `SCH_IO_PCBJAM_LIB` plugin calls via the JS bridge. */
+/**
+ * The function the WASM lib plugins call via the JS bridge. Both the symbol
+ * plugin (`SCH_IO_PCBJAM_LIB`) and the footprint plugin (`PCB_IO_PCBJAM_FP`)
+ * call the same hook; `kind` (4th arg) discriminates the item kind. The symbol
+ * plugin omits it (passes 3 args) so it defaults to "symbol" — keeping the
+ * existing eeschema binary correct with no rebuild.
+ */
 export type KicadLibsRequest = (
   op: string,
   lib: string,
   arg: string,
+  kind?: string,
 ) => Promise<string | null>;
 
 declare global {
@@ -89,10 +96,32 @@ export function buildSymLibTable(libsList: LibInfo[]): string {
 }
 
 /**
- * Install `window.kicadLibs` backed by a `LibsSource`. The plugin calls
- * `request(op, "/mnt/pcbjam[-rw]/<id>", arg)`:
- *   "list" -> JSON {"symbols":[...]}   (symbol names in the lib)
- *   "get"  -> the item body s-expr     (arg = symbol name; null if absent)
+ * Build fp-lib-table content (KiCad v7) with one PCBJAM_FP row per lib. The
+ * footprint editor selects the plugin from this row's `type` field (via
+ * PCB_IO_MGR::EnumFromStr), so it MUST be "PCBJAM_FP" to match the registered
+ * plugin name. Same /mnt/pcbjam/<id> URI as symbols (the same lib id can appear
+ * in both tables — user libs are kind-agnostic containers).
+ */
+export function buildFpLibTable(libsList: LibInfo[]): string {
+  const rows = libsList.map((l) => {
+    const descr = l.description ? sexprEscape(l.description) : "";
+    return `  (lib (name "${sexprEscape(
+      l.name,
+    )}")(type "PCBJAM_FP")(uri "${libUri(
+      l.id,
+    )}")(options "")(descr "${descr}"))`;
+  });
+  return `(fp_lib_table\n  (version 7)\n${rows.join("\n")}${
+    rows.length ? "\n" : ""
+  })\n`;
+}
+
+/**
+ * Install `window.kicadLibs` backed by a `LibsSource`. Both lib plugins call
+ * `request(op, "/mnt/pcbjam/<id>", arg, kind)` (kind defaults to "symbol" so the
+ * symbol plugin's 3-arg calls still work):
+ *   "list" -> JSON {"symbols":[...]} | {"footprints":[...]}  (names of that kind)
+ *   "get"  -> the item body s-expr     (arg = item name; null if absent)
  *   "save" -> "ok" / null              (arg = JSON {"name":..,"body":..})
  */
 export function installLibsProvider(
@@ -102,9 +131,9 @@ export function installLibsProvider(
   if (window.kicadLibs) return;
   const delay = artificialDelayMs();
 
-  const request: KicadLibsRequest = async (op, lib, arg) => {
+  const request: KicadLibsRequest = async (op, lib, arg, kind = "symbol") => {
     const id = libIdFromUri(lib);
-    log(`[libs] request op=${op} lib=${lib} (id=${id}) arg=${arg}`);
+    log(`[libs] request op=${op} kind=${kind} lib=${lib} (id=${id}) arg=${arg}`);
     if (!id) return null;
     if (delay) await sleep(delay);
 
@@ -112,13 +141,15 @@ export function installLibsProvider(
       switch (op) {
         case "list": {
           const items = await source.listItems(id);
-          const symbols = items
-            .filter((i) => i.kind === "symbol")
+          const names = items
+            .filter((i) => i.kind === kind)
             .map((i) => i.name);
-          return JSON.stringify({ symbols });
+          // Each plugin parses its own key: footprints / symbols.
+          const key = kind === "footprint" ? "footprints" : "symbols";
+          return JSON.stringify({ [key]: names });
         }
         case "get":
-          return await source.getItemBody(id, "symbol", arg);
+          return await source.getItemBody(id, kind, arg);
         case "save": {
           let parsed: { name?: string; body?: string };
           try {
@@ -134,7 +165,7 @@ export function installLibsProvider(
           }
           const ok = await source.saveItemBody(
             id,
-            "symbol",
+            kind,
             parsed.name,
             parsed.body,
           );

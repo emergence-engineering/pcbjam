@@ -60,8 +60,13 @@ case "$APP_NAME" in
         KICAD_TARGET="symbol_editor"
         KICAD_SUBDIR="eeschema"
         ;;
+    footprint_editor)
+        # served by the pcbnew kiface, so it builds in pcbnew/ (like symbol_editor in eeschema/)
+        KICAD_TARGET="footprint_editor"
+        KICAD_SUBDIR="pcbnew"
+        ;;
     *)
-        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor | symbol_editor | gerbview)" >&2
+        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor | symbol_editor | footprint_editor | gerbview)" >&2
         exit 1
         ;;
 esac
@@ -72,8 +77,18 @@ esac
 # et al.) the shared kiface objects reference. Without this the symbol_editor link
 # fails with "undefined symbol: kicadCollabOnSave" (the placeholder defines nothing).
 case "$APP_NAME" in
-    symbol_editor) EMBIND_APP="eeschema" ;;
-    *)             EMBIND_APP="$APP_NAME" ;;
+    symbol_editor)    EMBIND_APP="eeschema" ;;
+    footprint_editor) EMBIND_APP="pcbnew" ;;
+    *)                EMBIND_APP="$APP_NAME" ;;
+esac
+
+# Which app's WASM stub libraries (scripting/frame placeholders) to link. Like
+# EMBIND_APP, the footprint_editor reuses pcbnew's: it links the pcbnew kiface
+# objects, which reference pcbnew's action-plugin scripting symbols
+# (pcbnewGetScriptsSearchPaths et al., defined in pcbnew_scripting_stub.cpp).
+case "$APP_NAME" in
+    footprint_editor) STUB_APP="pcbnew" ;;
+    *)                STUB_APP="$APP_NAME" ;;
 esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -262,20 +277,20 @@ WX_CXXFLAGS=$("${WX_BUILD}/wx-config" --cxxflags 2>/dev/null || echo "-I${WX_BUI
 # - pcbnew: pcbnew_scripting_stub.cpp (action-plugin scripting placeholders)
 # - eeschema: eeschema_frame_stub.cpp (placeholder; grows as linker dictates)
 APP_STUB_LINK=""
-APP_SCRIPTING_STUB_SRC="${STUBS_DIR}/${APP_NAME}_scripting_stub.cpp"
+APP_SCRIPTING_STUB_SRC="${STUBS_DIR}/${STUB_APP}_scripting_stub.cpp"
 if [ -f "${APP_SCRIPTING_STUB_SRC}" ]; then
-    log_info "Building app scripting stub: ${APP_NAME}_scripting_stub.cpp"
-    em++ -c ${WX_CXXFLAGS} "${APP_SCRIPTING_STUB_SRC}" -o "${STUBS_BUILD}/${APP_NAME}_scripting_stub.o"
-    emar rcs "${STUBS_BUILD}/lib${APP_NAME}_scripting_stub.a" "${STUBS_BUILD}/${APP_NAME}_scripting_stub.o"
-    APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${APP_NAME}_scripting_stub.a"
+    log_info "Building app scripting stub: ${STUB_APP}_scripting_stub.cpp"
+    em++ -c ${WX_CXXFLAGS} "${APP_SCRIPTING_STUB_SRC}" -o "${STUBS_BUILD}/${STUB_APP}_scripting_stub.o"
+    emar rcs "${STUBS_BUILD}/lib${STUB_APP}_scripting_stub.a" "${STUBS_BUILD}/${STUB_APP}_scripting_stub.o"
+    APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${STUB_APP}_scripting_stub.a"
 fi
 
-APP_FRAME_STUB_SRC="${STUBS_DIR}/${APP_NAME}_frame_stub.cpp"
+APP_FRAME_STUB_SRC="${STUBS_DIR}/${STUB_APP}_frame_stub.cpp"
 if [ -f "${APP_FRAME_STUB_SRC}" ] && [ -s "${APP_FRAME_STUB_SRC}" ]; then
-    log_info "Building app frame stub: ${APP_NAME}_frame_stub.cpp"
-    em++ -c ${WX_CXXFLAGS} "${APP_FRAME_STUB_SRC}" -o "${STUBS_BUILD}/${APP_NAME}_frame_stub.o"
-    emar rcs "${STUBS_BUILD}/lib${APP_NAME}_frame_stub.a" "${STUBS_BUILD}/${APP_NAME}_frame_stub.o"
-    APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${APP_NAME}_frame_stub.a"
+    log_info "Building app frame stub: ${STUB_APP}_frame_stub.cpp"
+    em++ -c ${WX_CXXFLAGS} "${APP_FRAME_STUB_SRC}" -o "${STUBS_BUILD}/${STUB_APP}_frame_stub.o"
+    emar rcs "${STUBS_BUILD}/lib${STUB_APP}_frame_stub.a" "${STUBS_BUILD}/${STUB_APP}_frame_stub.o"
+    APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${STUB_APP}_frame_stub.a"
 fi
 
 log_info "Stub libraries built"
@@ -408,7 +423,9 @@ if [ -f "${EMBIND_SRC}" ]; then
     # ${KICAD_BUILD}/common by make_lexer custom commands on the pcbcommon target).
     # On a fresh build dir they don't exist until make runs — build pcbcommon first.
     # No wasted work: the app target depends on pcbcommon anyway; incremental no-op.
-    if [ "${APP_NAME}" = "pcbnew" ]; then
+    # Guard on EMBIND_APP (not APP_NAME) so footprint_editor — whose embind IS
+    # pcbnew's — also pre-builds pcbcommon.
+    if [ "${EMBIND_APP}" = "pcbnew" ]; then
         log_info "Pre-building pcbcommon so generated lexer headers exist for the embind compile..."
         emmake make -j${JOBS} pcbcommon
     fi
