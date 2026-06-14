@@ -177,10 +177,12 @@ async function main(): Promise<void> {
       }
       return { status: 200 as const, body: await walk(PROJECT_DIR) };
     },
-    listLibs: async ({ headers }) => {
+    listLibs: async ({ headers, query }) => {
       const owner = ownerOf(headers);
+      // Origins filtered by item kind (?kind); user libs are kind-agnostic
+      // containers → always listed.
       const [origins, user] = await Promise.all([
-        listLibs(libs),
+        listLibs(libs, query.kind),
         listUserLibs(userLibs, owner),
       ]);
       return { status: 200 as const, body: [...origins, ...user] };

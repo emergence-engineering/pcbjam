@@ -30,8 +30,8 @@ export function remoteLibsSource(
     `${encodeURIComponent(kind)}/${encodeURIComponent(name)}`;
 
   return {
-    async listLibs(): Promise<LibInfo[]> {
-      const res = await client.listLibs();
+    async listLibs(kind?: string): Promise<LibInfo[]> {
+      const res = await client.listLibs({ query: { kind } });
       if (res.status !== 200) return [];
       return res.body.map((l) => ({
         id: l.id,

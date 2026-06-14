@@ -31,6 +31,13 @@ function safeLibDir(root: string, lib: string): string | null {
   return path.join(root, lib);
 }
 
+/** Per-kind body file extension (one file per item), or null for unknown kinds. */
+export function extForKind(kind: string): string | null {
+  if (kind === "symbol") return ".kicad_sym";
+  if (kind === "footprint") return ".kicad_mod";
+  return null;
+}
+
 interface IndexFile {
   items?: { kind: string; name: string; description?: string | null; keywords?: string | null }[];
   description?: string | null;
@@ -44,7 +51,10 @@ async function readIndex(dir: string): Promise<IndexFile | null> {
   }
 }
 
-export async function listLibs(cfg: LibsConfig): Promise<Lib[]> {
+export async function listLibs(
+  cfg: LibsConfig,
+  kind?: string,
+): Promise<Lib[]> {
   if (!cfg.dir) return [];
   let entries: import("node:fs").Dirent[];
   try {
@@ -56,6 +66,9 @@ export async function listLibs(cfg: LibsConfig): Promise<Lib[]> {
   for (const e of entries) {
     if (!e.isDirectory() || e.name.startsWith(".")) continue;
     const idx = await readIndex(path.join(cfg.dir, e.name));
+    // Filter origins by item kind when requested (a footprint tool shouldn't
+    // list symbol-only origins, and vice versa).
+    if (kind && !(idx?.items ?? []).some((i) => i.kind === kind)) continue;
     libs.push({
       id: e.name,
       name: e.name,
@@ -92,14 +105,15 @@ export function itemBodyPath(
   kind: string,
   name: string,
 ): string | null {
-  if (!cfg.dir || kind !== "symbol") return null;
+  const ext = extForKind(kind);
+  if (!cfg.dir || !ext) return null;
   const dir = safeLibDir(cfg.dir, lib);
   if (!dir) return null;
-  // Symbol names allow a wide charset but never path separators.
+  // Item names allow a wide charset but never path separators.
   if (name.includes("/") || name.includes("\\") || name.includes("..")) {
     return null;
   }
-  return path.join(dir, `${name}.kicad_sym`);
+  return path.join(dir, `${name}${ext}`);
 }
 
 export function streamBody(absPath: string) {

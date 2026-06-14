@@ -58,8 +58,9 @@ const SYMBOLS: Record<string, string> = {
 
 export function staticLibsSource(): LibsSource {
   return {
-    async listLibs(): Promise<LibInfo[]> {
-      return [STATIC_LIB];
+    async listLibs(kind?: string): Promise<LibInfo[]> {
+      // The built-in example lib is symbols-only.
+      return !kind || kind === "symbol" ? [STATIC_LIB] : [];
     },
     async listItems(libId: string): Promise<LibItemInfo[]> {
       if (libId !== STATIC_LIB.id) return [];

@@ -36,16 +36,17 @@ function withSpikeKindLib(
   const isSpike = (libId: string) => libId === spec.id;
 
   return {
-    async listLibs(): Promise<LibInfo[]> {
+    async listLibs(kind?: string): Promise<LibInfo[]> {
       // Resilient to a missing backend: the spike must boot standalone (the
       // writable lib is in-memory), so an unreachable inner source just yields
       // no origins rather than failing the whole table.
       let base: LibInfo[] = [];
       try {
-        base = inner ? await inner.listLibs() : [];
+        base = inner ? await inner.listLibs(kind) : [];
       } catch (e) {
         log(`[libs] spike: inner listLibs failed, origins omitted: ${String(e)}`);
       }
+      // The spike lib is the writable target for its kind (mimics a user lib).
       return [...base, { id: spec.id, name: spec.name, type: "user" }];
     },
 

@@ -121,7 +121,8 @@ async function doBoot(opts: BootOptions): Promise<void> {
     installLibsProvider(libsSource, log);
     try {
       // Ensure the owner has at least one writable user lib to save items into.
-      let libsList = await libsSource.listLibs();
+      // Pass the tool's kind so origins are filtered to the right domain.
+      let libsList = await libsSource.listLibs(libKind);
       if (libsSource.createLib && !libsList.some((l) => l.type === "user")) {
         const created = await libsSource.createLib(DEFAULT_USER_LIB_NAME);
         if (created) {

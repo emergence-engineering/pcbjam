@@ -21,8 +21,13 @@ export interface LibItemInfo {
 }
 
 export interface LibsSource {
-  /** Libraries to expose to the editor (one sym-lib-table row each). */
-  listLibs(): Promise<LibInfo[]>;
+  /**
+   * Libraries to expose to the editor (one lib-table row each). `kind` (the
+   * current tool's item kind, "symbol" | "footprint") filters origins to those
+   * holding that kind; user libs are kind-agnostic containers, always listed.
+   * Omitted ⇒ all libs.
+   */
+  listLibs(kind?: string): Promise<LibInfo[]>;
   /** Items in a library (by lib id). */
   listItems(libId: string): Promise<LibItemInfo[]>;
   /**

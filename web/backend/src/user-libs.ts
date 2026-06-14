@@ -5,16 +5,19 @@
 // plain files under USER_LIBS_DIR, owner-namespaced, in the same per-lib layout
 // the read side uses:
 //
-//   <USER_LIBS_DIR>/<owner>/<libId>/index.json          { items: [...], type, name }
-//   <USER_LIBS_DIR>/<owner>/<libId>/<Symbol>.kicad_sym   the saved body (verbatim)
+//   <USER_LIBS_DIR>/<owner>/<libId>/index.json           { items: [...], type, name }
+//   <USER_LIBS_DIR>/<owner>/<libId>/<Symbol>.kicad_sym    a saved symbol body
+//   <USER_LIBS_DIR>/<owner>/<libId>/<Footprint>.kicad_mod a saved footprint body
 //
-// No parsing: the editor sends fork-native kicad_symbol_lib bytes, stored as-is
-// (decision: user-saved bodies round-trip without a version shim). Owner comes
-// from OWNER_HEADER; absent ⇒ "default".
+// No parsing: the editor sends fork-native bytes, stored as-is (decision:
+// user-saved bodies round-trip without a version shim). A user lib is a
+// kind-agnostic container (symbols + footprints can coexist). Owner comes from
+// OWNER_HEADER; absent ⇒ "default".
 
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Lib, LibItem } from "@pcbjam/shared";
+import { extForKind } from "./libs.js";
 
 export const DEFAULT_OWNER = "default";
 
@@ -161,11 +164,12 @@ export function userItemBodyPath(
   name: string,
 ): string | null {
   const dir = libDir(cfg, owner, lib);
-  if (!dir || kind !== "symbol" || !safeSeg(name)) return null;
-  return path.join(dir, `${name}.kicad_sym`);
+  const ext = extForKind(kind);
+  if (!dir || !ext || !safeSeg(name)) return null;
+  return path.join(dir, `${name}${ext}`);
 }
 
-/** Write one symbol body into a user lib + index it. */
+/** Write one item body (symbol or footprint) into a user lib + index it. */
 export async function writeUserItem(
   cfg: UserLibsConfig,
   owner: string,
@@ -174,13 +178,14 @@ export async function writeUserItem(
   name: string,
   body: string,
 ): Promise<LibItem> {
-  if (kind !== "symbol") throw new UserLibError(400, "only symbols for now");
+  const ext = extForKind(kind);
+  if (!ext) throw new UserLibError(400, `unsupported kind "${kind}"`);
   const dir = libDir(cfg, owner, lib);
   if (!dir || !safeSeg(name)) throw new UserLibError(400, "bad lib or item name");
   const idx = await readIndex(dir);
   if (!idx) throw new UserLibError(404, `user library "${lib}" not found`);
 
-  await fs.writeFile(path.join(dir, `${name}.kicad_sym`), body, "utf8");
+  await fs.writeFile(path.join(dir, `${name}${ext}`), body, "utf8");
 
   const items = idx.items ?? [];
   const existing = items.find((i) => i.kind === kind && i.name === name);
