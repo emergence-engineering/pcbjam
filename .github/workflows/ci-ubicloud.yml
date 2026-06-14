@@ -105,6 +105,18 @@ jobs:
         working-directory: tests
         run: npm ci
 
+      # The collab e2e specs rebuild apps/kicad/collab-bundle.js with esbuild
+      # (collab/build.mjs), which bundles web/standalone/src/wasm/collab/* and
+      # its `@pcbjam/shared` import. That package is the web/pcbjam-shared
+      # submodule, resolved through the web/ pnpm workspace — so install it
+      # (and the bundle's runtime deps: zod, @ts-rest/core, yjs) here. Without
+      # this the bundle build fails: [ERROR] Could not resolve "@pcbjam/shared".
+      - name: Install web workspace deps (collab bundle)
+        working-directory: web
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
       - name: Install Playwright browsers
         working-directory: tests
         run: npx playwright install --with-deps firefox chromium
