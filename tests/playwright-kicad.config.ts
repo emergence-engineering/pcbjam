@@ -72,6 +72,18 @@ const PCBNEW_FAMILY_SPECS = [
   '**/pcbnew-collab.spec.ts',
   '**/load-pcb.spec.ts',
   '**/load-pcb-probe.spec.ts',
+  // Specs added 2026-06-11..06-13 that boot pcbnew (pcbnew.html /
+  // pcbnew-collab.html). Without routing here they ran on Firefox in CI and
+  // timed out at instantiation (the SpiderMonkey/x86 code-budget OOM above).
+  // The last three are parametrized across pl_editor/eeschema/pcbnew; routing
+  // the whole file moves those variants to chromium-ci too (they boot fine on
+  // V8) — only the browser exercising them changes, not whether they run.
+  '**/appearance.spec.ts',
+  '**/contextmenu-scrollbar-pcbnew.spec.ts',
+  '**/dark-mode.spec.ts',
+  '**/items-bridge.spec.ts',
+  '**/roundtrip.spec.ts',
+  '**/save-hook.spec.ts',
 ];
 
 const appsDir = 'apps';
