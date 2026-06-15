@@ -1,10 +1,11 @@
 import {
   EXTENSION_TOOL,
   FILELESS_TOOLS,
+  LIB_EXTENSION_TOOL,
   TOOL_LABELS,
   type Tool,
 } from "@pcbjam/shared";
-import { ArrowLeft, ExternalLink, FolderOpen } from "lucide-react";
+import { ArrowLeft, ExternalLink, FolderOpen, Library } from "lucide-react";
 import { formatBytes } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
@@ -13,10 +14,18 @@ export interface LocalFile {
   size?: number;
 }
 
-function toolForPath(path: string): Tool | null {
+function ext(path: string): string {
   const dot = path.lastIndexOf(".");
-  if (dot < 0) return null;
-  return EXTENSION_TOOL[path.slice(dot).toLowerCase()] ?? null;
+  return dot < 0 ? "" : path.slice(dot).toLowerCase();
+}
+
+function toolForPath(path: string): Tool | null {
+  return EXTENSION_TOOL[ext(path)] ?? null;
+}
+
+/** A library file (.kicad_sym / .kicad_mod) → the editor that opens it scoped. */
+function libToolForPath(path: string): Tool | null {
+  return LIB_EXTENSION_TOOL[ext(path)] ?? null;
 }
 
 /**
@@ -31,12 +40,15 @@ export function LocalProjectView({
   name,
   files,
   onOpen,
+  onOpenLib,
   onBack,
 }: {
   name: string;
   files: LocalFile[];
   /** Launch a tool; `path` is undefined for file-less tools. */
   onOpen: (tool: Tool, path?: string) => void;
+  /** Open a local library FILE (.kicad_sym/.kicad_mod) scoped in its editor. */
+  onOpenLib: (tool: Tool, path: string) => void;
   onBack: () => void;
 }) {
   return (
@@ -70,6 +82,7 @@ export function LocalProjectView({
       <div className="divide-y rounded-lg border">
         {files.map((f) => {
           const tool = toolForPath(f.path);
+          const libTool = tool ? null : libToolForPath(f.path);
           return (
             <div
               key={f.path}
@@ -87,6 +100,14 @@ export function LocalProjectView({
                   onClick={() => onOpen(tool, f.path)}
                 >
                   <ExternalLink size={14} /> Open in {TOOL_LABELS[tool]}
+                </button>
+              )}
+              {libTool && (
+                <button
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
+                  onClick={() => onOpenLib(libTool, f.path)}
+                >
+                  <Library size={14} /> Open in {TOOL_LABELS[libTool]}
                 </button>
               )}
             </div>

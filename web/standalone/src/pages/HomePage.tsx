@@ -3,6 +3,10 @@ import { Link } from "react-router-dom";
 import type { Lib, Tool } from "@pcbjam/shared";
 import { FolderOpen, Library, Loader2, Package } from "lucide-react";
 import { useLibs, useProjects } from "@/lib/api";
+import { libsSourceConfig } from "@/lib/config";
+import { scopedLibsSource } from "@/wasm/libs/scoped-source";
+import { localFileLibsSource } from "@/wasm/libs/local-file-source";
+import type { LibsSource } from "@/wasm/libs/source";
 import { downloadBytes } from "@/lib/download";
 import { Button } from "@/components/ui/button";
 import { ToolGrid } from "@/components/ToolGrid";
@@ -110,7 +114,21 @@ export function HomePage() {
   // A tool launched straight from the home page — no local folder, no backend
   // project. File-less editors browse backend libraries; document editors
   // (schematic/PCB/drawing sheet) boot to a blank document (KiCad-launcher style).
-  const [launchedTool, setLaunchedTool] = React.useState<{ tool: Tool } | null>(null);
+  // `libsSource`, when set, scopes the editor to ONE library (a backend lib, or a
+  // local lib file); omitted ⇒ the editor's configured default source.
+  const [launchedTool, setLaunchedTool] = React.useState<{
+    tool: Tool;
+    libsSource?: LibsSource | null;
+  } | null>(null);
+
+  /** Open a backend library scoped to itself in its matching editor. */
+  const openScopedLib = (tool: Tool, lib: Lib) => {
+    const base = libsSourceConfig("local");
+    setLaunchedTool({
+      tool,
+      libsSource: base ? scopedLibsSource(base, lib.id) : undefined,
+    });
+  };
 
   // <input webkitdirectory> is non-standard; set it imperatively.
   React.useEffect(() => {
@@ -128,6 +146,7 @@ export function HomePage() {
         slug="local"
         projectId="local"
         files={[]}
+        libsSource={launchedTool.libsSource}
         fetchBytes={async (p) => {
           throw new Error(`no project file to fetch: ${p}`);
         }}
@@ -158,6 +177,21 @@ export function HomePage() {
         name={local.name}
         files={local.files}
         onOpen={(tool, path) => setLaunched({ tool, target: path })}
+        onOpenLib={(tool, path) => {
+          void (async () => {
+            const bytes = await local.fetchBytes(path);
+            const text = new TextDecoder().decode(bytes);
+            const id = (path.split("/").pop() ?? path).replace(
+              /\.(kicad_sym|kicad_mod)$/i,
+              "",
+            );
+            const kind = tool === "footprint_editor" ? "footprint" : "symbol";
+            setLaunchedTool({
+              tool,
+              libsSource: localFileLibsSource(id, text, kind),
+            });
+          })();
+        }}
         onBack={() => setLocal(null)}
       />
     );
@@ -265,13 +299,13 @@ export function HomePage() {
             icon={<Library size={16} />}
             label="Symbols"
             query={symbolLibs}
-            onOpen={() => setLaunchedTool({ tool: "symbol_editor" })}
+            onOpen={(lib) => openScopedLib("symbol_editor", lib)}
           />
           <LibGroup
             icon={<Package size={16} />}
             label="Footprints"
             query={footprintLibs}
-            onOpen={() => setLaunchedTool({ tool: "footprint_editor" })}
+            onOpen={(lib) => openScopedLib("footprint_editor", lib)}
           />
         </div>
       </section>

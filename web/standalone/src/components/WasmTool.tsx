@@ -19,6 +19,7 @@ import {
   type DocSource,
 } from "@/lib/config";
 import { bootKicadTool } from "@/wasm/boot";
+import type { LibsSource } from "@/wasm/libs/source";
 import { memfsFilePath, memfsProjectDir } from "@/wasm/constants";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
 import { registerSaveHook, type SaveBytes } from "@/wasm/save-flow";
@@ -348,6 +349,7 @@ export function WasmTool({
   saveBytes,
   docSource,
   assetBaseUrl,
+  libsSource,
 }: {
   tool: Tool;
   slug: string;
@@ -355,6 +357,12 @@ export function WasmTool({
   projectId: string;
   files: ToolFile[];
   targetPath?: string;
+  /**
+   * Override the library source the editor browses. Omitted ⇒ the configured
+   * default (`libsSourceConfig`). Used to open a single library scoped to itself
+   * — a specific backend lib, or a local `.kicad_sym`/`.kicad_mod` file.
+   */
+  libsSource?: LibsSource | null;
   /** Fetch one project-relative file's bytes (contract loader or local folder). */
   fetchBytes: (relPath: string) => Promise<Uint8Array>;
   /**
@@ -442,7 +450,8 @@ export function WasmTool({
           log: append,
           onStatus: setStatus,
           onAbort: oom.onAbort,
-          libsSource: libsSourceConfig(projectId),
+          libsSource:
+            libsSource !== undefined ? libsSource : libsSourceConfig(projectId),
         });
         // Register the save sink before the file opens: from here on, every
         // editor File→Save (MEMFS write) is routed onward through saveBytes.
