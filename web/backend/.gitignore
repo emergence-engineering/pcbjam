@@ -1,0 +1,7 @@
+# Self-provisioned example libraries (src/extract/ensure-example-libs.ts):
+# .cache/      — blobless sparse clones of upstream kicad-symbols / kicad-footprints
+# .libs/       — extracted serve-format fixtures (LIBS_DIR default)
+# .user-libs/  — writable user libraries created via the editor (USER_LIBS_DIR default)
+.cache/
+.libs/
+.user-libs/

@@ -11,7 +11,7 @@
 // ingestion/extractor) so the open reference server stays trivial. If LIBS_DIR
 // is unset or empty, the lib endpoints simply report no libraries.
 
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { Lib, LibItem } from "@pcbjam/shared";
@@ -20,9 +20,17 @@ export interface LibsConfig {
   dir: string | null;
 }
 
+/** Self-provisioned fixtures dir (see src/extract/ensure-example-libs.ts). */
+const DEFAULT_LIBS_DIR = "./.libs";
+
 export function libsConfig(): LibsConfig {
   const dir = process.env.LIBS_DIR;
-  return { dir: dir ? path.resolve(process.cwd(), dir) : null };
+  if (dir) return { dir: path.resolve(process.cwd(), dir) };
+  // No explicit LIBS_DIR: fall back to the self-provisioned fixtures if present,
+  // so `pnpm dev`/`start` (which run ensure-example-libs first) serve origins
+  // out of the box. Absent ⇒ no origin libraries (the prior behaviour).
+  const fallback = path.resolve(process.cwd(), DEFAULT_LIBS_DIR);
+  return { dir: existsSync(fallback) ? fallback : null };
 }
 
 /** A lib id is its directory name; reject anything that isn't a plain segment. */

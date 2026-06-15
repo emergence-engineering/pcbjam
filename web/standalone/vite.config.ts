@@ -42,7 +42,11 @@ export default defineConfig({
     },
   },
   server: {
-    port: 3048,
+    // Default :3048. The closed `pnpm dev:gpl` runs a second editor instance on
+    // :3049 (alongside the closed stack) via STANDALONE_PORT. strictPort so a
+    // busy port fails loudly instead of drifting onto another service's port.
+    port: Number(process.env.STANDALONE_PORT) || 3048,
+    strictPort: true,
     // KiCad WASM is cross-origin-isolated (COOP/COEP); same-origin /wasm assets
     // load fine. Keep these so SharedArrayBuffer/threads are available.
     headers: {

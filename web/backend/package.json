@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "tsx src/server.ts",
+    "dev": "tsx src/extract/ensure-example-libs.ts && tsx watch src/server.ts",
+    "start": "tsx src/extract/ensure-example-libs.ts && tsx src/server.ts",
+    "ensure-libs": "tsx src/extract/ensure-example-libs.ts",
+    "extract-libs": "tsx src/extract/extract-libs.ts",
     "build": "tsc -p tsconfig.json --noEmit false --declaration false --outDir dist",
     "typecheck": "tsc --noEmit"
   },

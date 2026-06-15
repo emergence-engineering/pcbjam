@@ -27,8 +27,12 @@ web/
   (no iframe), syncs the project tree into MEMFS, drives File→Open, and runs
   same-tab collaboration over BroadcastChannel.
 - **Example backend**: Fastify + ts-rest serving a single project off the local
-  filesystem (`PROJECT_DIR`). No DB, no auth, no uploads — the minimum the editor
-  needs, and a worked example of the contract.
+  filesystem (`PROJECT_DIR`). **No DB**, no auth, no uploads — the minimum the
+  editor needs, and a worked example of the contract. Listens on `:3060`. On
+  `dev`/`start` it **self-provisions example libraries** — a curated slice of
+  upstream KiCad symbol + footprint libs is cloned + extracted into `.libs`
+  (served as read-only origins), so a bare clone has libraries to browse with no
+  closed repo present. See `backend/src/extract/`.
 
 ## Quick start
 
