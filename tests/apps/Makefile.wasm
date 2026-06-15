@@ -167,6 +167,7 @@ all: minimal_test.html \
      $(S)/regions/regions_test.html \
      $(S)/maximize/maximize_test.html \
      $(S)/earlysize/earlysize_test.html \
+     $(S)/selectheight/selectheight_test.html \
      $(S)/threadpool/threadpool_test.html \
      $(S)/logerror/logerror_test.html \
      $(S)/retinascale/retinascale_test.html \
@@ -508,6 +509,12 @@ $(S)/earlysize/earlysize_test.o: $(S)/earlysize/earlysize_test.cpp
 $(S)/earlysize/earlysize_test.html: $(S)/earlysize/earlysize_test.o $(WX_CORE_LIB) $(JS_FILES)
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
+$(S)/selectheight/selectheight_test.o: $(S)/selectheight/selectheight_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/selectheight/selectheight_test.html: $(S)/selectheight/selectheight_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
 # Thread Pool test (pthread) - reproduces KiCad deadlock when hardware_concurrency() > PTHREAD_POOL_SIZE
 $(S)/threadpool/threadpool_test.o: $(S)/threadpool/threadpool_test.cpp
 	$(CXX) -c $(CXXFLAGS) -pthread $< -o $@
@@ -604,6 +611,7 @@ bitmask: $(S)/bitmask/bitmask_test.html
 regions: $(S)/regions/regions_test.html
 maximize: $(S)/maximize/maximize_test.html
 earlysize: $(S)/earlysize/earlysize_test.html
+selectheight: $(S)/selectheight/selectheight_test.html
 threadpool: $(S)/threadpool/threadpool_test.html
 logerror: $(S)/logerror/logerror_test.html
 
@@ -627,7 +635,7 @@ clean:
 	rm -f $(S)/*/*_test*.html $(S)/*/*_test*.js $(S)/*/*_test*.wasm
 	rm -f $(S)/*/*_repro*.html $(S)/*/*_repro*.js $(S)/*/*_repro*.wasm
 
-.PHONY: all clean menu contextmenu scrollbar clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize threadpool logerror retinascale coroutine coroutine-nested asyncify-races
+.PHONY: all clean menu contextmenu scrollbar clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize selectheight threadpool logerror retinascale coroutine coroutine-nested asyncify-races
 
 # === Coroutine pthread variant — reproduces the KiCad Asyncify-fiber x pthreads crash ===
 # Same modal-free harness as `coroutine`, but compiled/linked with pthreads to match
