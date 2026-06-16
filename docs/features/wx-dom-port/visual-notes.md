@@ -235,3 +235,34 @@ trees fault identically; binary timing decides whether the race is lost,
 so any rebuild can flip these specs. They were red before this
 consolidation (the "31 passed" gates) and stay red after it; greening
 them is the async feature's exit criterion.
+
+## Layers tab goes blank after a tab round-trip (2026-06-15, pcbjam#8)
+
+Switching the pcbnew appearance notebook Layers → Objects/Nets → Layers left
+the Layers page blank: every layer row was present in the DOM but fully
+clip-pathed away, and the layers `wxScrolledWindow` viewport had collapsed to
+zero height (`154x0`).
+
+Root cause (two layers):
+  30. KiCad's `APPEARANCE_CONTROLS::OnNotebookPageChanged` calls
+      `m_panelLayers->Fit()` on every page change, which shrinks the page to
+      its content min size and collapses the proportion-1 scrolled child's
+      viewport to height 0. `wxBookCtrlBase::DoSetSelection()` fires
+      `wxEVT_NOTEBOOK_PAGE_CHANGED` LAST, so this happens after the page was
+      sized/shown.
+  31. `wxWindowWasm::DoSetSize()` only emits `wxEVT_SIZE` (which drives
+      auto-Layout) when the size actually changes. Resizing the page back to
+      the page area is therefore a no-op that never re-runs the sizer, so the
+      collapsed scrolled child sticks and `UpdateDomGeometry` clip-paths every
+      row out of the empty ancestor viewport.
+
+Fix: `wxNotebook::OnDomEvent` now calls `WasmRelayoutSelectedPage()` after
+`SetSelection()` returns (all PAGE_CHANGED handlers done) — it re-asserts the
+page to the full page area, forces `page->Layout()`, and re-projects the DOM
+geometry. wxwidgets-layer only; KiCad untouched.
+
+Test hardening: `appearance.spec.ts`'s `rowLabelTops()` previously returned
+`getBoundingClientRect().top`, which is `0` (not null) for a clip-pathed row,
+so the round-trip assertion passed even when the panel was blank. It now
+hit-tests the row centre via `elementsFromPoint` (clip-path affects
+hit-testing), so a clipped-away row reads as null and fails the assertion.

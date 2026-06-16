@@ -67,8 +67,10 @@ async function selectTab(page: Page, label: string): Promise<void> {
     await page.waitForTimeout(400);
 }
 
-// DOM port only: viewport rects of row labels inside the appearance pane
+// DOM port only: viewport tops of row labels inside the appearance pane
 // (spans are real elements there; the canvas port draws them as pixels).
+// Returns the layout-box top regardless of clipping — used to track row
+// MOVEMENT under scrolling, where rows legitimately clip at the pane edges.
 async function rowLabelTops(page: Page, labels: string[]): Promise<Record<string, number | null>> {
     return page.evaluate((wanted: string[]) => {
         const out: Record<string, number | null> = {};
@@ -78,6 +80,39 @@ async function rowLabelTops(page: Page, labels: string[]): Promise<Record<string
             if (el.tagName === 'SPAN' && wanted.includes(el.textContent || '')) {
                 out[el.textContent as string] = Math.round(el.getBoundingClientRect().top);
             }
+        }
+        return out;
+    }, labels);
+}
+
+// Whether each row label is genuinely PAINTED (not merely present in the DOM).
+// A bare getBoundingClientRect is not enough: when the layers scrolled window
+// collapses on a tab round-trip the rows keep their layout box but are fully
+// removed by an ancestor's clip-path. clip-path also affects hit-testing, so we
+// sample points down each row's box and treat it as visible only if the row (or
+// its own content) is actually returned by elementsFromPoint somewhere. This is
+// what makes the "pages came back blank" regression fail the assertion below.
+async function rowsVisible(page: Page, labels: string[]): Promise<Record<string, boolean>> {
+    return page.evaluate((wanted: string[]) => {
+        const out: Record<string, boolean> = {};
+        for (const w of wanted) out[w] = false;
+        if (!window.wxDomControls) return out;
+        const visible = (el: HTMLElement): boolean => {
+            const cs = getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden') return false;
+            const r = el.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1) return false;
+            const cx = r.left + r.width / 2;
+            const ys = [r.top + 1, r.top + r.height / 2, r.bottom - 1];
+            return ys.some(y => {
+                const hits = document.elementsFromPoint(cx, y);
+                return hits.some(h => h === el || el.contains(h));
+            });
+        };
+        for (const [, el] of window.wxDomControls) {
+            const txt = el.textContent || '';
+            if (el.tagName === 'SPAN' && wanted.includes(txt) && visible(el))
+                out[txt] = true;
         }
         return out;
     }, labels);
@@ -107,11 +142,13 @@ test.describe('Appearance panel (Layers/Objects/Nets)', () => {
         await selectTab(page, 'Layers');
         await page.screenshot({ path: 'test-results/appearance-03-layers-again.png' });
 
-        // Layer rows must survive the tab round-trip (regression:
-        // pages came back blank after switching away and back)
-        const tops = await rowLabelTops(page, ['F.Cu', 'B.Cu']);
-        expect(tops['F.Cu'], 'F.Cu row visible after tab round-trip').not.toBeNull();
-        expect(tops['B.Cu'], 'B.Cu row visible after tab round-trip').not.toBeNull();
+        // Layer rows must survive the tab round-trip (regression pcbjam#8:
+        // pages came back blank after switching away and back — the rows stayed
+        // in the DOM but their scrolled window collapsed and clip-pathed them
+        // all away, so this must assert real paint, not just DOM presence).
+        const vis = await rowsVisible(page, ['F.Cu', 'B.Cu']);
+        expect(vis['F.Cu'], 'F.Cu row visible after tab round-trip').toBe(true);
+        expect(vis['B.Cu'], 'B.Cu row visible after tab round-trip').toBe(true);
     });
 
     test('layer list scrolls with the wheel and clips at the pane', async ({ page }) => {
