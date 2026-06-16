@@ -1,5 +1,5 @@
 # The build + e2e CI: full KiCad WASM build (all 6 tools, Binaryen 130, host-side
-# asyncify only — the -O2 pass is skipped via ASYNCIFY_ONLY=1) + wxWidgets e2e
+# asyncify + a lighter wasm-opt -O1 shrink pass via BINARYEN_OPT_LEVEL) + wxWidgets e2e
 # (291 tests) + KiCad e2e (38 tests) on a Ubicloud runner. Runs on pushes to
 # main/ubicloud-ci and on PRs against main.
 # Replaced the ephemeral-Hetzner-VM workflows (ci-full-build.yml / ci.yml,
@@ -38,10 +38,14 @@ jobs:
     env:
       KICAD_LOG_NESTED: "1"
       BINARYEN_VERSION: ${{ inputs.binaryen_version || '130' }}
-      # Skip the heavy wasm-opt -O2 pass (scripts/common/apply-asyncify.sh:124):
-      # stops after the asyncify pass. The full e2e suite below validates that
-      # the non-O2 wasm runs correctly in Chrome/Firefox.
-      ASYNCIFY_ONLY: "1"
+      # Use the lighter wasm-opt -O1 shrink pass instead of -O2
+      # (scripts/common/apply-asyncify.sh). -O1 still runs CoalesceLocals, so the
+      # asyncify-instrumented coroutine functions stay under V8's per-function
+      # locals limit: it produces the same ~187 MB pcbnew.wasm as -O2 and is green
+      # on the load-pcb chromium-ci spec, but is a faster pass. (Skipping the
+      # optimization entirely via ASYNCIFY_ONLY=1 shipped a 336 MB wasm that
+      # crashed headless Chromium — that flag is benchmark-only, not for e2e.)
+      BINARYEN_OPT_LEVEL: "-O1"
       # Stable docker-compose project → deterministic build-cache volume name
       # (kicad-wasm-ci_kicad-build-cache) for the deps cache below.
       COMPOSE_PROJECT_NAME: kicad-wasm-ci
@@ -86,7 +90,7 @@ jobs:
 
       # Same build recipe as ci-full-build.yml: full KiCad WASM build of ALL 6
       # tools, host-side asyncify on Binaryen v130 (BINARYEN_VERSION in env →
-      # get-wasm-opt.sh); the -O2 pass is skipped (ASYNCIFY_ONLY=1 in job env).
+      # get-wasm-opt.sh) + a lighter -O1 shrink pass (BINARYEN_OPT_LEVEL in job env).
       # 'all' = pcbnew eeschema calculator pl_editor symbol_editor gerbview,
       # built in sequence. --build-deps short-circuits on a cache hit.
       - name: Build all KiCad tools WASM with Binaryen ${{ env.BINARYEN_VERSION }}
@@ -116,6 +120,25 @@ jobs:
           mkdir -p deps-cache
           docker run --rm -v kicad-wasm-ci_kicad-build-cache:/bw -v "$PWD/deps-cache":/cache \
             alpine sh -c 'cd /bw && tar czf /cache/deps.tar.gz sysroot stamps'
+
+      # Cache the host wxWidgets build (build-wasm/wxwidgets, ~11 min, incremental
+      # but uncached) keyed on the wx submodule SHA + the build script/versions.
+      # On a hit, touch the tree so make treats the restored objects as current
+      # (same SHA ⇒ identical sources), so build-wx-wasm.sh just relinks fast.
+      - name: wx submodule sha
+        id: wxsha
+        run: echo "sha=$(git -C wxwidgets rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore wx build cache
+        id: wx-cache
+        uses: actions/cache@v4
+        with:
+          path: build-wasm/wxwidgets
+          key: wx-${{ runner.os }}-${{ steps.wxsha.outputs.sha }}-${{ hashFiles('scripts/build-wx-wasm.sh','scripts/common/versions.sh') }}
+
+      - name: Mark restored wx objects current
+        if: steps.wx-cache.outputs.cache-hit == 'true'
+        run: find build-wasm/wxwidgets -exec touch {} +
 
       # Host-side wxWidgets build producing the wx test apps for `npm run test`
       # (separate from the in-docker wxWidgets that KiCad links against).

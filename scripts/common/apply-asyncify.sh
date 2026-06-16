@@ -128,18 +128,30 @@ if [[ "${ASYNCIFY_ONLY:-0}" == "1" ]]; then
     exit 0
 fi
 
+# Post-asyncify shrink pass. Asyncify emits deliberately verbose instrumentation
+# (spills every live local) and relies on the optimizer to coalesce it back down
+# under V8's per-function locals limit — without it, large coroutine-entry
+# functions silently stall (and on newer Chromium hard-crash the renderer while
+# loading a heavy board) in Chrome's V8. See docs/debugging/DEBUG.md §6-7.
+#
+# Level is configurable via BINARYEN_OPT_LEVEL: -O1 already runs CoalesceLocals
+# and is sufficient (measured: same ~187 MB / 64 MB-gzip output as -O2 on pcbnew,
+# validated green on the load-pcb chromium-ci spec — but a lighter, faster pass,
+# which is why CI sets -O1). -O2 stays the default for the more thorough rewrite.
+# Do NOT use -Os/-Oz here: they break the asyncify runtime (Binaryen #4484).
+BINARYEN_OPT_LEVEL="${BINARYEN_OPT_LEVEL:--O2}"
+
 echo ""
-echo "Running wasm-opt -O2 on the asyncified wasm..."
+echo "Running wasm-opt ${BINARYEN_OPT_LEVEL} on the asyncified wasm..."
 echo "  Purpose: shrink asyncify-instrumented functions back under V8's"
 echo "  per-function locals limit (otherwise large coroutine-entry and"
-echo "  similar functions silently stall in Chrome's V8). See docs/debugging/DEBUG.md §7"
-echo "  and memory/bundle-size-asyncify-optimization.md."
-echo "  This pass also takes several minutes and ~10-15 GB RAM."
+echo "  similar functions stall/crash in Chrome's V8). See docs/debugging/DEBUG.md §6-7."
+echo "  This pass takes several minutes and ~10-15 GB RAM."
 echo "  BINARYEN_CORES=${BINARYEN_CORES}"
 echo "  LD_PRELOAD=${WASM_OPT_PRELOAD:-<none>}"
 
-"${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${WASM_OPT}" -O2 "${OUTPUT_WASM}" -o "${OUTPUT_WASM}"
+"${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${WASM_OPT}" "${BINARYEN_OPT_LEVEL}" "${OUTPUT_WASM}" -o "${OUTPUT_WASM}"
 
 echo ""
-echo "Asyncify + -O2 complete: ${OUTPUT_WASM}"
+echo "Asyncify + ${BINARYEN_OPT_LEVEL} complete: ${OUTPUT_WASM}"
 ls -lh "${OUTPUT_WASM}"

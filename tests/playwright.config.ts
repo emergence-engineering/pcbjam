@@ -72,7 +72,10 @@ export default defineConfig({
   // 1 local retry absorbs transient `npx serve` connection refusals under heavy
   // parallel load (many workers fetching large WASM bundles at once).
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 1 : undefined,
+  // Run parallel workers on CI too (Playwright default ≈ 50% of cores), same as
+  // local — the serial CI run was the dominant wall-clock cost. Cap (e.g. '50%'
+  // or a fixed count) if contention OOMs/flakes; retries:2 covers transient.
+  workers: undefined,
   reporter: 'html',
   timeout: 60000,  // WASM can be slow to load
 

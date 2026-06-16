@@ -97,7 +97,10 @@ export default defineConfig({
   // as playwright.config.ts): the load-pcb post-load clipboard crash that can
   // close the page on Firefox, and the calculator first-run-wizard timing race.
   retries: process.env.CI ? 2 : 1,
-  workers: process.env.CI ? 1 : undefined,
+  // Run parallel workers on CI too (Playwright default ≈ 50% of cores), same as
+  // local — the serial CI run was the dominant wall-clock cost. Cap (e.g. '50%'
+  // or a fixed count) if contention OOMs/flakes; retries:2 covers transient.
+  workers: undefined,
   reporter: 'html',
   timeout: 180000,  // KiCad WASM needs more time to load (3 minutes)
 
