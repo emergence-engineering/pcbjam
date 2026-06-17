@@ -32,9 +32,13 @@ export function ToolPage() {
     );
   }
 
-  // Env-selected document source (same /p/ URLs either way): with "ydoc" the
-  // collab room is the source of truth, so saves are NOT uploaded back — the
-  // provider persists the doc. With "api" a user save uploads to the backend.
+  // Env-selected document source (same /p/ URLs either way): with "ydoc" the collab
+  // room is the live source of truth (materialized client-side on load), with "api" the
+  // REST file is. EITHER WAY a save is uploaded to the backend — the backend owns the
+  // project FILE LIST, so an editor-created file (e.g. a hierarchical SUBSHEET added via
+  // "Add Sheet") must be registered there or it's missing on reload and the parent's
+  // (sheet … child.kicad_sch) reference fails to load. In ydoc mode the room still wins
+  // on reload when it holds newer state; the upload is the registration + fallback copy.
   const docSource = docSourceConfig();
 
   // PreflightGate runs the device-capability check; on a fatal mismatch it blocks
@@ -48,11 +52,7 @@ export function ToolPage() {
         files={data.files}
         targetPath={targetPath}
         fetchBytes={(relPath) => fetchFileBytes(slug, relPath)}
-        saveBytes={
-          docSource === "api"
-            ? (relPath, bytes) => uploadFileBytes(slug, relPath, bytes)
-            : undefined
-        }
+        saveBytes={(relPath, bytes) => uploadFileBytes(slug, relPath, bytes)}
         docSource={docSource}
       />
     </PreflightGate>

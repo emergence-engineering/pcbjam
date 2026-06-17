@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include <wx/app.h>
+#include <wx/filename.h>
 #include <wx/string.h>
 #include <wx/window.h>
 #include <nlohmann/json.hpp>
@@ -92,6 +93,21 @@ std::string toUtf8( const wxString& s ) { return std::string( s.utf8_str() ); }
 SCH_EDIT_FRAME* schFrame()
 {
     return wxTheApp ? dynamic_cast<SCH_EDIT_FRAME*>( wxTheApp->GetTopWindow() ) : nullptr;
+}
+
+// The screen of the sheet the editor is currently showing. Per-sheet collab keys a room
+// to each .kicad_sch, so the snapshot/diff that feeds a room must cover ONLY this screen,
+// never the whole Hierarchy(). GetCurrentSheet().LastScreen() is the active sheet's screen
+// (GetScreen() tracks the same screen and is the fallback before a sheet path exists).
+SCH_SCREEN* currentScreen( SCH_EDIT_FRAME* aFrame )
+{
+    if( !aFrame )
+        return nullptr;
+
+    if( SCH_SCREEN* screen = aFrame->GetCurrentSheet().LastScreen() )
+        return screen;
+
+    return aFrame->GetScreen();
 }
 
 json itemToJson( SCH_ITEM* aItem )
@@ -256,26 +272,17 @@ SCH_ITEM* makeItem( const json& j )
     return item;
 }
 
-// Full current model as an array of item json, deduped by uuid across the hierarchy.
-json snapshotItems( SCHEMATIC& aSch )
+// Current model of the ACTIVE screen as an array of item json. One collab room == one
+// .kicad_sch screen, so we never fold in the rest of the hierarchy (uuids are unique
+// within a screen, so no cross-sheet dedup is needed).
+json snapshotItems( SCH_EDIT_FRAME* aFrame )
 {
-    json               arr = json::array();
-    std::set<std::string> seen;
+    json arr = json::array();
 
-    for( const SCH_SHEET_PATH& path : aSch.Hierarchy() )
+    if( SCH_SCREEN* screen = currentScreen( aFrame ) )
     {
-        SCH_SCREEN* screen = const_cast<SCH_SHEET_PATH&>( path ).LastScreen();
-
-        if( !screen )
-            continue;
-
         for( SCH_ITEM* item : screen->Items() )
-        {
-            std::string id = toUtf8( item->m_Uuid.AsString() );
-
-            if( seen.insert( id ).second )
-                arr.push_back( itemToJson( item ) );
-        }
+            arr.push_back( itemToJson( item ) );
     }
 
     return arr;
@@ -299,6 +306,25 @@ void emitItems( const json& aWire )
     EM_ASM( {
         if( window.kicadCollab && window.kicadCollab.onItems )
             window.kicadCollab.onItems( UTF8ToString( $0 ) );
+    }, s.c_str() );
+}
+
+// Notify the standalone that the editor switched to a different sheet — a different
+// .kicad_sch == a different collab room (ysync subschemas). The path is the active
+// screen's load path: the same absolute MEMFS form kicadCollabOnSave emits, so the JS
+// side strips the project prefix the same way (relativeProjectPath). No-op without a
+// JS listener.
+void emitSheetChanged()
+{
+    SCH_SCREEN* screen = currentScreen( schFrame() );
+
+    if( !screen )
+        return;
+
+    std::string s = toUtf8( screen->GetFileName() );
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onSheetChanged )
+            window.kicadCollab.onSheetChanged( UTF8ToString( $0 ) );
     }, s.c_str() );
 }
 
@@ -336,24 +362,15 @@ std::string itemBlob( SCH_EDIT_FRAME* aFrame, SCH_ITEM* aItem )
 // applies it and re-cleaning already-clean geometry is idempotent, so the two converge. (This
 // mirrors pl_editor's snapshot-differ.) g_baseline is the last-broadcast state.
 
-std::map<std::string, json> snapshotByUuid( SCHEMATIC& aSch )
+// Diff baseline of the ACTIVE screen only (per-sheet collab room scope), keyed by uuid.
+std::map<std::string, json> snapshotByUuid( SCH_EDIT_FRAME* aFrame )
 {
     std::map<std::string, json> m;
 
-    for( const SCH_SHEET_PATH& path : aSch.Hierarchy() )
+    if( SCH_SCREEN* screen = currentScreen( aFrame ) )
     {
-        SCH_SCREEN* screen = const_cast<SCH_SHEET_PATH&>( path ).LastScreen();
-
-        if( !screen )
-            continue;
-
         for( SCH_ITEM* item : screen->Items() )
-        {
-            std::string id = toUtf8( item->m_Uuid.AsString() );
-
-            if( !m.count( id ) )
-                m[id] = itemToJson( item );
-        }
+            m[toUtf8( item->m_Uuid.AsString() )] = itemToJson( item );
     }
 
     return m;
@@ -367,7 +384,7 @@ bool                        g_flushScheduled = false;
 void rebaseline()
 {
     if( SCH_EDIT_FRAME* fr = schFrame() )
-        g_baseline = snapshotByUuid( fr->Schematic() );
+        g_baseline = snapshotByUuid( fr );
 }
 
 // Diff the current (settled, post-cleanup) model against the baseline and broadcast the change.
@@ -380,7 +397,7 @@ void flushDiff()
     if( !fr )
         return;
 
-    std::map<std::string, json> cur = snapshotByUuid( fr->Schematic() );
+    std::map<std::string, json> cur = snapshotByUuid( fr );
 
     json added = json::array(), changed = json::array(), removed = json::array();
 
@@ -456,15 +473,88 @@ void scheduleFlush()
     }
 }
 
+// A hierarchical sheet was just created locally ("Add Sheet"): write its new child screen
+// to the child .kicad_sch file and tell the standalone (window.kicadCollab.onSheetCreated),
+// so the child is persisted/registered the moment it's created — without waiting for the
+// user to enter it or save the project. Otherwise the parent's `(sheet … child)` reference
+// dangles for peers / on reload. Deferred onto the fiber stack (CallAfter + COROUTINE):
+// SCH_IO_KICAD_SEXPR::Format's virtual dispatch traps on the bare listener/CallAfter stack,
+// same as flushDiff/doApply. The sheet is re-resolved by uuid in the deferred body so a
+// since-deleted sheet (e.g. an immediate undo) is a no-op rather than a dangling pointer.
+void scheduleSheetSave( SCH_SHEET* aSheet )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+    SCH_SCREEN*     parent = currentScreen( fr );
+
+    if( !fr || !parent || !aSheet->GetScreen() )
+        return;
+
+    wxFileName childFn( aSheet->GetFileName() ); // relative "Sheetfile"
+    childFn.MakeAbsolute( wxFileName( parent->GetFileName() ).GetPath() );
+
+    std::string childAbs = toUtf8( childFn.GetFullPath() );
+    std::string uuid = toUtf8( aSheet->m_Uuid.AsString() );
+
+    fr->CallAfter( [fr, childAbs, uuid]() {
+        COROUTINE<int, int> cor( [fr, childAbs, uuid]( int ) -> int
+        {
+            KIID      kid( wxString::FromUTF8( uuid.c_str() ) );
+            SCH_ITEM* item = fr->Schematic().ResolveItem( kid, nullptr, /*allowNull*/ true );
+
+            if( !item || item->Type() != SCH_SHEET_T )
+                return 0;
+
+            try
+            {
+                SCH_IO_KICAD_SEXPR io;
+                io.SaveSchematicFile( wxString::FromUTF8( childAbs.c_str() ),
+                                      static_cast<SCH_SHEET*>( item ), &fr->Schematic() );
+            }
+            catch( ... )
+            {
+                return 0; // a write failure must not abort the runtime
+            }
+
+            EM_ASM( {
+                if( window.kicadCollab && window.kicadCollab.onSheetCreated )
+                    window.kicadCollab.onSheetCreated( UTF8ToString( $0 ) );
+            }, childAbs.c_str() );
+            return 0;
+        } );
+        cor.Call( 0 );
+    } );
+}
+
 // ChangeSource: the native SCHEMATIC_LISTENER is just a trigger — the actual change set comes
 // from the post-settle snapshot diff above. Skipped while applying a remote delta (no echo);
 // doApply rebaselines instead.
 class COLLAB_LISTENER : public SCHEMATIC_LISTENER
 {
 public:
-    void OnSchItemsAdded( SCHEMATIC&, std::vector<SCH_ITEM*>& ) override   { trigger(); }
+    void OnSchItemsAdded( SCHEMATIC&, std::vector<SCH_ITEM*>& aItems ) override
+    {
+        // A newly-added hierarchical sheet → persist + register its child file (above).
+        if( !s_applyingRemote )
+        {
+            for( SCH_ITEM* item : aItems )
+                if( item->Type() == SCH_SHEET_T )
+                    scheduleSheetSave( static_cast<SCH_SHEET*>( item ) );
+        }
+        trigger();
+    }
     void OnSchItemsChanged( SCHEMATIC&, std::vector<SCH_ITEM*>& ) override { trigger(); }
     void OnSchItemsRemoved( SCHEMATIC&, std::vector<SCH_ITEM*>& ) override { trigger(); }
+
+    // The editor switched to a different sheet (a different .kicad_sch == a different
+    // collab room). Re-baseline so the first edit on the new sheet diffs against ITS
+    // screen, not the previous one, then tell the standalone to rebind its room to the
+    // now-active sheet file. Fires from SCH_EDIT_FRAME::DisplayCurrentSheet, by which
+    // point GetCurrentSheet()/GetScreen() already point at the new sheet.
+    void OnSchSheetChanged( SCHEMATIC& ) override
+    {
+        rebaseline();
+        emitSheetChanged();
+    }
 
 private:
     void trigger()
@@ -808,8 +898,8 @@ void kicadCollabApply( std::string aJson )
 // registers the change listener on first call.
 std::string kicadCollabSnapshot()
 {
-    SCHEMATIC* sch = ensureBridge();
-    json       added = sch ? snapshotItems( *sch ) : json::array();
+    ensureBridge();
+    json added = snapshotItems( schFrame() );
 
     // Seed the diff baseline to exactly the model we're handing out, so the first local edit
     // diffs against this snapshot (and we don't re-broadcast the whole model).
@@ -845,9 +935,9 @@ void kicadCollabApplyItems( std::string aJson )
 }
 
 
-// JS pull of the full current model as an all-"added" v2 items wire: one clipboard-
-// style blob per screen item across the hierarchy (deduped by uuid). Registers the
-// listener + rebaselines exactly like kicadCollabSnapshot.
+// JS pull of the ACTIVE screen's model as an all-"added" v2 items wire: one clipboard-
+// style blob per item on the current sheet (one collab room == one .kicad_sch screen).
+// Registers the listener + rebaselines exactly like kicadCollabSnapshot.
 std::string kicadCollabSnapshotItems()
 {
     SCH_EDIT_FRAME* fr = schFrame();
@@ -858,20 +948,10 @@ std::string kicadCollabSnapshotItems()
     {
         ensureBridge();
 
-        std::set<std::string> seen;
-
-        for( const SCH_SHEET_PATH& path : fr->Schematic().Hierarchy() )
+        if( SCH_SCREEN* screen = currentScreen( fr ) )
         {
-            SCH_SCREEN* screen = const_cast<SCH_SHEET_PATH&>( path ).LastScreen();
-
-            if( !screen )
-                continue;
-
             for( SCH_ITEM* item : screen->Items() )
-            {
-                if( seen.insert( toUtf8( item->m_Uuid.AsString() ) ).second )
-                    added.push_back( json{ { "sexpr", itemBlob( fr, item ) }, { "parent", nullptr } } );
-            }
+                added.push_back( json{ { "sexpr", itemBlob( fr, item ) }, { "parent", nullptr } } );
         }
 
         rebaseline();

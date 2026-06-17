@@ -34,7 +34,16 @@ import type {
   KicadDocSession,
   KicadItemsWindow,
 } from "@/wasm/collab";
+import {
+  createSheetCollabManager,
+  registerSheetChangedHook,
+  registerSheetCreatedHook,
+  type SheetChangedWindow,
+  type SheetCollabManager,
+  type SheetCreatedWindow,
+} from "@/wasm/collab/sheet-manager";
 import { clog, cwarn } from "@/wasm/collab/debug";
+import type * as Y from "yjs";
 import { createOomWatch, respawnInNewTab } from "@/recovery/oom-watch";
 import { MemoryExhaustedDialog } from "@/recovery/MemoryExhaustedDialog";
 
@@ -348,6 +357,125 @@ async function maybeStartCollab(
 }
 
 /**
+ * Hierarchical-sheet (subschema) collaborative editing for eeschema: every `.kicad_sch`
+ * in the design is its own WARM collab room (provider kept open for the session), and the
+ * editor's single active-screen binding is re-routed between them on sheet navigation (the
+ * C++ `onSheetChanged` hook). Supersedes the single-room `maybeStartCollab` for eeschema;
+ * background sheets stay synced at the data layer, the active sheet is bound to the editor.
+ *
+ * Opt OUT with `?collab=0`; a pre-connected ydoc session ignores the opt-out (the doc IS
+ * the data source). Returns undefined when collab is off or the wasm predates the Phase-0
+ * items+sheet bridge.
+ */
+async function startSheetCollab(
+  win: ToolWindow,
+  opts: {
+    slug: string;
+    projectId: string;
+    targetPath?: string;
+    files: ToolFile[];
+    /** ydoc mode: the entry sheet's pre-connected room (from maybeConnectDocSession). */
+    session?: KicadDocSession;
+    /** The entry file was materialized from `session`'s doc (baseline-only first seed). */
+    editorMatchesDoc?: boolean;
+    onActiveChange: (active: { sheetPath: string; doc: Y.Doc } | null) => void;
+    /** Upload sink (project-backed sessions) — used to register a just-created subsheet. */
+    saveBytes?: SaveBytes;
+    log: (m: string) => void;
+    onStatus: (t: string) => void;
+  },
+): Promise<SheetCollabManager | undefined> {
+  const collabParam = new URLSearchParams(win.location.search).get("collab");
+  const mod = win.Module;
+
+  if (!opts.session && (collabParam === "0" || collabParam === "false")) {
+    clog("[sheet] collab disabled (?collab=0) — skipping");
+    return undefined;
+  }
+  if (typeof mod?.kicadCollabSnapshotItems !== "function") {
+    cwarn(
+      "[sheet] BRIDGE NOT PRESENT: Module.kicadCollabSnapshotItems is",
+      typeof mod?.kicadCollabSnapshotItems,
+      "— the loaded eeschema.wasm predates the items+sheet bridge (subschema Phase 0). Rebuild + `npm run setup:kicad` and restart the dev server.",
+    );
+    return undefined;
+  }
+
+  const manager = createSheetCollabManager({
+    mod,
+    win: win as unknown as KicadItemsWindow,
+    projectId: opts.projectId,
+    provider: yjsProviderConfig(),
+    seedDocForPath: (sheet) => seedDocFromMemfs(win, opts.slug, sheet),
+    onActiveChange: opts.onActiveChange,
+    log: opts.log,
+    initial:
+      opts.session && opts.targetPath
+        ? {
+            sheetPath: opts.targetPath,
+            session: opts.session,
+            editorMatchesDoc: !!opts.editorMatchesDoc,
+          }
+        : undefined,
+  });
+
+  const sheetPaths = opts.files
+    .filter((f) => f.path.endsWith(".kicad_sch"))
+    .map((f) => f.path);
+
+  // C++ navigation → rebind the active room to the now-shown sheet.
+  registerSheetChangedHook(win as unknown as SheetChangedWindow, (abs) => {
+    const rel = relativeProjectPath(opts.slug, abs);
+    if (rel) void manager.switchTo(rel);
+  });
+
+  // C++ sheet creation ("Add Sheet") → the child .kicad_sch was just written to MEMFS by
+  // the hook; register it with the backend + warm its room, so a subsheet placed but never
+  // entered or saved still persists (the file-list snapshot can't contain it).
+  registerSheetCreatedHook(win as unknown as SheetCreatedWindow, (abs) => {
+    const rel = relativeProjectPath(opts.slug, abs);
+    if (rel && rel.endsWith(".kicad_sch")) {
+      persistCreatedSheet(win, opts.slug, rel, opts.saveBytes, manager, opts.log);
+    }
+  });
+
+  // Warm every schematic file in the project so later sheet switches are instant.
+  void manager.connectAll(sheetPaths);
+
+  if (opts.targetPath) await manager.switchTo(opts.targetPath);
+  opts.log(`[sheet] multi-room collab active (${sheetPaths.length} sheet(s) warmed)`);
+  opts.onStatus("Collab: connected");
+  return manager;
+}
+
+/**
+ * A subsheet was just created in-editor — the C++ `onSheetCreated` hook has already written
+ * the child .kicad_sch to MEMFS. Register it with the backend (so it survives reload and
+ * reaches peers) and warm its collab room. Covers a subsheet that's placed but never entered
+ * or saved, which the page-load file list can't contain.
+ */
+function persistCreatedSheet(
+  win: ToolWindow,
+  slug: string,
+  relPath: string,
+  saveBytes: SaveBytes | undefined,
+  manager: SheetCollabManager,
+  log: (m: string) => void,
+): void {
+  void manager.onboard(relPath);
+  if (!saveBytes) return;
+  try {
+    const bytes = win.FS?.readFile(memfsFilePath(slug, relPath));
+    if (!(bytes instanceof Uint8Array)) return;
+    void saveBytes(relPath, bytes)
+      .then(() => log(`[sheet] registered created subsheet ${relPath} (${bytes.length} bytes)`))
+      .catch((err) => cwarn(`[sheet] upload of created subsheet ${relPath} failed`, err));
+  } catch (err) {
+    cwarn(`[sheet] read of created subsheet ${relPath} failed`, err);
+  }
+}
+
+/**
  * Wait until the wxWidgets UI has actually built some elements — it populates a
  * frame or two AFTER the boot sequence resolves, so dropping the loading overlay
  * on boot-resolve flashes a blank editor. Polls `wxElementRegistry` (the same
@@ -415,6 +543,7 @@ export function WasmTool({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const startedRef = React.useRef(false);
   const driftRef = React.useRef<{ stop(): void } | null>(null);
+  const sheetManagerRef = React.useRef<SheetCollabManager | null>(null);
   const [status, setStatus] = React.useState("Loading tool…");
   const [logs, setLogs] = React.useState<string[]>([]);
   const [showLog, setShowLog] = React.useState(false);
@@ -527,7 +656,17 @@ export function WasmTool({
         });
         // Register the save sink before the file opens: from here on, every
         // editor File→Save (MEMFS write) is routed onward through saveBytes.
-        registerSaveHook(win, { slug, saveBytes, log: append, onStatus: setStatus });
+        registerSaveHook(win, {
+          slug,
+          saveBytes,
+          log: append,
+          onStatus: setStatus,
+          // A sheet created mid-session ("Add Sheet") saves to a new .kicad_sch path the
+          // page-load file list can't contain — warm its collab room so it stays in sync.
+          onSaved: (relPath) => {
+            if (relPath.endsWith(".kicad_sch")) void sheetManagerRef.current?.onboard(relPath);
+          },
+        });
         const { session, targetBytes } = await maybeConnectDocSession(win, {
           docSource,
           tool,
@@ -550,30 +689,64 @@ export function WasmTool({
           log: append,
           onStatus: setStatus,
         });
-        const collabHandle = await maybeStartCollab(win, {
-          tool,
-          slug,
-          projectId,
-          targetPath,
-          collabSession: session,
-          editorMatchesDoc: !!targetBytes,
-          log: append,
-          onStatus: setStatus,
-        });
-        // Drift detection: while this doc is collaboratively edited, periodically
-        // (every N edits + at session end) compare the WASM serialization to the
-        // Y.Doc and report any divergence. Gated on a real collab session.
-        if (collabHandle && targetPath && COLLAB_TOOLS.has(tool)) {
-          const { startDriftDetection } = await import("@/wasm/collab/drift-detect");
-          driftRef.current = startDriftDetection({
-            doc: collabHandle.doc,
-            mod: win.Module,
-            win,
+        // Drift detection: while a sheet is collaboratively edited, periodically (every N
+        // edits + at session end) compare the WASM serialization to the Y.Doc and report
+        // divergence. Gated on a real collab session; re-targeted per active sheet below.
+        const { startDriftDetection } = await import("@/wasm/collab/drift-detect");
+
+        if (tool === "eeschema") {
+          // Multi-room (subschema) collab: every .kicad_sch is its own warm room; the
+          // active sheet is bound, navigation re-routes it (C++ onSheetChanged hook).
+          sheetManagerRef.current =
+            (await startSheetCollab(win, {
+              slug,
+              projectId,
+              targetPath,
+              files,
+              session,
+              saveBytes,
+              editorMatchesDoc: !!targetBytes,
+              // Re-point drift detection at whichever sheet is currently bound.
+              onActiveChange: (activeRoom) => {
+                driftRef.current?.stop();
+                driftRef.current = null;
+                if (activeRoom) {
+                  driftRef.current = startDriftDetection({
+                    doc: activeRoom.doc,
+                    mod: win.Module,
+                    win,
+                    tool,
+                    slug,
+                    targetPath: activeRoom.sheetPath,
+                    log: append,
+                  });
+                }
+              },
+              log: append,
+              onStatus: setStatus,
+            })) ?? null;
+        } else {
+          const collabHandle = await maybeStartCollab(win, {
             tool,
             slug,
+            projectId,
             targetPath,
+            collabSession: session,
+            editorMatchesDoc: !!targetBytes,
             log: append,
+            onStatus: setStatus,
           });
+          if (collabHandle && targetPath && COLLAB_TOOLS.has(tool)) {
+            driftRef.current = startDriftDetection({
+              doc: collabHandle.doc,
+              mod: win.Module,
+              win,
+              tool,
+              slug,
+              targetPath,
+              log: append,
+            });
+          }
         }
         // Tool booted + project opened. Wait for the wx UI to actually build
         // before dropping the overlay, so we don't reveal a still-blank editor.
@@ -590,6 +763,11 @@ export function WasmTool({
       win.removeEventListener("keydown", swallowBrowserSave, true);
       driftRef.current?.stop();
       driftRef.current = null;
+      // Tears down every warm room's provider/doc (the only place providers are
+      // destroyed — switching sheets keeps them connected) and clears drift via
+      // onActiveChange(null).
+      sheetManagerRef.current?.destroy();
+      sheetManagerRef.current = null;
       oom.stop();
     };
     // Boot is one-shot per mount; deps intentionally exclude files/targetPath so
