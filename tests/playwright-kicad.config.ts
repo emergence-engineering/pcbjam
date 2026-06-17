@@ -84,6 +84,9 @@ const PCBNEW_FAMILY_SPECS = [
   '**/items-bridge.spec.ts',
   '**/roundtrip.spec.ts',
   '**/save-hook.spec.ts',
+  // boots pcbnew.html — must run on V8 (chromium-ci); on Firefox/x86 CI the
+  // ~190M module OOMs at instantiation and #canvas never appears (run 27626037849).
+  '**/pcbnew-move.spec.ts',
 ];
 
 const appsDir = 'apps';

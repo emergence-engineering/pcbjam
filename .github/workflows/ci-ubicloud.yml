@@ -23,9 +23,12 @@ on:
       binaryen_version: { description: "Binaryen version for the host asyncify step", required: false, default: "130" }
 
 concurrency:
-  # Per-ref: a new push to a PR (or to main) cancels its own older in-flight run.
+  # Per-ref: a new push to a PR (or to main) queues behind its own in-flight run
+  # instead of cancelling it (cancel-in-progress: false). Note GitHub keeps at most
+  # one pending run per group — rapid successive pushes collapse to "running + latest
+  # pending", superseding any earlier still-pending run.
   group: ci-ubicloud-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build-and-test:
