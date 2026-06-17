@@ -70,4 +70,49 @@ test.describe('wx DOM-port bug reproductions', () => {
     const line = reproLine(testLogger.consoleLogs, name)!;
     expect(line, `repro line was: ${line}`).toContain(`[REPRO] ${name}: PASS`);
   });
+
+  // stattext.cpp ellipsized the label only inside SetLabel(), at the control's
+  // client size at that moment. A wxStaticText in a growable sizer cell (e.g.
+  // gerbview's Layers Manager) is constructed narrow and widened later by layout,
+  // but the DOM-port wxStaticText had no wxEVT_SIZE handler — so the label stayed
+  // truncated to the early tiny width ("1..." instead of the layer name). The fix
+  // re-ellipsizes on resize via UpdateLabel(). The app sets the long label while
+  // narrow, then a button widens the control.
+  test('wxStaticText: an ellipsized label must re-expand when the control is widened', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto('/standalone/stattext-ellipsize/stattext-ellipsize_test.html');
+    expect(await tryLoadApp(page, 30000), 'repro app should load').toBe(true);
+
+    await expect
+      .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] stattext ready')), {
+        timeout: 30000,
+        message: 'repro app should finish setup',
+      })
+      .toBe(true);
+
+    // The middle of the label only renders when the control is wide enough; this
+    // exact substring is ellipsized away at the narrow width.
+    const fullNameVisible = () =>
+      page.evaluate(() =>
+        Array.from(document.querySelectorAll('span, div')).some((el) =>
+          (el.textContent || '').includes('tinytapeout-demo-User_2'),
+        ),
+      );
+
+    // Narrow: the long name is ellipsized away.
+    expect(await fullNameVisible(), 'label starts ellipsized at the narrow width').toBe(false);
+
+    await page.getByRole('button', { name: 'Grow' }).click();
+
+    // Widening must re-ellipsize so the full label shows. RED before the wasm fix:
+    // nothing re-ran ellipsization on resize, so the label stayed truncated.
+    await expect
+      .poll(fullNameVisible, {
+        timeout: 10000,
+        message: 'widening the control must re-ellipsize so the full label becomes visible',
+      })
+      .toBe(true);
+  });
 });

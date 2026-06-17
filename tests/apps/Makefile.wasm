@@ -186,6 +186,7 @@ all: minimal_test.html \
      $(S)/coroutine-pthread/nested_repro_ex.html \
      $(S)/coroutine-pthread/vcall_repro.html \
      $(S)/textctrl-reentry/textctrl-reentry_test.html \
+     $(S)/stattext-ellipsize/stattext-ellipsize_test.html \
      $(S)/tooltip-lifetime/tooltip-lifetime_test.html \
      $(S)/warp-pointer/warp-pointer_test.html
 
@@ -207,6 +208,15 @@ $(S)/textctrl-reentry/textctrl-reentry_test.html: $(S)/textctrl-reentry/textctrl
 	$(CXX) $< $(LDFLAGS_NOGL) -fexceptions --pre-js $(JS) --shell-file $(HTML) -o $@
 
 textctrl-reentry: $(S)/textctrl-reentry/textctrl-reentry_test.html
+
+# wxStaticText ellipsize-on-resize repro: re-ellipsize the label on wxEVT_SIZE.
+$(S)/stattext-ellipsize/stattext-ellipsize_test.o: $(S)/stattext-ellipsize/stattext-ellipsize_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/stattext-ellipsize/stattext-ellipsize_test.html: $(S)/stattext-ellipsize/stattext-ellipsize_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+stattext-ellipsize: $(S)/stattext-ellipsize/stattext-ellipsize_test.html
 
 # wxToolTip hover-window lifetime repro (relies on wxWasmTooltipDebugHoverWindow).
 $(S)/tooltip-lifetime/tooltip-lifetime_test.o: $(S)/tooltip-lifetime/tooltip-lifetime_test.cpp
