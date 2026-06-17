@@ -2,3 +2,5 @@ packages:
   - "standalone"
   - "backend"
   - "pcbjam-shared"
+  # Generic R2⇄IndexedDB sync client (MIT), nested in the shared repo; movable.
+  - "pcbjam-shared/sync-client"

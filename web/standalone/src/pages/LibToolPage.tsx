@@ -1,7 +1,6 @@
 import { useParams } from "react-router-dom";
 import { toolSchema } from "@pcbjam/shared";
-import { libsSourceConfig } from "@/lib/config";
-import { scopedLibsSource } from "@/wasm/libs/scoped-source";
+import { libsSourceForLib } from "@/lib/config";
 import { WasmTool } from "@/components/WasmTool";
 import { PreflightGate } from "@/preflight/PreflightGate";
 
@@ -27,8 +26,7 @@ export function LibToolPage() {
     );
   }
 
-  const base = libsSourceConfig("local");
-  const libsSource = base ? scopedLibsSource(base, libId) : null;
+  const libsSource = libsSourceForLib(libId, "local");
 
   return (
     <PreflightGate>

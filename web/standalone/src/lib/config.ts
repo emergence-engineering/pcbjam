@@ -10,12 +10,14 @@ export const WASM_ASSET_BASE_URL =
 
 import type { ProviderConfig, ProviderKind } from "@/wasm/collab";
 import { remoteLibsSource } from "@/wasm/libs/remote-source";
+import { scopedLibsSource } from "@/wasm/libs/scoped-source";
 import type { LibsSource } from "@/wasm/libs/source";
 import {
   withSpikeWritableFpLib,
   withSpikeWritableLib,
 } from "@/wasm/libs/spike-writable";
 import { staticLibsSource } from "@/wasm/libs/static-source";
+import { syncedLibsSource } from "@/wasm/libs/synced-source";
 
 /**
  * Which Yjs collab provider this deployment uses (one active per env), and its
@@ -102,4 +104,28 @@ export function libsSourceConfig(projectId?: string): LibsSource | null {
   }
 
   return base;
+}
+
+/**
+ * The libs source for a single backend library opened scoped to itself
+ * (`/l/<libId>/<tool>`). With `VITE_LIBS_SOURCE=synced` this is the r2-idb-sync
+ * bridge (`syncedLibsSource`, per-lib IDB cache + realtime); otherwise it's the
+ * existing per-item network path wrapped in `scopedLibsSource`. Falls back to the
+ * network path when the lib can't be synced.
+ */
+export function libsSourceForLib(
+  libId: string,
+  projectId?: string,
+): LibsSource | null {
+  const project = projectId && projectId !== "local" ? projectId : undefined;
+  if (import.meta.env.VITE_LIBS_SOURCE === "synced") {
+    return syncedLibsSource(libId, {
+      apiBase: API_BASE_URL,
+      owner: libsOwner(),
+      project,
+      log: (m) => console.log(m),
+    });
+  }
+  const base = libsSourceConfig(projectId);
+  return base ? scopedLibsSource(base, libId) : null;
 }
