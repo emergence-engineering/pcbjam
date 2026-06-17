@@ -187,6 +187,7 @@ compile_app() {
     # emsdk_env.sh, so the build shell would lack emcc/embuilder on PATH. Setting
     # EMSDK lets scripts/common/env.sh source /emsdk/emsdk_env.sh and activate the toolchain.
     docker compose -f docker/docker-compose.yml exec -e EMSDK=/emsdk \
+        -e BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-OFF}" \
         kicad-wasm-builder \
         "/workspace/scripts/kicad/build-${app}.sh" "${ARGS[@]}"
 

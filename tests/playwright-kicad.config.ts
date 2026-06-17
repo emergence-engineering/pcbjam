@@ -87,6 +87,9 @@ const PCBNEW_FAMILY_SPECS = [
   // boots pcbnew.html — must run on V8 (chromium-ci); on Firefox/x86 CI the
   // ~190M module OOMs at instantiation and #canvas never appears (run 27626037849).
   '**/pcbnew-move.spec.ts',
+  // 3D viewer specs boot pcbnew.html (3D-enabled build) — same V8 routing.
+  '**/3d-viewer.spec.ts',
+  '**/footprint-3d-preview.spec.ts',
 ];
 
 const appsDir = 'apps';
