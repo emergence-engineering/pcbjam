@@ -24,8 +24,10 @@ import { waitForPcbnew } from './utils/pcbnew-ready';
 const KICAD_VERSION_DIR = '9.99';
 const PROJECT_DIR_MEMFS = `/home/kicad/documents/kicad/${KICAD_VERSION_DIR}/projects`;
 
-// Small, no-external-libs RF board — fast to load, no missing-libs dialog.
-const DEMO = { name: 'microwave', dir: 'microwave', stem: 'microwave' } as const;
+// pic_programmer frames correctly in the default 3D camera (the microwave demo
+// has a known board-bounding-box scale bug that projects it off-screen — a
+// separate follow-up). Loads cleanly in this harness (see 2D load tests).
+const DEMO = { name: 'pic_programmer', dir: 'pic_programmer', stem: 'pic_programmer' } as const;
 
 async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors: string[] }): Promise<void> {
     const pcbFilename = `${DEMO.stem}.kicad_pcb`;
@@ -115,17 +117,48 @@ test.describe('3D viewer from pcbnew', () => {
         console.log(`[TEST] glcanvas count after opening 3D viewer: ${glAfter}`);
         expect(glAfter, 'a new WebGL canvas should appear for the 3D viewer').toBeGreaterThan(glBefore);
 
-        // The 3D reload runs through asyncify; give it time to build & render the
-        // board, then screenshot for visual validation (per CLAUDE.md).
-        await page.waitForTimeout(4000);
+        // The 3D reload + raytrace run through asyncify; give them time to build
+        // the scene and render a few progressive passes.
+        await page.waitForTimeout(5000);
+
         await page.screenshot({ path: `test-results/3d-viewer-${DEMO.name}.png`, scale: 'device' });
 
-        // The newest GL canvas is the 3D viewer's — screenshot it on its own too.
-        const newCanvas = page.locator('canvas[id^="glcanvas-"]').last();
-        if (await newCanvas.isVisible().catch(() => false)) {
-            await newCanvas.screenshot({ path: `test-results/3d-viewer-${DEMO.name}-canvas.png` })
-                .catch((e: unknown) => console.log(`[TEST] canvas screenshot failed: ${e}`));
-        }
+        // Read the 3D viewer canvas (the newest glcanvas) directly from its backing
+        // store: copy it onto a 2D canvas with drawImage and sample pixels. This is
+        // reliable thanks to preserveDrawingBuffer=true, whereas Playwright's CDP
+        // screenshot of a WebGL canvas on swiftshader comes back blank. We save the
+        // copy as a PNG (the real visual artifact) and assert the board rendered by
+        // checking the canvas is not a single uniform colour.
+        const render = await page.evaluate(() => {
+            const list = document.querySelectorAll('canvas[id^="glcanvas-"]');
+            const el = list[list.length - 1] as HTMLCanvasElement;
+            const tmp = document.createElement('canvas');
+            tmp.width = el.width;
+            tmp.height = el.height;
+            const ctx = tmp.getContext('2d')!;
+            ctx.drawImage(el, 0, 0);
+
+            const colors = new Set<string>();
+            for (let i = 0; i < 16; i++) {
+                for (let j = 0; j < 16; j++) {
+                    const d = ctx.getImageData(Math.floor(el.width * i / 16),
+                                               Math.floor(el.height * j / 16), 1, 1).data;
+                    colors.add(`${d[0]},${d[1]},${d[2]}`);
+                }
+            }
+            return { id: el.id, w: el.width, h: el.height, distinctColors: colors.size,
+                     dataUrl: tmp.toDataURL('image/png') };
+        });
+        console.log(`[TEST] 3D canvas ${render.id} ${render.w}x${render.h}, distinct colours: ${render.distinctColors}`);
+
+        const b64 = render.dataUrl.replace(/^data:image\/png;base64,/, '');
+        require('fs').writeFileSync(`test-results/3d-viewer-${DEMO.name}-render.png`,
+                                    Buffer.from(b64, 'base64'));
+
+        // A blank/uniform canvas yields ~1 colour; the rendered board has many.
+        expect(render.distinctColors,
+            'the 3D viewer canvas should render the board (many colours), not a blank fill')
+            .toBeGreaterThan(8);
 
         // ── Console-clean gates (same signatures load-pcb.spec.ts guards). ──
         const allLines = [...testLogger.consoleLogs, ...testLogger.errors];

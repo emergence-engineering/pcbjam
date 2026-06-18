@@ -388,14 +388,18 @@ if [ "${APP_NAME}" = "sym_convert" ]; then
 fi
 
 # 3D viewer (experimental): opt in with BUILD_3D_VIEWER=ON. Default OFF keeps
-# existing/CI builds unchanged and the 3D stubs in place. When ON, the 3D
-# viewer's fixed-function OpenGL renderer needs Emscripten's legacy GL emulation
-# plus our immediate-mode shim (color-per-vertex + double-precision helpers).
+# existing/CI builds unchanged and the 3D stubs in place. When ON, the 3D viewer
+# renders with the GL-free CPU raytracer (RENDER_3D_RAYTRACE_RAM) blitted to the
+# canvas through a plain WebGL2 textured quad — no -sLEGACY_GL_EMULATION. KiCad's
+# fixed-function OpenGL renderer is still compiled (shared files reference it) but
+# never executed on WASM, so its FFP/GLU entry points are satisfied at link time
+# by no-op stubs (gl_ffp_stub.c). See docs/features/fork-cleanup/10-3d-viewer.md.
 BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-OFF}"
 GL3D_LINK_FLAGS=""
 if [ "${BUILD_3D_VIEWER}" = "ON" ]; then
     log_info "3D viewer ENABLED for WASM (BUILD_3D_VIEWER=ON)"
-    GL3D_LINK_FLAGS="-sLEGACY_GL_EMULATION --js-library ${WASM_LAYER}/shims/gl_immediate_shim.js"
+    emcc -c -I"${STUBS_DIR}" "${STUBS_DIR}/gl_ffp_stub.c" -o "${STUBS_BUILD}/gl_ffp_stub.o"
+    GL3D_LINK_FLAGS="${STUBS_BUILD}/gl_ffp_stub.o"
 fi
 
 emcmake cmake "${KICAD_DIR}" \
