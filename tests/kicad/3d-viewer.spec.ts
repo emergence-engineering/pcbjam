@@ -74,6 +74,39 @@ function countGlCanvases(page: Page): Promise<number> {
     return page.evaluate(() => document.querySelectorAll('canvas[id^="glcanvas-"]').length);
 }
 
+// Open the 3D viewer (View → 3D Viewer, with an Alt+3 fallback) and wait for the
+// secondary frame + its NEW `glcanvas-*` to appear. The main pcbnew board view is
+// itself a wxGLCanvas, so the viewer is detected by the GL-canvas COUNT increasing.
+// Returns the glcanvas count after opening. `glBefore` is the count beforehand.
+async function openThreeDViewer(page: Page, glBefore: number): Promise<number> {
+    let opened = false;
+    if (await clickMenuBarItem(page, 'View')) {
+        await page.waitForTimeout(400);
+        opened = await clickMenuItem(page, '3D Viewer');
+    }
+    if (!opened) {
+        console.log('[TEST] View → 3D Viewer not found via menu; trying Alt+3');
+        await page.keyboard.press('Escape');
+        await page.waitForTimeout(200);
+        await page.keyboard.press('Alt+3');
+    }
+
+    await page.waitForFunction(() => {
+        // A new top-level window div beyond the main pcbnew frame.
+        return !!document.querySelector('#window-container [id^="window-"]')
+            || document.querySelectorAll('canvas[id^="glcanvas-"]').length > 0;
+    }, null, { timeout: 60000 });
+
+    await page.waitForFunction((before: number) =>
+        document.querySelectorAll('canvas[id^="glcanvas-"]').length > before,
+        glBefore, { timeout: 60000 });
+
+    const glAfter = await countGlCanvases(page);
+    console.log(`[TEST] glcanvas count after opening 3D viewer: ${glAfter}`);
+    expect(glAfter, 'a new WebGL canvas should appear for the 3D viewer').toBeGreaterThan(glBefore);
+    return glAfter;
+}
+
 test.describe('3D viewer from pcbnew', () => {
     // One 187 MB wasm runtime is already heavy; keep this serial and generous.
     test.describe.configure({ mode: 'serial' });
@@ -89,33 +122,7 @@ test.describe('3D viewer from pcbnew', () => {
         const glBefore = await countGlCanvases(page);
         console.log(`[TEST] glcanvas count before opening 3D viewer: ${glBefore}`);
 
-        // ── Open the 3D viewer: View → 3D Viewer, with an Alt+3 fallback. ──
-        let opened = false;
-        if (await clickMenuBarItem(page, 'View')) {
-            await page.waitForTimeout(400);
-            opened = await clickMenuItem(page, '3D Viewer');
-        }
-        if (!opened) {
-            console.log('[TEST] View → 3D Viewer not found via menu; trying Alt+3');
-            await page.keyboard.press('Escape');
-            await page.waitForTimeout(200);
-            await page.keyboard.press('Alt+3');
-        }
-
-        // ── Wait for the secondary frame + a NEW GL canvas to appear. ──────
-        await page.waitForFunction(() => {
-            // A new top-level window div beyond the main pcbnew frame.
-            return !!document.querySelector('#window-container [id^="window-"]')
-                || document.querySelectorAll('canvas[id^="glcanvas-"]').length > 0;
-        }, null, { timeout: 60000 });
-
-        await page.waitForFunction((before: number) =>
-            document.querySelectorAll('canvas[id^="glcanvas-"]').length > before,
-            glBefore, { timeout: 60000 });
-
-        const glAfter = await countGlCanvases(page);
-        console.log(`[TEST] glcanvas count after opening 3D viewer: ${glAfter}`);
-        expect(glAfter, 'a new WebGL canvas should appear for the 3D viewer').toBeGreaterThan(glBefore);
+        await openThreeDViewer(page, glBefore);
 
         // The 3D reload + raytrace run through asyncify; give them time to build
         // the scene and render a few progressive passes.
@@ -180,5 +187,100 @@ test.describe('3D viewer from pcbnew', () => {
         const stubbed = allLines.filter((l) => l.includes('3D Viewer is not available'));
         expect(stubbed,
             `3D viewer is still stubbed (build not enabled?):\n${stubbed.join('\n')}`).toEqual([]);
+    });
+
+    /**
+     * Regression for the "two canvases over each other" bug.
+     *
+     * The wasm DOM port draws each window's chrome onto 2D canvases and reveals a
+     * wxGLCanvas through it. The CPU raytracer rendered the board correctly into the
+     * 3D viewer's own `glcanvas-*`, but on screen the user saw grey: the 3D viewer is
+     * a SECONDARY top-level frame, and when it is shown wx.js `raiseWindow()` lifts its
+     * opaque `#window-N` chrome div to z-index 101 (= the main GAL canvas's 100, + 1).
+     * Every `glcanvas-*` was hard-coded to z-index 100, so the frame's own window
+     * background painted OVER the GL canvas behind it — two canvases stacked, the
+     * opaque one on top. (The main editor escapes this because its window keeps
+     * `#canvas` transparent over the GAL region; a secondary frame's region is opaque.)
+     *
+     * The fix (wx.js `createGLCanvas`): a GL canvas created while another GL canvas is
+     * already visible belongs to a secondary window → lift it to z-index 2147483647 so
+     * it stacks above the chrome.
+     *
+     * This asserts the stacking straight from the DOM/computed-style — no pixels or
+     * screenshots — so it is independent of the slow raytrace and CI-safe on swiftshader
+     * (where WebGL-canvas screenshots come back blank). Note `glcanvas-*`, `#window-N`
+     * and `.window-canvas` all have `pointer-events:none`, so `elementsFromPoint` can't
+     * see them; computed z-index is the right tool.
+     *
+     * Before the fix: every `glcanvas-*` is z-index 100, so the viewer canvas is not
+     * strictly above the main GAL canvas (100 > 100 is false) → FAILS.
+     * After the fix: the viewer canvas is 2147483647 → PASSES.
+     */
+    test('reveals the 3D viewer GL canvas above the window chrome (regression: occluded board)',
+        async ({ page, testLogger }) => {
+        await page.goto('/kicad/pcbnew.html');
+        await waitForPcbnew(page);
+
+        await loadBoard(page, testLogger);
+
+        const glBefore = await countGlCanvases(page);
+        await openThreeDViewer(page, glBefore);
+
+        // The z-index is assigned synchronously when the canvas is created, but wait
+        // until the newest glcanvas is actually on-screen (setGLCanvasRect ran →
+        // display:block, non-zero box) so its secondary frame's window-N div has been
+        // raised by raiseWindow() and the DOM stacking has settled.
+        await page.waitForFunction((before: number) => {
+            const list = document.querySelectorAll<HTMLCanvasElement>('canvas[id^="glcanvas-"]');
+            if (list.length <= before) return false;
+            const viewer = list[list.length - 1];
+            return getComputedStyle(viewer).display !== 'none'
+                && viewer.getBoundingClientRect().width > 0;
+        }, glBefore, { timeout: 60000 });
+
+        // Stacking order inside #window-container (a single z-index:1 stacking context).
+        // The 3D viewer canvas is the newest glcanvas-*; it must out-stack every other
+        // GL canvas and every secondary window-N chrome div, or the opaque chrome occludes it.
+        const stacking = await page.evaluate(() => {
+            const z = (el: Element) => parseInt(getComputedStyle(el).zIndex, 10) || 0;
+            const gls = Array.from(document.querySelectorAll('#window-container canvas[id^="glcanvas-"]'));
+            const windows = Array.from(document.querySelectorAll('#window-container [id^="window-"]'));
+            const viewer = gls[gls.length - 1];
+            return {
+                glCount: gls.length,
+                viewerId: viewer ? viewer.id : null,
+                viewerZ: viewer ? z(viewer) : 0,
+                maxOtherGlZ: Math.max(0, ...gls.slice(0, -1).map(z)),
+                maxWindowZ: Math.max(0, ...windows.map(z)),
+                glZ: gls.map((c) => ({ id: c.id, z: z(c) })),
+                windowZ: windows.map((w) => ({ id: w.id, z: z(w) })),
+            };
+        });
+        console.log(`[TEST] stacking: ${JSON.stringify(stacking)}`);
+
+        // Precondition: the viewer actually opened (main GAL canvas + viewer canvas).
+        expect(stacking.glCount,
+            'the 3D viewer should add a second WebGL canvas').toBeGreaterThanOrEqual(2);
+
+        // THE regression assertion. Pre-fix every glcanvas-* shares z-index 100, so the
+        // viewer canvas is not strictly above the main GAL canvas and the chrome occludes it.
+        expect(stacking.viewerZ,
+            `3D viewer canvas ${stacking.viewerId} (z=${stacking.viewerZ}) must stack strictly above `
+            + `the other GL canvases (max z=${stacking.maxOtherGlZ}); an equal z-index means the `
+            + `window chrome can occlude it. all=${JSON.stringify(stacking.glZ)}`)
+            .toBeGreaterThan(stacking.maxOtherGlZ);
+
+        // The user-visible symptom: the GL canvas must paint at or above every secondary
+        // window's opaque 2D chrome. (>= not > to tolerate a window clamped to the same
+        // 2147483647 CSS z-index ceiling by raiseWindow.)
+        expect(stacking.viewerZ,
+            `3D viewer canvas (z=${stacking.viewerZ}) must not sit below any window chrome `
+            + `(max window z=${stacking.maxWindowZ}). windows=${JSON.stringify(stacking.windowZ)}`)
+            .toBeGreaterThanOrEqual(stacking.maxWindowZ);
+
+        // Sanity: opening the viewer didn't blow up the runtime.
+        const aborts = [...testLogger.consoleLogs, ...testLogger.errors]
+            .filter((l) => l.includes('Aborted('));
+        expect(aborts, `WASM aborted while opening the 3D viewer:\n${aborts.join('\n\n')}`).toEqual([]);
     });
 });

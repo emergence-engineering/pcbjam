@@ -824,3 +824,23 @@ $(S)/coroutine-pthread/vcall_repro.html: $(S)/coroutine-pthread/vcall_repro.o $(
 
 coroutine-pthread-vcall: $(S)/coroutine-pthread/vcall_repro.html
 .PHONY: coroutine-pthread-vcall
+
+# --- secondary-window wxGLCanvas compositing test (GL-enabled) -----------------
+# First GL-linked standalone app. Reproduces the "two canvases over each other"
+# bug: a wxGLCanvas in a secondary top-level frame must be z-lifted above that
+# frame's own window chrome (wx.js createGLCanvas fix). GL link recipe mirrors
+# tests/gal-regression/wasm/Makefile (wx 'gl' lib + -sMAX_WEBGL_VERSION=2).
+WX_LDFLAGS_GL := $(shell $(WXCONFIG) --libs base,core,gl)
+EM_GL_FLAGS := -sMAX_WEBGL_VERSION=2
+LDFLAGS_GL = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) $(EM_GL_FLAGS) $(WX_LDFLAGS_GL)
+
+$(S)/secondary-glcanvas/secondary-glcanvas_test.o: $(S)/secondary-glcanvas/secondary-glcanvas_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/secondary-glcanvas/secondary-glcanvas_test.html: $(S)/secondary-glcanvas/secondary-glcanvas_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_GL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+secondary-glcanvas: $(S)/secondary-glcanvas/secondary-glcanvas_test.html
+
+# Include the new app in the default `all` build (prerequisites accumulate).
+all: $(S)/secondary-glcanvas/secondary-glcanvas_test.html

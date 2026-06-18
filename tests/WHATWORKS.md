@@ -212,6 +212,7 @@ Organized in `apps/standalone/` folders:
 | textdecor/textdecor_test | WORKS | 1/1 | Text underline/strikethrough decorations |
 | bitmask/bitmask_test | WORKS | 1/1 | Bitmap masking with wxMask transparency |
 | regions/regions_test | WORKS | 1/1 | Non-rectangular region clipping |
+| secondary-glcanvas/secondary-glcanvas_test | WORKS | 1/1 | Secondary-window wxGLCanvas is z-lifted above the window chrome (3D-viewer occlusion regression) |
 
 ---
 
