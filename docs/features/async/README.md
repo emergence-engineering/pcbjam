@@ -43,6 +43,7 @@ or **hang** (a swap unwinds but is never rewound).
 | [`08-dom-port-regression.md`](08-dom-port-regression.md) | DOM-port regression investigation after rebasing onto the async hardening: traces, symbolized crash, ruled-out Asyncify/table/removelist hypotheses, and current stale-window diagnosis. |
 | [`09-dom-window-lifetime-hypothesis.md`](09-dom-window-lifetime-hypothesis.md) | Concrete failure story and first fix experiment for the DOM-port stale `wxWindow` hypothesis: destructor ordering, DOM event reentry, and validation plan. |
 | [`10-resolution-menubar-uaf.md`](10-resolution-menubar-uaf.md) | **RESOLVED:** the regression was a freed `wxMenuBar` left in a live frame's child list by `wxMenuBarBase::Detach()` (DOM-port only — the bar is a real child there). One-line fix in `wxMenuBar::Detach()`; full kicad suite green, zero corruption signatures. |
+| [`11-asyncify-nesting-raytracer.md`](11-asyncify-nesting-raytracer.md) | **Finding + decision:** the WASM 3D raytracer is single-core because `emscripten_sleep` can't nest on an already-unwinding Asyncify context — yielding to join worker threads aborts with `invalid state: 1` since the viewer renders inside a suspended wx modal pump. Multi-core pool (~6–7×) built + parked; unpark needs a *nestable* yield (fiber/JSPI). |
 
 ## The single decisive next step
 

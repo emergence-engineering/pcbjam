@@ -1,19 +1,23 @@
 /**
  * raytrace_threads_test.cpp
  *
- * Minimal, fast-building reproduction of the KiCad WASM raytracer threading
- * deadlock (kicad/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_base.cpp,
- * the post-process passes), PLUS candidate fixes — all in one binary, switchable
- * by URL query param so we build ONCE and test every variant.
+ * Minimal, fast-building proof that the KiCad WASM raytracer's threading
+ * mechanisms (kicad/3d-viewer/3d_rendering/raytracing/render_3d_raytrace_base.cpp,
+ * the post-process passes) genuinely run MULTI-CORE in the browser — several
+ * candidate mechanisms in one binary, switchable by URL query param so we build
+ * ONCE and test every variant.
+ *
+ * Each variant must demonstrate real parallelism (workersRan > 1). The suite is
+ * green iff multithreading actually happens; a variant that degrades to a single
+ * thread fails. Variant A (m=0) is the NAIVE pattern that deadlocks the browser tab
+ * (see WHY below): it is kept ONLY as a negative control. It is held to the same bar
+ * (workersRan > 1), which it cannot meet — the spec marks its test `test.fail()` so it
+ * is reported as an EXPECTED failure, never a green pass. A frozen tab is never a
+ * passing state. (Variant A self-recovers after a 12s cap so it reports workersRan=0
+ * instead of hanging the tab forever.)
  *
  * ------------------------------------------------------------------------------
- * THE PATTERN WE'RE REPRODUCING (raytracer post-process, desktop path):
- *
- *     for (i in 0..N) { std::thread t(worker); t.detach(); }   // spawn N workers
- *     while (threadsFinished < N)                              // ...then WAIT
- *         std::this_thread::sleep_for(10ms);                   // by busy-looping
- *
- * WHY IT DEADLOCKS IN THE BROWSER:
+ * WHY A MAIN-THREAD BUSY-WAIT DEADLOCKS (the trap these mechanisms avoid):
  *  - std::thread == a Web Worker. Creating one needs a message processed by the
  *    browser MAIN-THREAD event loop.
  *  - KiCad already pre-spawned hardware_concurrency() thread-pool workers at
@@ -21,12 +25,14 @@
  *    (-sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency') are already full.
  *    The raytracer's new threads must therefore be spawned ON DEMAND, which
  *    again needs the event loop.
- *  - The busy-wait `sleep_for` NEVER returns to the event loop, so those new
+ *  - A busy-wait `sleep_for` NEVER returns to the event loop, so those new
  *    workers are never created -> threadsFinished never advances -> frozen tab.
  *
- * THE FIX: don't busy-wait — YIELD. emscripten_sleep() (Asyncify) hands control
- * back to the event loop each tick, so the pending worker spawns complete and
- * the workers actually run on real cores.
+ * THE MECHANISMS THAT WORK: either YIELD — emscripten_sleep() (Asyncify) hands
+ * control back to the event loop each tick so pending worker spawns complete
+ * (B1/B2/m4) — or keep a PERSISTENT pre-alive pool whose workers already exist, so
+ * a main-thread busy-wait still completes because they run on their own cores with
+ * no event-loop dependency (B3/m5).
  *
  * TODO(asyncify-nesting) — IMPORTANT CAVEAT this harness does NOT capture: the
  * emscripten_sleep variants (B1/B2/m4) pass here but ABORT the real KiCad 3D viewer
@@ -36,30 +42,33 @@
  * to KiCad is B3 (m=5): a persistent pool + sleep_for busy-wait — NO emscripten_sleep, so
  * no nesting. That multi-core port is currently PARKED (git -C kicad stash) pending
  * research into whether a nestable yield (fibers / emscripten_fiber_swap / JSPI) works.
+ * So this suite validates the threading MECHANISM in isolation, not the shipped viewer
+ * (which still ships serial). See docs/features/async/11-asyncify-nesting-raytracer.md.
  *
  * To reproduce KiCad faithfully we first pre-spawn `park` "parked" workers that
  * block on a condition variable (zero CPU) to occupy the pool slots — exactly
- * what KiCad's singleton thread pool does. Set ?park=0 to show that WITHOUT that
- * pre-existing pool, variant A does NOT deadlock (hwc threads fit in hwc slots).
+ * what KiCad's singleton thread pool does, forcing the on-demand spawns the
+ * yield-based variants must service.
  *
  * ------------------------------------------------------------------------------
  * URL params (all optional):
- *   ?m=0   variant A  : detached threads + std::this_thread::sleep_for  (EXPECT DEADLOCK)
- *   ?m=1   variant B1 : detached threads + emscripten_sleep yield        (FIX, fresh threads)
- *   ?m=2   variant B2 : persistent pre-warmed pool + emscripten_sleep     (FIX, reused threads)
- *   ?m=3   variant C  : serial on the calling thread                      (current shipped fallback)
+ *   ?m=0   variant A  : detached threads + std::this_thread::sleep_for  (NEGATIVE CONTROL: deadlocks)
+ *   ?m=1   variant B1 : detached threads + emscripten_sleep yield        (fresh threads)
+ *   ?m=2   variant B2 : persistent pre-warmed pool + emscripten_sleep     (reused threads)
+ *   ?m=3   variant C  : serial on the calling thread (baseline for the speedup comparison)
+ *   ?m=4   variant B1 with STACK-LOCAL atomics (mirrors the raytracer exactly)
+ *   ?m=5   variant B3 : persistent pool + sleep_for busy-wait (the real ported mechanism; default)
  *   ?park=K  parked workers pre-spawned to exhaust the pool (default = hardware_concurrency)
  *   ?work=K  worker threads the pass uses (default = hardware_concurrency)
  *   ?blocks=K  number of work blocks (default 64)
  *   ?iters=K   compute iterations per block (default 4000000; tune so serial ~2-3s)
- *   ?passes=K  how many times to run the pass (default 1; use >1 to show B2 reuse)
+ *   ?passes=K  how many times to run the pass (default 1; use >1 to show B2/B3 reuse)
  *
  * Console contract (the Playwright spec asserts on these):
  *   [RTPOOL] START m=.. park=.. work=.. blocks=.. iters=.. passes=.. hwc=..
  *   [RTPOOL] PASS done pass=.. workersRan=.. passMs=..
- *   [RTPOOL] DEADLOCK pass=.. ...                 (variant A)
- *   [RTPOOL] SUCCESS mode=.. workersRan=.. totalMs=..
- *   [RTPOOL] FAIL deadlocked mode=.. totalMs=..   (variant A)
+ *   [RTPOOL] SUCCESS mode=.. workersRan=.. totalMs=..   (workersRan=0 for m=0, the deadlock)
+ *   [RTPOOL] DEADLOCK mode=0: ...                       (informational; m=0 negative control only)
  */
 
 #include "wx/wx.h"
@@ -224,22 +233,6 @@ static void releaseParkedPool()
 }
 
 // ----------------------------------------------------------------------------
-// variant A: detached threads + std::this_thread::sleep_for busy-wait.
-// Returns true if a deadlock was detected (workers never finished within 12s).
-// ----------------------------------------------------------------------------
-static bool waitBusy( int n )
-{
-    auto start = clock_t_::now();
-    while( g_threadsFinished.load() < (size_t) n )
-    {
-        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
-        if( std::chrono::duration_cast<std::chrono::seconds>( clock_t_::now() - start ).count() >= 12 )
-            return true; // deadlock: the event loop never ran, workers never started
-    }
-    return false;
-}
-
-// ----------------------------------------------------------------------------
 // variant B1: detached threads + emscripten_sleep yield-poll.
 // ----------------------------------------------------------------------------
 static void waitYield( int n )
@@ -367,7 +360,7 @@ public:
         readUrlParams( raw );
         auto pick = [&]( int i, int dflt ) { return raw[i] == INT_MIN ? dflt : raw[i]; };
 
-        const int mode = pick( 0, 0 );
+        const int mode = pick( 0, 5 ); // default = B3, the real ported mechanism
         const int park = pick( 1, hwc );
         const int work = pick( 2, hwc );
         g_numBlocks = pick( 3, 64 );
@@ -385,9 +378,8 @@ public:
         }
 
         auto t0 = clock_t_::now();
-        bool deadlocked = false;
 
-        for( int pass = 0; pass < passes && !deadlocked; ++pass )
+        for( int pass = 0; pass < passes; ++pass )
         {
             auto p0 = clock_t_::now();
 
@@ -398,12 +390,30 @@ public:
                 workerBody();
                 break;
 
-            case 0: // A — detached threads + busy-wait (expected deadlock)
+            case 0: // A (NEGATIVE CONTROL) — detached threads + main-thread busy-wait.
+                    // CANNOT multi-core in the browser: the busy-wait starves the event
+                    // loop, so the on-demand worker spawns never run and no worker ever
+                    // executes -> workersRan stays 0. Self-recovers after a 12s cap so the
+                    // harness reports (workersRan=0) instead of hanging the tab forever.
+            {
                 resetPass();
                 for( int i = 0; i < work; ++i )
                     std::thread( workerBody ).detach();
-                deadlocked = waitBusy( work );
+
+                auto dlStart = clock_t_::now();
+                while( g_threadsFinished.load() < (size_t) work )
+                {
+                    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+                    if( std::chrono::duration_cast<std::chrono::seconds>(
+                                clock_t_::now() - dlStart ).count() >= 12 )
+                    {
+                        rtlog( "[RTPOOL] DEADLOCK mode=0: workers never spawned within 12s "
+                               "(main-thread busy-wait starved the event loop)" );
+                        break;
+                    }
+                }
                 break;
+            }
 
             case 1: // B1 — detached threads + emscripten_sleep yield
                 resetPass();
@@ -479,21 +489,13 @@ public:
             }
 
             long passMs = elapsedMs( p0 );
-            if( deadlocked )
-                rtlog( "[RTPOOL] DEADLOCK pass=%d workersRan=%d threadsFinished=%d "
-                       "(workers never ran within 12s)",
-                       pass, g_workersRan.load(), (int) g_threadsFinished.load() );
-            else
-                rtlog( "[RTPOOL] PASS done pass=%d workersRan=%d passMs=%ld",
-                       pass, g_workersRan.load(), passMs );
+            rtlog( "[RTPOOL] PASS done pass=%d workersRan=%d passMs=%ld",
+                   pass, g_workersRan.load(), passMs );
         }
 
         long totalMs = elapsedMs( t0 );
-        if( deadlocked )
-            rtlog( "[RTPOOL] FAIL deadlocked mode=%d totalMs=%ld", mode, totalMs );
-        else
-            rtlog( "[RTPOOL] SUCCESS mode=%d workersRan=%d totalMs=%ld sink=%.3f",
-                   mode, g_workersRan.load(), totalMs, g_sink.load() );
+        rtlog( "[RTPOOL] SUCCESS mode=%d workersRan=%d totalMs=%ld sink=%.3f",
+               mode, g_workersRan.load(), totalMs, g_sink.load() );
 
         releaseParkedPool();
 
