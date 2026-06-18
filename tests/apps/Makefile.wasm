@@ -105,6 +105,14 @@ LDFLAGS_COROUTINE = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) $(WX_LDFLAGS_NOGL
 # forbids the very multi-parked-sleep states the harness exists to exercise.
 LDFLAGS_RACES = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -sASSERTIONS=0 $(WX_LDFLAGS_NOGL)
 
+# LDFLAGS for the raytracer thread-deadlock repro. Same pthread + pool config as
+# LDFLAGS_PTHREAD, but built on COROUTINE_BASE_LDFLAGS for the 65536 ASYNCIFY
+# stack KiCad actually ships (emscripten_sleep needs Asyncify to yield).
+LDFLAGS_RAYTRACE = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -pthread \
+                  -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' \
+                  -sPTHREAD_POOL_SIZE_STRICT=0 \
+                  $(WX_LDFLAGS_NOGL)
+
 # A second pre-js carries the DOM-control shim ("--pre-js A --pre-js B"
 # after expansion — emcc accepts repeated --pre-js).
 # JS_FILES lists the actual pre-js paths (no flags) so the link targets can
@@ -548,6 +556,17 @@ $(S)/threadpool/threadpool_test.o: $(S)/threadpool/threadpool_test.cpp
 
 $(S)/threadpool/threadpool_test.html: $(S)/threadpool/threadpool_test.o $(WX_CORE_LIB) $(JS_FILES)
 	$(CXX) $< $(LDFLAGS_PTHREAD) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# Raytracer thread-deadlock repro (pthread) - mirrors render_3d_raytrace_base.cpp's
+# post-process passes (detached threads + main-thread busy-wait). Variants via URL ?m=.
+$(S)/raytrace-threads/raytrace_threads_test.o: $(S)/raytrace-threads/raytrace_threads_test.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $< -o $@
+
+$(S)/raytrace-threads/raytrace_threads_test.html: $(S)/raytrace-threads/raytrace_threads_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_RAYTRACE) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+raytrace-threads: $(S)/raytrace-threads/raytrace_threads_test.html
+.PHONY: raytrace-threads
 
 # Log Error test (no GL) - reproduces KiCad's kiface error dialog
 $(S)/logerror/logerror_test.o: $(S)/logerror/logerror_test.cpp
