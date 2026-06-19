@@ -47,7 +47,12 @@ jobs:
       - name: Init pcbjam-shared submodule
         run: git submodule update --init --depth 1 web/pcbjam-shared
 
+      # Pin pnpm explicitly: the repo root has no package.json, so action-setup
+      # can't infer the version from a packageManager field (it lives in
+      # web/package.json). Keep in sync with web/package.json's packageManager.
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
