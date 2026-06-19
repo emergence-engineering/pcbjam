@@ -568,6 +568,9 @@ $(S)/raytrace-threads/raytrace_threads_test.html: $(S)/raytrace-threads/raytrace
 raytrace-threads: $(S)/raytrace-threads/raytrace_threads_test.html
 .PHONY: raytrace-threads
 
+# Include the raytracer-threading repro in the default `all` build (prereqs accumulate).
+all: $(S)/raytrace-threads/raytrace_threads_test.html
+
 # Log Error test (no GL) - reproduces KiCad's kiface error dialog
 $(S)/logerror/logerror_test.o: $(S)/logerror/logerror_test.cpp
 	$(CXX) -c $(CXXFLAGS) $< -o $@
