@@ -1,4 +1,4 @@
-import { test, expect, tryLoadApp } from './utils/fixtures';
+import { test, expect, tryLoadApp, getCanvasBox } from './utils/fixtures';
 
 // Red-green reproductions for the two DOM-port bugs in
 // docs/features/wx-dom-port/branch-review.md.
@@ -114,5 +114,79 @@ test.describe('wx DOM-port bug reproductions', () => {
         message: 'widening the control must re-ellipsize so the full label becomes visible',
       })
       .toBe(true);
+  });
+
+  // KiCad's ACTION_TOOLBAR derives from wxAuiToolBar, whose tool buttons are
+  // painted "islands" inside ONE wxWindow. The C++ hover tooltip layer
+  // (src/wasm/tooltip.cpp) is armed from wxApp::HandleMouseEvent only when the
+  // hovered wxWindow changes, and BEFORE the motion is dispatched — so (1) the
+  // first tool's tooltip often never arms (read before wxAuiToolBar::OnMotion
+  // sets it) and (2) moving between tools on the same toolbar never re-arms.
+  // The app logs each tool's #canvas-relative rect; we drive the real pointer
+  // and assert the #wx-tooltip layer shows the hovered tool's text and updates.
+  test('wxAuiToolBar: tooltip shows on hover and updates when moving between tools', async ({
+    page,
+    testLogger,
+  }) => {
+    await page.goto('/standalone/tooltip-toolbar/tooltip-toolbar_test.html');
+    expect(await tryLoadApp(page, 30000), 'repro app should load').toBe(true);
+
+    await expect
+      .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] tooltip-toolbar ready')), {
+        timeout: 30000,
+        message: 'repro app should finish setup',
+      })
+      .toBe(true);
+
+    // Tool rects (in #canvas-relative coords) logged by the app.
+    const rects: Record<string, { x: number; y: number; w: number; h: number }> = {};
+    for (const l of testLogger.consoleLogs) {
+      const m = l.match(/\[REPRO\] toolrect (\S+) (-?\d+) (-?\d+) (-?\d+) (-?\d+)/);
+      if (m) rects[m[1]] = { x: +m[2], y: +m[3], w: +m[4], h: +m[5] };
+    }
+    expect(rects['TOOLTIP_A'], 'tool A rect logged').toBeTruthy();
+    expect(rects['TOOLTIP_B'], 'tool B rect logged').toBeTruthy();
+
+    const canvas = await getCanvasBox(page);
+    const center = (r: { x: number; y: number; w: number; h: number }) => ({
+      x: canvas.x + r.x + r.w / 2,
+      y: canvas.y + r.y + r.h / 2,
+    });
+    const a = center(rects['TOOLTIP_A']);
+    const b = center(rects['TOOLTIP_B']);
+
+    const readTooltip = () =>
+      page.evaluate(() => {
+        const el = document.getElementById('wx-tooltip');
+        if (!el) return { visible: false, text: '' };
+        const visible = el.style.display !== 'none' && getComputedStyle(el).display !== 'none';
+        return { visible, text: el.textContent || '' };
+      });
+    const shownText = async () => {
+      const t = await readTooltip();
+      return t.visible ? t.text : '';
+    };
+
+    // Settle the pointer off the toolbar, then hover tool A.
+    await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height - 20);
+    await page.mouse.move(a.x, a.y);
+
+    // RED today: the tooltip often never arms for the first hovered tool.
+    await expect
+      .poll(shownText, {
+        timeout: 4000,
+        message: 'tooltip should show TOOLTIP_A when hovering tool A',
+      })
+      .toBe('TOOLTIP_A');
+
+    // Move to tool B (same toolbar window). RED today: never re-armed, so it
+    // stays on TOOLTIP_A or hides.
+    await page.mouse.move(b.x, b.y);
+    await expect
+      .poll(shownText, {
+        timeout: 4000,
+        message: 'tooltip should update to TOOLTIP_B when moving to tool B',
+      })
+      .toBe('TOOLTIP_B');
   });
 });

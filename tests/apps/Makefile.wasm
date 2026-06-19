@@ -196,6 +196,7 @@ all: minimal_test.html \
      $(S)/textctrl-reentry/textctrl-reentry_test.html \
      $(S)/stattext-ellipsize/stattext-ellipsize_test.html \
      $(S)/tooltip-lifetime/tooltip-lifetime_test.html \
+     $(S)/tooltip-toolbar/tooltip-toolbar_test.html \
      $(S)/warp-pointer/warp-pointer_test.html
 
 # Main test app
@@ -234,6 +235,15 @@ $(S)/tooltip-lifetime/tooltip-lifetime_test.html: $(S)/tooltip-lifetime/tooltip-
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
 tooltip-lifetime: $(S)/tooltip-lifetime/tooltip-lifetime_test.html
+
+# wxAuiToolBar per-tool tooltip repro (dom-port-bugs.spec.ts).
+$(S)/tooltip-toolbar/tooltip-toolbar_test.o: $(S)/tooltip-toolbar/tooltip-toolbar_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/tooltip-toolbar/tooltip-toolbar_test.html: $(S)/tooltip-toolbar/tooltip-toolbar_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+tooltip-toolbar: $(S)/tooltip-toolbar/tooltip-toolbar_test.html
 
 # wxWindow::WarpPointer must update the cached mouse position (wxGetMousePosition).
 $(S)/warp-pointer/warp-pointer_test.o: $(S)/warp-pointer/warp-pointer_test.cpp
