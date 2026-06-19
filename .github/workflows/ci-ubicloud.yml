@@ -110,6 +110,9 @@ jobs:
           # Self-built wasm-opt: official x86_64-linux tarballs run asyncify
           # ~4x slower than a stock gcc -O3+LTO build (A/B run 27276830256).
           export BINARYEN_BUILD_FROM_SOURCE=1
+          # Build the experimental WASM 3D viewer (default OFF) so tests/kicad/3d-viewer.spec.ts
+          # has a viewer-enabled pcbnew to open. Propagates into the container via docker/build.sh.
+          export BUILD_3D_VIEWER=ON
           echo "Building ALL tools with BINARYEN_VERSION=${BINARYEN_VERSION}, compile -j $(nproc) on ${KICAD_DOCKER_CPUS} CPUs, pipelined wasm-opt"
           ./docker/build.sh all --build-deps -j "$(nproc)"
           echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
