@@ -115,5 +115,20 @@ else
     smart_cp "$PROJECT_ROOT/wxwidgets/build/wasm/wx-dom.js" "$KICAD_TEST"
 fi
 
+# Demo board for the gerbview print test (tests/apps/kicad/gerbview-print.html).
+# Provisioned (not committed; gitignored) from the canonical demo board, same
+# pattern as the wasm artifacts above. gerbview-print.html fetches the subset of
+# layers it needs from ./board/, so copying the whole set is harmless.
+BOARD_SRC="$PROJECT_ROOT/site/public/gerber-demo/board"
+if [ -d "$BOARD_SRC" ]; then
+    echo "Provisioning gerbview demo board..."
+    mkdir -p "$KICAD_TEST/board"
+    for f in "$BOARD_SRC"/tinytapeout-demo-*; do
+        smart_cp "$f" "$KICAD_TEST/board"
+    done
+else
+    echo "  (demo board source $BOARD_SRC not found — skipping)"
+fi
+
 echo "KiCad WASM files synced to $KICAD_TEST"
 ls -lh "$KICAD_TEST"
