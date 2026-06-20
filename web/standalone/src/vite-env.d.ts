@@ -18,6 +18,8 @@ interface ImportMetaEnv {
   readonly VITE_PROJECT_SOURCE?: string;
   /** Static gallery manifest URL (required when VITE_PROJECT_SOURCE=static), e.g. https://cdn.pcbjam.com/content/2.7.7/manifest.json. */
   readonly VITE_PROJECT_MANIFEST_URL?: string;
+  /** "idb" ⇒ loaded folders import into a browser-local (IndexedDB) project with its own URL; otherwise the in-page File System Access flow. */
+  readonly VITE_LOCAL_PROJECTS?: string;
   /** Yjs collab provider: none | broadcastchannel | partykit | hocuspocus. */
   readonly VITE_YJS_PROVIDER?: string;
   /** Host/URL for network collab providers (partykit, hocuspocus). */

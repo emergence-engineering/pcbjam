@@ -71,6 +71,9 @@ function main() {
     // Read-only example gallery, saves download to local.
     VITE_PROJECT_SOURCE: "static",
     VITE_PROJECT_MANIFEST_URL: `${a.cdn}/content/${a.tag}/manifest.json`,
+    // Loaded folders import into a browser-local (IndexedDB) project — editable,
+    // persistent, exported via Download .zip — layered over the gallery.
+    VITE_LOCAL_PROJECTS: "idb",
     // Built-in offline symbols (no backend); cross-tab collab only.
     VITE_LIBS_SOURCE: "static",
     VITE_YJS_PROVIDER: "broadcastchannel",

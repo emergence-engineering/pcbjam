@@ -1,21 +1,49 @@
-import type { DriftReportBody, Lib } from "@pcbjam/shared";
+import type { DriftReportBody, Lib, Project } from "@pcbjam/shared";
 import { useQuery } from "@tanstack/react-query";
 import { API_BASE_URL, PROJECT_SOURCE_KIND } from "./config";
 import { client } from "./contract-client";
 import { downloadBytes } from "./download";
-import { projectSource } from "./project-source";
+import {
+  ReadOnlyProjectError,
+  descriptorForSlug,
+  listPrimaryProjects,
+  localProjectStore,
+  projectSource,
+} from "./project-source";
+import type { SourceDescriptor } from "./project-source-shared";
 
 /**
  * Project/file reads go through the active PROJECT SOURCE (lib/project-source.ts):
- * the @pcbjam/shared REST backend, or the read-only static gallery (demo mode).
- * Libraries + collab drift reporting are backend-only and stay on the contract
- * client here.
+ * the @pcbjam/shared REST backend, the read-only static gallery (demo mode), or
+ * the browser-local IndexedDB store — composited per slug. Libraries + collab
+ * drift reporting are backend-only and stay on the contract client here.
  */
 
+/** Remote/gallery projects (excludes browser-local ones — those have their own
+ *  hook so the home page can list + manage them as a distinct section). */
 export function useProjects() {
   return useQuery({
     queryKey: ["projects"],
-    queryFn: () => projectSource().listProjects(),
+    queryFn: () => listPrimaryProjects(),
+  });
+}
+
+/** Browser-local (IndexedDB) projects; empty when the local store is disabled. */
+export function useLocalProjects() {
+  return useQuery({
+    queryKey: ["local-projects"],
+    queryFn: (): Promise<Project[]> =>
+      localProjectStore()?.listProjects() ?? Promise.resolve([]),
+  });
+}
+
+/** The source kind that owns `slug` (local / remote-ro / remote-rw) — for the
+ *  "where your edits go" chip on the project + editor views. */
+export function useSourceDescriptor(slug: string) {
+  return useQuery({
+    queryKey: ["source-descriptor", slug],
+    queryFn: (): Promise<SourceDescriptor> => descriptorForSlug(slug),
+    enabled: !!slug,
   });
 }
 
@@ -57,17 +85,26 @@ export function fetchFileBytes(
  * to the user's machine instead. The remote-vs-static choice is config-driven
  * (the active project source), so callers just call this.
  */
-export function uploadFileBytes(
+export async function uploadFileBytes(
   slug: string,
   relPath: string,
   bytes: Uint8Array,
 ): Promise<void> {
   const source = projectSource();
-  if (source.uploadFileBytes) {
-    return source.uploadFileBytes(slug, relPath, bytes);
+  if (!source.uploadFileBytes) {
+    downloadBytes(relPath, bytes);
+    return;
   }
-  downloadBytes(relPath, bytes);
-  return Promise.resolve();
+  try {
+    await source.uploadFileBytes(slug, relPath, bytes);
+  } catch (e) {
+    // Composite write to a read-only (gallery) project → fall back to download.
+    if (e instanceof ReadOnlyProjectError) {
+      downloadBytes(relPath, bytes);
+      return;
+    }
+    throw e;
+  }
 }
 
 // --- collaboration drift reporting (ysync; backend-only) ---

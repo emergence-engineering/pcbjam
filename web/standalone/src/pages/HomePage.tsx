@@ -1,14 +1,20 @@
 import * as React from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Lib, Tool } from "@pcbjam/shared";
 import { FolderOpen, Library, Loader2, Package } from "lucide-react";
 import { useLibs, useProjects } from "@/lib/api";
-import { PROJECT_SOURCE_KIND } from "@/lib/config";
+import { LOCAL_PROJECTS_ENABLED, PROJECT_SOURCE_KIND } from "@/lib/config";
 import { localFileLibsSource } from "@/wasm/libs/local-file-source";
 import type { LibsSource } from "@/wasm/libs/source";
 import { downloadBytes } from "@/lib/download";
+import { importFileList, importFsaFolder } from "@/lib/import-folder";
+import { localProjectStore } from "@/lib/project-source";
+import { SOURCE_DESCRIPTORS } from "@/lib/project-source-shared";
 import { Button } from "@/components/ui/button";
 import { ToolGrid } from "@/components/ToolGrid";
+import { SourceChip } from "@/components/SourceChip";
+import { LocalProjectsSection } from "@/components/LocalProjectsSection";
 import type { SaveBytes } from "@/wasm/save-flow";
 import { LocalProjectView, type LocalFile } from "@/components/LocalProjectView";
 import { WasmTool } from "@/components/WasmTool";
@@ -105,6 +111,11 @@ export function HomePage() {
   // Static (no-backend) demo mode: projects come from a read-only CDN gallery,
   // there are no backend libraries, and editor saves download to local.
   const staticMode = PROJECT_SOURCE_KIND === "static";
+  // When on, loaded folders import into a browser-local (IDB) project with its
+  // own URL instead of the in-page File System Access write-back flow.
+  const localEnabled = LOCAL_PROJECTS_ENABLED;
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: projects, isLoading, error } = useProjects();
   const symbolLibs = useLibs("symbol");
   const footprintLibs = useLibs("footprint");
@@ -127,6 +138,17 @@ export function HomePage() {
   React.useEffect(() => {
     if (inputRef.current) inputRef.current.setAttribute("webkitdirectory", "");
   }, []);
+
+  // Import a picked folder into the browser-local store as a new editable
+  // project, then open it at its own /p/:slug URL. The original disk files are
+  // untouched (this is a copy); edits persist to IDB, export via Download .zip.
+  const importToLocal = async (imported: { name: string; files: { path: string; bytes: Uint8Array }[] }) => {
+    const store = localProjectStore();
+    if (!store) return;
+    const project = await store.createProject(imported.name, imported.files);
+    await queryClient.invalidateQueries({ queryKey: ["local-projects"] });
+    navigate(`/p/${project.slug}`);
+  };
 
   // Tool launched from the home page: no project, no files. File-less editors
   // read libraries from the backend (libsSourceConfig) and persist through the
@@ -205,8 +227,9 @@ export function HomePage() {
           <FolderOpen size={18} /> Open a local folder
         </h2>
         <p className="mb-4 text-sm text-muted-foreground">
-          No upload — files stay in your browser. Pick a folder containing a
-          KiCad project.
+          {localEnabled
+            ? "No upload — a copy is imported into this browser as an editable project (your original files aren't touched). Save persists here; export anytime with Download .zip."
+            : "No upload — files stay in your browser. Pick a folder containing a KiCad project."}
         </p>
         {window.showDirectoryPicker ? (
           <Button
@@ -215,19 +238,24 @@ export function HomePage() {
               void (async () => {
                 let root: FileSystemDirectoryHandle;
                 try {
-                  root = await window.showDirectoryPicker!({ mode: "readwrite" });
+                  // Import only needs read; the write-back flow needs readwrite.
+                  root = await window.showDirectoryPicker!({
+                    mode: localEnabled ? "read" : "readwrite",
+                  });
                 } catch {
-                  return; // user cancelled the picker / denied write access
+                  return; // user cancelled the picker / denied access
                 }
-                setLocal(await buildFsaProject(root));
+                if (localEnabled) await importToLocal(await importFsaFolder(root));
+                else setLocal(await buildFsaProject(root));
               })();
             }}
           >
             <FolderOpen size={16} /> Choose folder
           </Button>
         ) : (
-          // No File System Access API (Firefox/Safari): read-only folder input;
-          // editor saves arrive as browser downloads instead of disk writes.
+          // No File System Access API (Firefox/Safari): folder input. With the
+          // local store on, the files are imported into IDB; otherwise it's a
+          // read-only session where editor saves arrive as browser downloads.
           <input
             ref={inputRef}
             type="file"
@@ -236,11 +264,18 @@ export function HomePage() {
             onChange={(e) => {
               const fl = e.target.files;
               if (!fl || fl.length === 0) return;
-              setLocal(buildLocalProject(fl));
+              if (localEnabled) {
+                void (async () => importToLocal(await importFileList(fl)))();
+              } else {
+                setLocal(buildLocalProject(fl));
+              }
             }}
           />
         )}
       </section>
+
+      {/* --- Your browser-local projects (imported folders + saved work) --- */}
+      {localEnabled && <LocalProjectsSection />}
 
       {/* --- Tools (KiCad-style launcher for the standalone tools) --- */}
       <section className="mb-10">
@@ -250,8 +285,15 @@ export function HomePage() {
 
       {/* --- Projects (backend, or the static example gallery) --- */}
       <section className="mb-10">
-        <h2 className="mb-3 text-lg font-medium">
+        <h2 className="mb-3 flex items-center gap-2 text-lg font-medium">
           {staticMode ? "Example projects" : "Projects from the backend"}
+          <SourceChip
+            descriptor={
+              staticMode
+                ? SOURCE_DESCRIPTORS["remote-ro"]
+                : SOURCE_DESCRIPTORS["remote-rw"]
+            }
+          />
         </h2>
         {isLoading && (
           <p className="flex items-center gap-2 text-muted-foreground">

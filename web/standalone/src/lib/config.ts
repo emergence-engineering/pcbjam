@@ -60,6 +60,17 @@ export const PROJECT_SOURCE_KIND: ProjectSourceKind =
  *  "https://cdn.pcbjam.com/content/2.7.7/manifest.json". Required for "static". */
 export const PROJECT_MANIFEST_URL = import.meta.env.VITE_PROJECT_MANIFEST_URL || null;
 
+/**
+ * When "idb", loaded folders import into a browser-local (IndexedDB) project
+ * with its own /p/:slug URL — editable, persistent across visits, exported via
+ * Download .zip / per-file — instead of the in-page File System Access flow.
+ * The local store is layered (composite) alongside the configured remote/gallery
+ * source. Off by default (plain dev keeps disk write-back); build-demo.mjs turns
+ * it on for the demo. See lib/idb-project-store.ts + lib/project-source.ts.
+ */
+export const LOCAL_PROJECTS_ENABLED =
+  import.meta.env.VITE_LOCAL_PROJECTS === "idb";
+
 import type { ProviderConfig, ProviderKind } from "@/wasm/collab";
 import { remoteLibsSource } from "@/wasm/libs/remote-source";
 import { scopedLibsSource } from "@/wasm/libs/scoped-source";

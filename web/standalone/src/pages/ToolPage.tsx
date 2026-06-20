@@ -1,6 +1,11 @@
 import { useParams } from "react-router-dom";
 import { toolSchema } from "@pcbjam/shared";
-import { fetchFileBytes, uploadFileBytes, useProject } from "@/lib/api";
+import {
+  fetchFileBytes,
+  uploadFileBytes,
+  useProject,
+  useSourceDescriptor,
+} from "@/lib/api";
 import { docSourceConfig } from "@/lib/config";
 import { WasmTool } from "@/components/WasmTool";
 import { PreflightGate } from "@/preflight/PreflightGate";
@@ -12,6 +17,7 @@ export function ToolPage() {
 
   const parsedTool = toolSchema.safeParse(params.tool);
   const { data, isLoading, error } = useProject(slug);
+  const { data: sourceDescriptor } = useSourceDescriptor(slug);
 
   if (!parsedTool.success) {
     return (
@@ -56,6 +62,7 @@ export function ToolPage() {
         fetchBytes={(relPath) => fetchFileBytes(slug, relPath)}
         saveBytes={(relPath, bytes) => uploadFileBytes(slug, relPath, bytes)}
         docSource={docSource}
+        sourceDescriptor={sourceDescriptor}
       />
     </PreflightGate>
   );

@@ -46,6 +46,8 @@ import { clog, cwarn } from "@/wasm/collab/debug";
 import type * as Y from "yjs";
 import { createOomWatch, respawnInNewTab } from "@/recovery/oom-watch";
 import { MemoryExhaustedDialog } from "@/recovery/MemoryExhaustedDialog";
+import type { SourceDescriptor } from "@/lib/project-source-shared";
+import { SourceChip } from "@/components/SourceChip";
 
 // Tools with the v2 items bridge (kicadCollabSnapshotItems/ApplyItems embind exports).
 const COLLAB_TOOLS = new Set<Tool>(["pl_editor", "eeschema", "pcbnew"]);
@@ -508,6 +510,7 @@ export function WasmTool({
   docSource,
   assetBaseUrl,
   libsSource,
+  sourceDescriptor,
 }: {
   tool: Tool;
   slug: string;
@@ -515,6 +518,9 @@ export function WasmTool({
   projectId: string;
   files: ToolFile[];
   targetPath?: string;
+  /** Where this project lives (local / remote-ro / remote-rw) — shown as a chip
+   *  so the user knows whether/how Save persists. Omitted ⇒ no chip. */
+  sourceDescriptor?: SourceDescriptor;
   /**
    * Override the library source the editor browses. Omitted ⇒ the configured
    * default (`libsSourceConfig`). Used to open a single library scoped to itself
@@ -830,6 +836,13 @@ export function WasmTool({
       {ready && status && (
         <div className="pointer-events-none absolute left-3 top-3 z-20 rounded bg-black/70 px-3 py-2 font-mono text-xs text-white">
           {status}
+        </div>
+      )}
+
+      {/* Where this project lives + whether Save persists (top-right). */}
+      {ready && sourceDescriptor && (
+        <div className="absolute right-3 top-3 z-20">
+          <SourceChip descriptor={sourceDescriptor} />
         </div>
       )}
 

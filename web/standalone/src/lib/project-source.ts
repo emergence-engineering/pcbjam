@@ -1,20 +1,33 @@
 import type { Project, ProjectFile, ProjectWithFiles } from "@pcbjam/shared";
 import {
   API_BASE_URL,
+  LOCAL_PROJECTS_ENABLED,
   PROJECT_MANIFEST_URL,
   PROJECT_SOURCE_KIND,
 } from "./config";
 import { client } from "./contract-client";
+import { idbProjectStore, type LocalProjectStore } from "./idb-project-store";
+import {
+  SOURCE_DESCRIPTORS,
+  type SourceDescriptor,
+  deterministicUuid,
+} from "./project-source-shared";
 
 /**
- * Where the standalone gets its PROJECTS. The default `remote` source talks the
- * @pcbjam/shared REST contract; the `static` source serves a read-only example
- * gallery (manifest + file bytes) from a CDN with no backend — the
- * demo.pcbjam.com mode, where Save downloads to local (`uploadFileBytes` absent
- * ⇒ the caller downloads). One source is active per deployment, selected by
- * PROJECT_SOURCE_KIND. See docs/features/demo-deploy/.
+ * Where the standalone gets its PROJECTS. Every source implements this one
+ * interface (so they're swappable) and self-describes via `descriptor`:
+ *   - remote   → REST backend over the @pcbjam/shared contract (remote-rw).
+ *   - static   → read-only example gallery from a CDN, no backend (remote-ro);
+ *                Save downloads to local (`uploadFileBytes` absent).
+ *   - local    → this browser's IndexedDB (idb-project-store.ts), writable.
+ * The configured PROJECT_SOURCE_KIND picks the remote/gallery source; when
+ * LOCAL_PROJECTS_ENABLED, the local IDB store is layered on top (a composite
+ * that routes per slug) so loaded folders + saved work coexist with the gallery.
+ * See docs/features/demo-deploy/.
  */
 export interface ProjectSource {
+  /** What this source is + whether saves persist (surfaced in the UI). */
+  readonly descriptor: SourceDescriptor;
   /** No write-back target — the editor should download saves to local. */
   readonly readOnly: boolean;
   listProjects(): Promise<Project[]>;
@@ -41,6 +54,7 @@ function remoteProjectSource(): ProjectSource {
   const fileUrl = (slug: string, relPath: string) =>
     `${API_BASE_URL}/api/projects/${encodeURIComponent(slug)}/files/${encodePath(relPath)}`;
   return {
+    descriptor: SOURCE_DESCRIPTORS["remote-rw"],
     readOnly: false,
     async listProjects() {
       const res = await client.listProjects();
@@ -92,31 +106,6 @@ interface StaticManifest {
   projects: StaticManifestProject[];
 }
 
-/** Stable v4-format UUID from a seed (cyrb128) — the contract ids are UUIDs and
- *  the editor uses project.id for the (broadcast-only here) collab room name, so
- *  a deterministic id keeps that stable across reloads/tabs. */
-function deterministicUuid(seed: string): string {
-  let h1 = 1779033703,
-    h2 = 3144134277,
-    h3 = 1013904242,
-    h4 = 2773480762;
-  for (let i = 0; i < seed.length; i++) {
-    const k = seed.charCodeAt(i);
-    h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
-    h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
-    h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
-    h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
-  }
-  h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
-  h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
-  h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
-  h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
-  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, "0");
-  const h = hex(h1) + hex(h2) + hex(h3) + hex(h4);
-  const variant = ((parseInt(h.charAt(16), 16) & 0x3) | 0x8).toString(16);
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
-}
-
 function contentTypeFor(path: string): string {
   if (/\.(kicad_\w+|net|csv|pos|drl|gbr)$/i.test(path))
     return "text/plain; charset=utf-8";
@@ -163,6 +152,7 @@ function staticProjectSource(manifestUrl: string): ProjectSource {
   };
 
   return {
+    descriptor: SOURCE_DESCRIPTORS["remote-ro"],
     readOnly: true,
     async listProjects() {
       const m = await load();
@@ -184,16 +174,98 @@ function staticProjectSource(manifestUrl: string): ProjectSource {
   };
 }
 
+// --- composite (local IDB layered over a remote/gallery source) ---------------
+
+/**
+ * Routes each call to the LOCAL store or the REMOTE/gallery `primary` by which
+ * one owns the slug, so browser-saved projects and the read-only gallery share
+ * one `/p/:slug` namespace. A locally-stored slug always wins (local list is
+ * deduped). `descriptorFor(slug)` answers which kind a given project is, for the
+ * UI; reads/writes fall through to `primary` for anything not in IDB.
+ */
+function compositeProjectSource(
+  local: LocalProjectStore,
+  primary: ProjectSource,
+): ProjectSource {
+  const route = async (slug: string): Promise<ProjectSource> =>
+    (await local.hasProject(slug)) ? local : primary;
+  return {
+    descriptor: local.descriptor,
+    readOnly: false,
+    async listProjects() {
+      const [a, b] = await Promise.all([
+        local.listProjects(),
+        primary.listProjects().catch(() => [] as Project[]),
+      ]);
+      const localSlugs = new Set(a.map((p) => p.slug));
+      return [...a, ...b.filter((p) => !localSlugs.has(p.slug))];
+    },
+    getProject: (slug) => route(slug).then((s) => s.getProject(slug)),
+    fetchFileBytes: (slug, p) => route(slug).then((s) => s.fetchFileBytes(slug, p)),
+    uploadFileBytes: async (slug, p, bytes) => {
+      const s = await route(slug);
+      if (s.uploadFileBytes) return s.uploadFileBytes(slug, p, bytes);
+      // Read-only gallery project being edited → download (api.ts also guards).
+      throw new ReadOnlyProjectError(slug);
+    },
+  };
+}
+
+/** Thrown by a composite write to a read-only project; api.ts maps it to a
+ *  browser download (the gallery's save-to-local behavior). */
+export class ReadOnlyProjectError extends Error {
+  constructor(slug: string) {
+    super(`project is read-only: ${slug}`);
+    this.name = "ReadOnlyProjectError";
+  }
+}
+
 // --- selection ----------------------------------------------------------------
 
-let cached: ProjectSource | null = null;
+let cachedPrimary: ProjectSource | null = null;
+let cachedLocal: LocalProjectStore | null = null;
+let cachedActive: ProjectSource | null = null;
 
-/** The active project source for this deployment (memoized). */
-export function projectSource(): ProjectSource {
-  if (cached) return cached;
-  cached =
+function primarySource(): ProjectSource {
+  if (cachedPrimary) return cachedPrimary;
+  cachedPrimary =
     PROJECT_SOURCE_KIND === "static" && PROJECT_MANIFEST_URL
       ? staticProjectSource(PROJECT_MANIFEST_URL)
       : remoteProjectSource();
-  return cached;
+  return cachedPrimary;
+}
+
+/**
+ * The browser-local IDB project store, when enabled for this deployment
+ * (LOCAL_PROJECTS_ENABLED) — used by the home page to import folders + manage
+ * saved projects. `null` when the feature is off (then loaded folders use the
+ * in-page File System Access flow instead).
+ */
+export function localProjectStore(): LocalProjectStore | null {
+  if (!LOCAL_PROJECTS_ENABLED) return null;
+  return (cachedLocal ??= idbProjectStore());
+}
+
+/** The active project source for this deployment (memoized). When the local IDB
+ *  store is enabled it's a composite over the configured remote/gallery source. */
+export function projectSource(): ProjectSource {
+  if (cachedActive) return cachedActive;
+  const local = localProjectStore();
+  cachedActive = local
+    ? compositeProjectSource(local, primarySource())
+    : primarySource();
+  return cachedActive;
+}
+
+/** The configured remote/gallery list only (excludes browser-local projects) —
+ *  the home page shows local + gallery as separate, clearly-labeled sections. */
+export function listPrimaryProjects(): Promise<Project[]> {
+  return primarySource().listProjects();
+}
+
+/** Which source kind owns `slug` — for showing/describing it in the UI. */
+export async function descriptorForSlug(slug: string): Promise<SourceDescriptor> {
+  const local = localProjectStore();
+  if (local && (await local.hasProject(slug))) return local.descriptor;
+  return primarySource().descriptor;
 }

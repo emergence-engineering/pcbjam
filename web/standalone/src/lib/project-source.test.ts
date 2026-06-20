@@ -25,6 +25,9 @@ async function loadStatic() {
     API_BASE_URL: "http://localhost:3050",
     PROJECT_SOURCE_KIND: "static",
     PROJECT_MANIFEST_URL: MANIFEST_URL,
+    // Local IDB store off ⇒ the active source is the plain static gallery
+    // (no composite), which is what these read-only assertions cover.
+    LOCAL_PROJECTS_ENABLED: false,
   }));
   return (await import("./project-source")).projectSource;
 }
