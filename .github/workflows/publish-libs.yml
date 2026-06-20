@@ -1,0 +1,61 @@
+name: publish-libs
+
+# On-demand, decoupled: clone the full upstream KiCad symbol + footprint
+# libraries at a tag and publish them to the CDN (cdn.pcbjam.com, R2 pcbjam-cdn)
+# as version-pinned r2-idb-sync STATIC ORIGINS — one immutable manifest+bundle
+# per lib under libs/kicad/<lib_tag>/. The demo's cdnLibsSource opens these
+# read-only + IDB-cached. See docs/features/r2-idb-sync + the demo-adjustments
+# feature; wasm/libs/cdn-source.ts (client) + scripts/deploy/publish-libs.ts.
+#
+# Keyed by the KiCad library tag and idempotent: if the snapshot already exists
+# the script SKIPS the whole run, so re-running for the same tag is a near no-op.
+# Run this ONLY when the library tag changes; deploy-demo.yml just pins the demo
+# build at the chosen tag (build-demo --lib-tag).
+on:
+  workflow_dispatch:
+    inputs:
+      lib_tag:
+        description: "KiCad library tag to publish (kicad-symbols/footprints), e.g. 10.0.3"
+        required: true
+        default: "10.0.3"
+      force:
+        description: "Re-publish even if the snapshot already exists (true/false)"
+        default: "false"
+
+concurrency:
+  group: publish-libs
+  cancel-in-progress: false
+
+env:
+  BUCKET: pcbjam-cdn
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  # publish-libs.ts shells wrangler (R2) via cdn-store; fetch it on demand.
+  WRANGLER_CMD: npx --yes wrangler@4
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      # Only the MIT pcbjam-shared submodule is needed (publish-libs imports the
+      # self-contained sync-wire codecs from it); kicad/wxwidgets are not.
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Init pcbjam-shared submodule
+        run: git submodule update --init --depth 1 web/pcbjam-shared
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Clone the full libs at <lib_tag>, extract every lib, build the static
+      # origins, upload to R2. The import chain (extract-libs parsers +
+      # sync-wire) is dependency-free, so no workspace install is needed.
+      - name: Publish libs to CDN
+        run: >
+          npx --yes tsx scripts/deploy/publish-libs.ts
+          --lib-tag "${{ github.event.inputs.lib_tag }}"
+          --clone "$RUNNER_TEMP/kicad-libs"
+          --driver r2 --bucket "$BUCKET" --remote
+          ${{ github.event.inputs.force == 'true' && '--force' || '' }}

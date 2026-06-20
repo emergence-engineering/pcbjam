@@ -19,14 +19,22 @@
 // + top `<prefix>/<libTag>/manifest.json` { schema, tag, libs:[{id,name,kind,itemCount}] }
 // All immutable (content is pinned by the tag).
 
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { extractAllLibs } from "../../web/backend/src/extract/extract-libs.js";
 import { encodeBundle, type SyncManifest } from "../../web/pcbjam-shared/src/sync-wire.js";
 import { IMMUTABLE, makeStore, putJSON, sha256hex } from "./lib/cdn-store.mjs";
+
+// Upstream KiCad library repos (full set lives here; tagged per KiCad release).
+const SYMBOLS_URL = "https://gitlab.com/kicad/libraries/kicad-symbols.git";
+const FOOTPRINTS_URL = "https://gitlab.com/kicad/libraries/kicad-footprints.git";
 
 interface Args {
   libTag: string | null;
   symbolsSrc: string | null;
   footprintsSrc: string | null;
+  clone: string | null;
   driver: string;
   out: string | null;
   bucket: string;
@@ -40,6 +48,7 @@ function parseArgs(argv: string[]): Args {
     libTag: null,
     symbolsSrc: null,
     footprintsSrc: null,
+    clone: null,
     driver: "local",
     out: null,
     bucket: "pcbjam-cdn",
@@ -53,6 +62,9 @@ function parseArgs(argv: string[]): Args {
       case "--lib-tag": a.libTag = next(); break;
       case "--symbols-src": a.symbolsSrc = next(); break;
       case "--footprints-src": a.footprintsSrc = next(); break;
+      // Clone both upstream repos at --lib-tag into <dir>/{kicad-symbols,
+      // kicad-footprints} (full, shallow) and use them as the sources.
+      case "--clone": a.clone = next(); break;
       case "--driver": a.driver = next(); break;
       case "--out": a.out = next(); break;
       case "--bucket": a.bucket = next(); break;
@@ -63,10 +75,23 @@ function parseArgs(argv: string[]): Args {
     }
   }
   if (!a.libTag) throw new Error("--lib-tag <kicad library tag> is required");
-  if (!a.symbolsSrc && !a.footprintsSrc)
-    throw new Error("at least one of --symbols-src / --footprints-src is required");
+  if (!a.symbolsSrc && !a.footprintsSrc && !a.clone)
+    throw new Error("need --clone <dir>, or --symbols-src / --footprints-src");
   if (a.driver === "local" && !a.out) a.out = ".cdn-out";
   return a;
+}
+
+/** Shallow full clone of a lib repo at a tag (idempotent: skip if present). */
+function cloneFull(url: string, dest: string, ref: string): void {
+  if (existsSync(dest)) {
+    console.log(`clone: ${dest} present — reusing`);
+    return;
+  }
+  mkdirSync(dirname(dest), { recursive: true });
+  console.log(`clone: ${url} @ ${ref} → ${dest}`);
+  execFileSync("git", ["clone", "--depth", "1", "--branch", ref, url, dest], {
+    stdio: "inherit",
+  });
 }
 
 async function main(): Promise<void> {
@@ -82,6 +107,18 @@ async function main(): Promise<void> {
   }
 
   console.log(`publish-libs: tag=${a.libTag} driver=${store.kind} → ${a.prefix}/${a.libTag}/`);
+
+  // Source the full set from upstream when asked (CI path); --symbols-src /
+  // --footprints-src still win if also given (local checkouts).
+  if (a.clone) {
+    const symDest = join(a.clone, "kicad-symbols");
+    const fpDest = join(a.clone, "kicad-footprints");
+    cloneFull(SYMBOLS_URL, symDest, a.libTag);
+    cloneFull(FOOTPRINTS_URL, fpDest, a.libTag);
+    a.symbolsSrc ??= symDest;
+    a.footprintsSrc ??= fpDest;
+  }
+
   const libs = await extractAllLibs({
     symbolsSrc: a.symbolsSrc ?? undefined,
     footprintsSrc: a.footprintsSrc ?? undefined,

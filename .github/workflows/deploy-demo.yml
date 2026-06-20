@@ -25,6 +25,9 @@ concurrency:
 env:
   CDN: https://cdn.pcbjam.com
   BUCKET: pcbjam-cdn
+  # KiCad library snapshot the demo points at (published once by publish-libs.yml
+  # to libs/kicad/<LIB_TAG>/). Bump when moving to a newer KiCad library release.
+  LIB_TAG: "10.0.3"
   PAGES_PROJECT: pcbjam-demo
   # MUST be the Pages project's PRODUCTION branch — any other value makes
   # `wrangler pages deploy` a PREVIEW deploy and demo.pcbjam.com won't update.
@@ -82,9 +85,13 @@ jobs:
           node scripts/deploy/publish-content.mjs --tag "${{ steps.tag.outputs.tag }}"
           --gallery deploy/demo/gallery.json --driver r2 --bucket "$BUCKET" --remote
 
-      # 3) Build the standalone pinned to the CDN + this tag's manifests.
+      # 3) Build the standalone pinned to the CDN + this tag's manifests. The
+      #    full KiCad library set is served read-only from libs/kicad/$LIB_TAG
+      #    (published once by publish-libs.yml — run it first for a new lib tag).
       - name: Build demo
-        run: node scripts/deploy/build-demo.mjs --tag "${{ steps.tag.outputs.tag }}" --cdn "$CDN"
+        run: >
+          node scripts/deploy/build-demo.mjs --tag "${{ steps.tag.outputs.tag }}"
+          --cdn "$CDN" --lib-tag "$LIB_TAG"
 
       # 4) Ensure the Pages project exists (first deploy creates it; no-op after).
       #    Its production branch must equal PAGES_PROD_BRANCH or deploys land as
