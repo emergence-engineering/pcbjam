@@ -1,20 +1,18 @@
 import * as React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Lib, Tool } from "@pcbjam/shared";
+import type { Tool } from "@pcbjam/shared";
 import { FolderOpen, Library, Loader2, Package } from "lucide-react";
-import { useLibs, useProjects } from "@/lib/api";
+import { useLibs } from "@/lib/api";
 import { LOCAL_PROJECTS_ENABLED, PROJECT_SOURCE_KIND } from "@/lib/config";
 import { localFileLibsSource } from "@/wasm/libs/local-file-source";
 import type { LibsSource } from "@/wasm/libs/source";
 import { downloadBytes } from "@/lib/download";
 import { importFileList, importFsaFolder } from "@/lib/import-folder";
 import { localProjectStore } from "@/lib/project-source";
-import { SOURCE_DESCRIPTORS } from "@/lib/project-source-shared";
 import { Button } from "@/components/ui/button";
 import { ToolGrid } from "@/components/ToolGrid";
-import { SourceChip } from "@/components/SourceChip";
-import { LocalProjectsSection } from "@/components/LocalProjectsSection";
+import { ProjectsSection } from "@/components/ProjectsSection";
 import type { SaveBytes } from "@/wasm/save-flow";
 import { LocalProjectView, type LocalFile } from "@/components/LocalProjectView";
 import { WasmTool } from "@/components/WasmTool";
@@ -116,7 +114,6 @@ export function HomePage() {
   const localEnabled = LOCAL_PROJECTS_ENABLED;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data: projects, isLoading, error } = useProjects();
   const symbolLibs = useLibs("symbol");
   const footprintLibs = useLibs("footprint");
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -274,60 +271,14 @@ export function HomePage() {
         )}
       </section>
 
-      {/* --- Your browser-local projects (imported folders + saved work) --- */}
-      {localEnabled && <LocalProjectsSection />}
+      {/* --- Projects (browser-local + the gallery/backend, one list with
+              a per-row source chip) --- */}
+      <ProjectsSection />
 
       {/* --- Tools (KiCad-style launcher for the standalone tools) --- */}
       <section className="mb-10">
         <h2 className="mb-3 text-lg font-medium">Tools</h2>
         <ToolGrid onLaunch={(tool) => setLaunchedTool({ tool })} />
-      </section>
-
-      {/* --- Projects (backend, or the static example gallery) --- */}
-      <section className="mb-10">
-        <h2 className="mb-3 flex items-center gap-2 text-lg font-medium">
-          {staticMode ? "Example projects" : "Projects from the backend"}
-          <SourceChip
-            descriptor={
-              staticMode
-                ? SOURCE_DESCRIPTORS["remote-ro"]
-                : SOURCE_DESCRIPTORS["remote-rw"]
-            }
-          />
-        </h2>
-        {isLoading && (
-          <p className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="animate-spin" /> loading…
-          </p>
-        )}
-        {error && (
-          <p className="text-sm text-muted-foreground">
-            {staticMode
-              ? `Couldn't load the example gallery (${(error as Error).message}). Use a local folder above.`
-              : `No backend reachable (${(error as Error).message}). Use a local folder above, or configure VITE_API_BASE_URL.`}
-          </p>
-        )}
-        <div className="divide-y rounded-lg border">
-          {projects?.map((p) => (
-            <div
-              key={p.id}
-              className="flex items-center justify-between px-4 py-3"
-            >
-              <div>
-                <p className="font-medium">{p.name}</p>
-                <p className="text-xs text-muted-foreground">/p/{p.slug}</p>
-              </div>
-              <Button asChild variant="secondary" size="sm">
-                <Link to={`/p/${p.slug}`}>Open</Link>
-              </Button>
-            </div>
-          ))}
-          {projects && projects.length === 0 && (
-            <div className="px-4 py-6 text-sm text-muted-foreground">
-              {staticMode ? "No example projects." : "The backend has no projects."}
-            </div>
-          )}
-        </div>
       </section>
 
       {/* --- Backend libraries (hidden in the no-backend static demo) --- */}

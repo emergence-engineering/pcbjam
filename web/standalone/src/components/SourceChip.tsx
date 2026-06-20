@@ -14,10 +14,13 @@ const ICONS: Record<SourceKind, typeof HardDrive> = {
   "remote-rw": Cloud,
 };
 
+// Solid fills with white text + a subtle inset ring, so the chip is legible on
+// any backdrop — the home page, the dark boot screen, or the light editor canvas
+// (the translucent pastel version washed out on the canvas).
 const TONES: Record<SourceKind, string> = {
-  local: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-  "remote-ro": "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  "remote-rw": "border-sky-500/40 bg-sky-500/10 text-sky-300",
+  local: "bg-emerald-600 text-white ring-emerald-300/30",
+  "remote-ro": "bg-amber-600 text-white ring-amber-300/30",
+  "remote-rw": "bg-sky-600 text-white ring-sky-300/30",
 };
 
 export function SourceChip({
@@ -31,7 +34,7 @@ export function SourceChip({
   return (
     <span
       title={descriptor.description}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${TONES[descriptor.kind]} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium shadow-sm ring-1 ring-inset ${TONES[descriptor.kind]} ${className}`}
     >
       <Icon size={13} />
       {descriptor.label}
