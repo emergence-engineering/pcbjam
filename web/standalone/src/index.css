@@ -79,6 +79,18 @@
   height: 0;
 }
 
+/*
+ * Give modal dialogs (top-level windows, not popup menus) a border + drop
+ * shadow so they read as raised surfaces instead of flat blocks. The
+ * `toplevel` class is emitted by wxTopLevelWindow::GetCSSClassList; popup menus
+ * (`.window.popup`) style themselves in wx-dom.js and the main frame is the
+ * page #canvas, so neither is affected. pcbjam #22.
+ */
+.window.toplevel {
+  border: 1px solid #808080;
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.35);
+}
+
 .window-canvas {
   position: absolute;
   top: 0;
