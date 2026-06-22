@@ -41,6 +41,7 @@ excluded** — additive new files do not hurt a rebase.
 | `kiglew.h` +189 GLEW-stub revert | 01 | ~190 | `c39e8f8689`; pristine vs upstream |
 | `opengl_gal.cpp` Connect→Bind refactor revert | 01 | ~63 | `c39e8f8689`; pristine |
 | `KI_DIAG_*` / `wxFprintf` diag call-site deletion | 01 | ~41 | `c39e8f8689`; **zero** `KI_DIAG` call sites remain (diag flags now inert even though `-DKICAD_DIAG_*=1` is still passed) |
+| CMake de-churn batches A–F (16 files) | 02 | ~683 (CMake churn 1,702→1,019) | Kicad `6f82742e68` (F) on `b5ac6dcbe4` (A–E); root `0b4d830`. `-O1` WASM build (pcbnew/eeschema/calculator) + 9/9 e2e, no screenshot change; **build-graph proven byte-identical pre/post for the whole tree** (compile+link+custom commands) → zero behavior change. Moves: `KICAD_WASM_LAYER` var, early-return guards, `list(REMOVE_ITEM)`, `add_shader` redefine via new `wasm/cmake/WasmShaderOverride.cmake`, additive `BUILD_KIWAY_DLL` sets, pcb_calculator restructure, gerbview/pl_editor #5, navlib #6 (behavior-preserving stub de-churn). **The in-place de-dup pass is complete; only Phase-B `cmake/wasm/` relocation remains.** |
 | Tooltips implemented in wx fork | 05 | enables ~19 revert | `wxwidgets/include/wx/wasm/tooltip.h` + `src/wasm/tooltip.cpp`, `wxUSE_TOOLTIPS=1` |
 | `GetCurrentSelection`/`IsEmpty` already base behavior in wx wasm | 05 | enables ~11 revert | wasm `wxChoice` inherits base `GetCurrentSelection(){return GetSelection();}` |
 | Symbol-lib asset pipeline | 09 | 0 (new files) | `boot.ts` seeds `sym-lib-table`; PCBJAM_LIB/FP plugins are additive new files |
@@ -166,7 +167,7 @@ Hours → days at 6 productive h/day.
 | Doc | Theme | Current churn | Residual | Reduction | Effort (h / days) | Risk | Verdict |
 |---|---|---|---|---|---|---|---|
 | [01](01-revert-dead-code.md) | Revert dead code | 0 | 0 | 0 | 0–0.5 / ~0d | low | **DONE** (`c39e8f8689`) |
-| [02](02-cmake-dechurn.md) | CMake de-churn | ~1,399 | ~175–250 | **~1,150–1,225** | 22–38 / 3.7–6.3d | med | **Biggest lever** |
+| [02](02-cmake-dechurn.md) | CMake de-churn | ~1,702 → 1,019 | ~175–250 | **−683 so far** | 22–38 / 3.7–6.3d | med | **A–F (in-place de-dup) DONE** (`6f82742e68`); only Phase-B `cmake/wasm/` relocation remains. Build graph proven identical → zero behavior change |
 | [03](03-config-not-code.md) | Config-not-code | ~60 | ~3 | ~57 | 7–15 / 1.2–2.5d | low–med | 4/5 → runtime config |
 | [04](04-stub-tu-relocation.md) | Stub-TU relocation | ~571 | ~20–31 | **~540–551** | 9–17 / 1.5–2.8d | low–med | **2nd-biggest lever** |
 | [05](05-wx-layer-fixes.md) | wx-layer fixes | ~37 | ~3 | ~34 | 3–7 / 0.5–1.2d | low | Mostly revertable now |
@@ -188,7 +189,7 @@ Cumulative removed is from the live 2,795 baseline (doc 01's ~401 already gone).
 | # | Action | Doc | Reduction | Effort (h) | Cumulative removed | Risk |
 |---|---|---|---|---|---|---|
 | 1 | Stub-TU relocation (libcontext + fontconfig) | 04 | ~540 | 5–11 | ~540 | low–med |
-| 2 | CMake de-dup pass (guards + `REMOVE_ITEM`, no relocation yet) | 02 | ~700 | 8–14 | ~1,240 | low–med |
+| 2 | CMake de-dup pass (guards + `REMOVE_ITEM`, no relocation yet) — **batches A–F DONE** (`6f82742e68`, −683; in-place de-dup complete) | 02 | ~700 | 8–14 | ~1,240 | low–med |
 | 3 | Importer re-enable (delete gates) | 08 | ~95 | 5–14 | ~1,335 | low–med |
 | 4 | `KICAD_SCRIPTING` reverts | 03/06 | ~64 | 2–4 | ~1,399 | low |
 | 5 | wx-layer + tooltip reverts | 05 | ~30 | 2–4 | ~1,429 | low |

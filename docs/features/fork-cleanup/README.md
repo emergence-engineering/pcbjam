@@ -113,7 +113,7 @@ Every disabled/divergent item, with verdict. Detail + recipes in the linked docs
 |---|---|
 | [00-effort-and-current-state.md](00-effort-and-current-state.md) | **Current state (2026-06-17): per-change revert/relocate/re-enable verdict, effort, and resulting diff math reconciled against a live file ledger. Read this first.** |
 | [01-revert-dead-code.md](01-revert-dead-code.md) | Diff that compiles only in unused configs: IPC-API gates, `kiglew.h`, `opengl_gal.cpp`, diagnostics. ~480 lines, zero behavior change. **(DONE — `c39e8f8689`.)** |
-| [02-cmake-dechurn.md](02-cmake-dechurn.md) | ~600 lines of CMake reindent/duplication → early-return guards, `list(REMOVE_ITEM)`, shader-hook, relocate `if(EMSCRIPTEN)` to `cmake/wasm/`. |
+| [02-cmake-dechurn.md](02-cmake-dechurn.md) | ~600 lines of CMake reindent/duplication → early-return guards, `list(REMOVE_ITEM)`, shader-hook, relocate `if(EMSCRIPTEN)` to `cmake/wasm/`. **(In-place de-dup A–F done — `6f82742e68`; CMake churn 1,702→1,019, build graph proven identical. Only Phase-B `cmake/wasm/` relocation remains.)** |
 | [03-config-not-code.md](03-config-not-code.md) | Patches that re-implement existing settings: zoom pref, hotkeys file, `HAVE_CLOCK_GETTIME`, kiface init from the shell. |
 | [04-stub-tu-relocation.md](04-stub-tu-relocation.md) | Move in-file `#else` stubs to new translation units: fontconfig, libcontext, SpaceMouse. |
 | [05-wx-layer-fixes.md](05-wx-layer-fixes.md) | KiCad patches that belong in the wxWidgets wasm port: scale factor, selection, header self-sufficiency, **tooltips**. |

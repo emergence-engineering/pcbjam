@@ -1,5 +1,13 @@
 # 02 — CMake de-churn
 
+> **Status — the in-place de-dup pass (batches A–F) is COMPLETE** (kicad `6f82742e68` on `b5ac6dcbe4`,
+> root `0b4d830`): Move 0 (`KICAD_WASM_LAYER` var) + moves #1–#7 across all apps, incl. #5 for
+> gerbview/pl_editor and #6 (navlib, behavior-preserving stub de-churn). **Not yet done:** only the
+> `cmake/wasm/` **relocation (Phase B)**. CMake churn: **1,702 → 1,019** (−683), validated by an `-O1`
+> WASM build (pcbnew/eeschema/calculator) + 9/9 e2e with no screenshot change, **and a build-graph
+> equivalence proof** (compile + link + custom commands byte-identical pre/post across the whole tree) →
+> zero behavior change. The recipes below describe the full design (Phase-B relocation still pending).
+
 > The build-system diff is **~1,600 changed lines across 17 `CMakeLists.txt` files**, and
 > **35–40% of it (~600 lines) is reindentation and duplication** — not logic. The logic
 > that *is* there (single-binary kiface linking, stub injection, the WebGL GAL) is mostly
