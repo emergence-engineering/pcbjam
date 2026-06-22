@@ -110,11 +110,38 @@ export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-kicad-wasm-${BRANCH_NAME}}"
 echo "Using Docker project: ${COMPOSE_PROJECT_NAME}"
 echo "Building app: ${APP_NAME}"
 
+# Build phase (cache split). The container compile produces an OPT-INDEPENDENT
+# base wasm; the only opt-DEPENDENT work is the final `wasm-opt -O$LEVEL` shrink
+# inside the host post-process (apply-asyncify.sh). Splitting them lets CI cache
+# the expensive compile once (shared across -O1/-O2) and re-run just the
+# asyncify/-O tail per opt level — see .github/workflows/.
+#   (default) both       — compile in-container, then host post-process.
+#   --compile-only       — only the in-container compile → base wasm in output/.
+#   --postprocess-only   — only the host post-process (dyncall + finalize +
+#                          asyncify + wasm-opt -O$BINARYEN_OPT_LEVEL) on the
+#                          existing output/ base wasm; NO container needed
+#                          (get-wasm-opt.sh self-provisions Binaryen).
+# Extracted here so they are NOT forwarded to the inner build-<app>.sh scripts.
+PHASE="both"
+_FILTERED=()
+for _arg in "$@"; do
+    case "$_arg" in
+        --compile-only)     PHASE="compile" ;;
+        --postprocess-only) PHASE="postprocess" ;;
+        *) _FILTERED+=("$_arg") ;;
+    esac
+done
+set -- "${_FILTERED[@]+"${_FILTERED[@]}"}"
+
 # Add -j 10 by default if no -j flag is given
 ARGS=("$@")
 if [[ ! " ${ARGS[*]} " =~ " -j " ]]; then
     ARGS+=("-j" "10")
 fi
+
+# Container compile + source sync — skipped entirely for --postprocess-only,
+# which is pure host work on the already-built base wasm in output/.
+if [[ "$PHASE" != "postprocess" ]]; then
 
 # Start container if not running
 docker compose -f docker/docker-compose.yml up -d
@@ -153,6 +180,8 @@ done
 if [ $sync_rc -ne 0 ] && [ $sync_rc -ne 24 ]; then
     echo "ERROR: source sync failed after retries (exit ${sync_rc})"; exit 1
 fi
+
+fi  # end: container compile + sync guard ("$PHASE" != postprocess)
 
 # Map an app name to its inner CMake build subdirectory. Most apps share their
 # subdir name with the app name; pcb_calculator emits OUTPUT_NAME=calculator
@@ -301,16 +330,44 @@ pipeline_wait_all() {
 }
 
 TOTAL_APPS="${#APPS[@]}"
-if [[ "${KICAD_PIPELINE:-0}" == "1" ]] && [ "$TOTAL_APPS" -gt 1 ]; then
+
+# Shared pipeline trap: on a failure, kill orphaned background wasm-opt jobs
+# (each ~30 GB) and keep the monitor's done/fail marker from the EXIT trap.
+_install_pipeline_trap() {
+    trap '_rc=$?; for p in "${PIPELINE_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; if [ $_rc -eq 0 ]; then kw_done; else kw_fail $_rc; fi' EXIT
+}
+
+if [[ "$PHASE" == "compile" ]]; then
+    # --compile-only: produce the opt-independent base wasm; no host post-process.
+    idx=1
+    for app in "${APPS[@]}"; do
+        compile_app "$app" "$idx" "$TOTAL_APPS"
+        idx=$((idx + 1))
+    done
+elif [[ "$PHASE" == "postprocess" ]]; then
+    # --postprocess-only: pure host post-process on the existing output/ base
+    # wasm (no container). Parallelize across apps when pipelining.
+    if [[ "${KICAD_PIPELINE:-0}" == "1" ]] && [ "$TOTAL_APPS" -gt 1 ]; then
+        mkdir -p "$PIPELINE_LOG_DIR"
+        ./scripts/common/get-wasm-opt.sh >/dev/null  # pre-warm Binaryen once
+        _install_pipeline_trap
+        for app in "${APPS[@]}"; do
+            pipeline_postprocess "$app"
+        done
+        pipeline_wait_all
+    else
+        for app in "${APPS[@]}"; do
+            postprocess_app "$app"
+        done
+    fi
+elif [[ "${KICAD_PIPELINE:-0}" == "1" ]] && [ "$TOTAL_APPS" -gt 1 ]; then
+    # both, pipelined: overlap app[i+1]'s container compile with app[i]'s host
+    # post-process (KICAD_PIPELINE=1).
     mkdir -p "$PIPELINE_LOG_DIR"
     # Pre-warm the Binaryen download once — two concurrent postprocesses racing
     # the first download would collide on the extract/mv.
     ./scripts/common/get-wasm-opt.sh >/dev/null
-    # If a compile fails, set -e aborts the script — don't leave orphaned
-    # wasm-opt jobs chewing 30 GB in the background. Keep the monitor's
-    # done/fail marker from the original EXIT trap (killing finished pids is a
-    # no-op, so this trap is safe on the success path too).
-    trap '_rc=$?; for p in "${PIPELINE_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; if [ $_rc -eq 0 ]; then kw_done; else kw_fail $_rc; fi' EXIT
+    _install_pipeline_trap
     idx=1
     for app in "${APPS[@]}"; do
         compile_app "$app" "$idx" "$TOTAL_APPS"
@@ -319,6 +376,7 @@ if [[ "${KICAD_PIPELINE:-0}" == "1" ]] && [ "$TOTAL_APPS" -gt 1 ]; then
     done
     pipeline_wait_all
 else
+    # both, sequential.
     idx=1
     for app in "${APPS[@]}"; do
         compile_app "$app" "$idx" "$TOTAL_APPS"
