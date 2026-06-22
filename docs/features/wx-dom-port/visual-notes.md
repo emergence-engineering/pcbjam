@@ -266,3 +266,37 @@ Test hardening: `appearance.spec.ts`'s `rowLabelTops()` previously returned
 so the round-trip assertion passed even when the panel was blank. It now
 hit-tests the row centre via `elementsFromPoint` (clip-path affects
 hit-testing), so a clipped-away row reads as null and fails the assertion.
+
+## Dock-panel resize: cursor, live preview, grey XOR lines (2026-06-19, pcbjam#20)
+
+Resizing a docked side panel (a `wxAuiManager` dock sash, as KiCad uses for
+all its side panels) was broken three ways in the DOM port: no resize cursor on
+hover, no live preview during the drag, and a trail of grey vertical "stripes"
+smeared across the pane when narrowing it.
+
+Root causes (both wasm-layer):
+  32. `wxAuiManager` only live-resizes when `wxUSE_AUI_LIVE_RESIZE_ALWAYS`
+      (Mac/GTK3 only) or the `wxAUI_MGR_LIVE_RESIZE` flag is set; otherwise
+      `OnMotion`/`OnLeftUp` paint the sash hint via `wxScreenDC` + `wxXOR`
+      (`DrawResizeHint`). On a Canvas2D island XOR neither composites nor
+      erases, so every drag step's `wxPaneCreateStippleBitmap` hint stays put —
+      a 1px black/light stipple trail — and the panes only re-dock on mouse-up
+      (no preview). Fixed by adding `__EMSCRIPTEN__` to the
+      `wxUSE_AUI_LIVE_RESIZE_ALWAYS` platform list (`src/aui/framemanager.cpp`),
+      exactly as the existing comment intends ("not possible to show sash
+      feedback, so always use live update"). The XOR hint path is now never
+      taken: panes follow the cursor live, no stripes. KiCad untouched.
+  33. The wasm mouse path (`src/wasm/app.cpp` `HandleMouseEvent`) only refreshed
+      the cursor when the hovered *window* changed, from that window's static
+      `GetCursor()`; it never dispatched `wxEVT_SET_CURSOR`. An AUI dock sash is
+      painted inside the managed frame (not a child window), so `OnSetCursor`
+      (which sets `wxCURSOR_SIZEWE`/`SIZENS`) was never consulted. Fixed by
+      dispatching `wxSetCursorEvent` up the window chain on motion (like the
+      native ports' `HandleSetCursor`) and applying the cursor only when a
+      handler supplies one — so windows that manage their own cursor (the GAL
+      canvas, plain controls, busy cursor) are untouched.
+
+Tests: `tests/e2e/aui-resize.spec.ts` pins all three on the faithful surface
+(`aui_test.cpp`'s default-flag `wxAuiManager`): hover→`ew-resize`, pane width
+changes mid-drag (live), and a stipple-fraction scan of the drag region
+(broken ~0.12, clean ~0.001; threshold 0.02). RED before the fix, GREEN after.
