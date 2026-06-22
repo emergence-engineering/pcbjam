@@ -1,0 +1,315 @@
+name: wasm-build (reusable)
+
+# THE single KiCad WASM build+test recipe, called by ci-ubicloud.yml (main/PR,
+# -O1 for fast feedback) and release.yml (tag, -O2 for the shipped demo). There
+# is no other build definition — publishing/deploy consume this job's output, so
+# the build can never diverge from what ships (the bug that shipped a -O1 / 3D-off
+# demo while CI built -O1 / 3D-on).
+#
+# Two-tier output cache around docker/build.sh's --compile-only / --postprocess-only
+# split. -O1 and -O2 differ ONLY in the final `wasm-opt -O` shrink; everything
+# before (docker compile → base wasm → asyncify instrument) is identical. So:
+#   - BASE cache  (opt-INDEPENDENT key): the --compile-only output (base wasm +
+#     sysroot headers). Warmed by main's -O1 CI; an -O2 release restores it and
+#     skips the expensive compile, running only the asyncify/-O2 tail.
+#   - FINAL cache (opt-SPECIFIC key): the post-processed output; fast-path for
+#     re-running the same opt+SHA (e.g. a re-deploy).
+# Both keys now include the 3D-viewer flag, so a 3D-on and 3D-off build can never
+# poison each other's cache.
+
+on:
+  workflow_call:
+    inputs:
+      opt_level:
+        description: "Binaryen wasm-opt shrink level for the asyncify tail (-O1 fast / -O2 shipped)"
+        type: string
+        default: "-O1"
+      build_3d_viewer:
+        description: "Build the WASM 3D viewer into pcbnew (ON/OFF)"
+        type: string
+        default: "ON"
+      binaryen_version:
+        description: "Binaryen version for the host asyncify step"
+        type: string
+        default: "130"
+      run_tests:
+        description: "Run the wxWidgets + KiCad e2e suites after building"
+        type: boolean
+        default: true
+      no_cache:
+        description: "Bypass the WASM output caches (force a full rebuild this run)"
+        type: boolean
+        default: false
+      upload_output:
+        description: "Upload the publishable output/ subset as the 'wasm-output' artifact"
+        type: boolean
+        default: false
+
+jobs:
+  build-and-test:
+    name: Build all tools + KiCad e2e (Ubicloud)
+    # Don't run untrusted fork PRs on the paid runner (push/dispatch always run;
+    # same-repo PRs run). github.event_name here is the CALLER's event.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubicloud-standard-30
+    timeout-minutes: 300
+    env:
+      KICAD_LOG_NESTED: "1"
+      BINARYEN_VERSION: ${{ inputs.binaryen_version }}
+      # Opt level for the asyncify shrink pass (the only opt-dependent step).
+      BINARYEN_OPT_LEVEL: ${{ inputs.opt_level }}
+      BUILD_3D_VIEWER: ${{ inputs.build_3d_viewer }}
+      # Stable docker-compose project → deterministic build-cache volume name.
+      COMPOSE_PROJECT_NAME: kicad-wasm-ci
+    steps:
+      - name: Install build toolchain (Binaryen from-source)
+        run: |
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          # xvfb: kicad e2e runs headed Firefox under a virtual display.
+          # autoconf/automake/make: host wxWidgets + wx test-app builds.
+          sudo apt-get install -y cmake ninja-build g++ libjemalloc2 xvfb autoconf automake make
+
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      # --- cache keys --------------------------------------------------------
+      # base  = opt-INDEPENDENT (no binaryen ver / opt level): docker compile out.
+      # final = opt-SPECIFIC: post-processed (asyncify + wasm-opt -O) out.
+      # Both include the 3D flag so 3D-on/off never share an entry.
+      - name: Compute build inputs
+        id: keys
+        run: |
+          KICAD=$(git -C kicad rev-parse HEAD)
+          WX=$(git -C wxwidgets rev-parse HEAD)
+          SC=$(node scripts/deploy/wasm-cache-hash.mjs)
+          EPOCH=$(cat .ci-cache-epoch 2>/dev/null || echo 0)
+          THREED='${{ inputs.build_3d_viewer }}'
+          BASE="kbase-${{ runner.os }}-k${KICAD}-wx${WX}-sc${SC}-3d${THREED}-e${EPOCH}"
+          FINAL="kwasm-${{ runner.os }}-bin${{ inputs.binaryen_version }}${{ inputs.opt_level }}-k${KICAD}-wx${WX}-sc${SC}-3d${THREED}-e${EPOCH}"
+          {
+            echo "kicad=$KICAD"; echo "wx=$WX"; echo "sc=$SC"; echo "epoch=$EPOCH"
+            echo "base_key=$BASE"; echo "final_key=$FINAL"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache control (commit message / dispatch)
+        id: cachectl
+        env:
+          HEAD_MSG: ${{ github.event.head_commit.message }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          DISPATCH_NOCACHE: ${{ inputs.no_cache }}
+        run: |
+          SKIP=false
+          if printf '%s\n%s' "$HEAD_MSG" "$PR_TITLE" | grep -qiE '\[(no-cache|rebuild-wasm)\]'; then SKIP=true; fi
+          [ "$DISPATCH_NOCACHE" = "true" ] && SKIP=true
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "WASM output-cache restore skip=$SKIP"
+
+      # The cached paths the e2e tests need: final wasms (or base, mid-build) +
+      # the sysroot headers the host GAL build compiles against. Same glob set for
+      # both tiers — only the bytes (base vs final) and the key differ.
+      - name: Restore FINAL WASM output cache
+        id: final-cache
+        if: steps.cachectl.outputs.skip != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            output/*.js
+            output/*.wasm
+            output/*.wasm.map
+            output/*.worker.js
+            output/images.tar.gz
+            build-wasm/sysroot/include
+            !output/*.wasm.debug.wasm
+          key: ${{ steps.keys.outputs.final_key }}
+
+      # Only consulted when the final (opt-specific) cache missed: the
+      # opt-independent compile output, warm across -O1/-O2.
+      - name: Restore BASE compile cache
+        id: base-cache
+        if: steps.cachectl.outputs.skip != 'true' && steps.final-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            output/*.js
+            output/*.wasm
+            output/*.wasm.map
+            output/*.worker.js
+            output/images.tar.gz
+            build-wasm/sysroot/include
+            !output/*.wasm.debug.wasm
+          key: ${{ steps.keys.outputs.base_key }}
+
+      # deps (sysroot + stamps) are only needed when we must COMPILE (base miss).
+      - name: Restore deps cache
+        id: deps-cache
+        if: steps.final-cache.outputs.cache-hit != 'true' && steps.base-cache.outputs.cache-hit != 'true'
+        uses: actions/cache@v4
+        with:
+          path: deps-cache
+          key: deps-${{ runner.os }}-${{ hashFiles('scripts/deps/**','scripts/common/versions.sh','scripts/common/functions.sh','scripts/common/env.sh','docker/Dockerfile','docker/docker-compose.yml') }}
+
+      - name: Seed deps volume from cache
+        if: steps.final-cache.outputs.cache-hit != 'true' && steps.base-cache.outputs.cache-hit != 'true' && steps.deps-cache.outputs.cache-hit == 'true'
+        run: |
+          docker volume create kicad-wasm-ci_kicad-build-cache
+          docker run --rm -v kicad-wasm-ci_kicad-build-cache:/bw -v "$PWD/deps-cache":/cache \
+            alpine sh -c 'tar xzf /cache/deps.tar.gz -C /bw'
+
+      # PHASE 1 (base miss only): container compile of all 6 tools → output/ base
+      # wasm (opt-independent). 3D viewer per input. --compile-only skips the host
+      # asyncify/-O tail. KICAD_PIPELINE has no effect here (no post-process to
+      # overlap), but the deps short-circuit on a warm volume.
+      - name: Compile all KiCad tools (container, base wasm)
+        if: steps.final-cache.outputs.cache-hit != 'true' && steps.base-cache.outputs.cache-hit != 'true'
+        run: |
+          export KICAD_DOCKER_CPUS="$(( $(nproc) - 1 ))" KICAD_DOCKER_MEM=110G
+          export BINARYEN_BUILD_FROM_SOURCE=1
+          echo "Compiling ALL tools (base wasm), 3D viewer=${BUILD_3D_VIEWER}, -j $(nproc)"
+          ./docker/build.sh all --compile-only --build-deps -j "$(nproc)"
+          ls -lh output/*.wasm
+
+      - name: Package deps for cache
+        if: steps.final-cache.outputs.cache-hit != 'true' && steps.base-cache.outputs.cache-hit != 'true' && steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p deps-cache
+          docker run --rm -v kicad-wasm-ci_kicad-build-cache:/bw -v "$PWD/deps-cache":/cache \
+            alpine sh -c 'cd /bw && tar czf /cache/deps.tar.gz sysroot stamps'
+
+      # GAL test compiles against kicad headers from the docker sysroot volume —
+      # export them to the host so they ride in the base cache (and thus any hit).
+      - name: Expose docker sysroot headers to host builds
+        if: steps.final-cache.outputs.cache-hit != 'true' && steps.base-cache.outputs.cache-hit != 'true'
+        run: |
+          VOL=kicad-wasm-ci_kicad-build-cache
+          mkdir -p build-wasm/sysroot
+          docker run --rm -v "$VOL":/bw -v "$PWD/build-wasm/sysroot":/host alpine \
+            sh -c 'cp -r /bw/sysroot/include /host/'
+          sudo chown -R "$(id -u):$(id -g)" build-wasm/sysroot
+
+      # Save the opt-independent base (compile output + headers) for cross-opt reuse.
+      - name: Save BASE compile cache
+        if: steps.final-cache.outputs.cache-hit != 'true' && steps.base-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            output/*.js
+            output/*.wasm
+            output/*.wasm.map
+            output/*.worker.js
+            output/images.tar.gz
+            build-wasm/sysroot/include
+            !output/*.wasm.debug.wasm
+          key: ${{ steps.keys.outputs.base_key }}
+
+      # PHASE 2 (any final miss): pure-host post-process on the base wasm —
+      # dyncall + finalize + asyncify + `wasm-opt ${opt_level}`. The ONLY
+      # opt-dependent work. No container; get-wasm-opt self-provisions Binaryen.
+      - name: Host post-process (asyncify + wasm-opt ${{ inputs.opt_level }})
+        if: steps.final-cache.outputs.cache-hit != 'true'
+        run: |
+          export KICAD_PIPELINE=1 BINARYEN_CORES=16 BINARYEN_BUILD_FROM_SOURCE=1
+          echo "Post-processing ALL tools with ${BINARYEN_OPT_LEVEL}, BINARYEN_VERSION=${BINARYEN_VERSION}"
+          ./docker/build.sh all --postprocess-only
+          echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
+          ls -lh output/*.wasm
+
+      - name: Save FINAL WASM output cache
+        if: steps.final-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            output/*.js
+            output/*.wasm
+            output/*.wasm.map
+            output/*.worker.js
+            output/images.tar.gz
+            build-wasm/sysroot/include
+            !output/*.wasm.debug.wasm
+          key: ${{ steps.keys.outputs.final_key }}
+
+      # --- publishable artifact (release path) -------------------------------
+      - name: Upload WASM output artifact
+        if: inputs.upload_output
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-output
+          if-no-files-found: error
+          path: |
+            output/*.js
+            output/*.wasm
+            output/*.wasm.map
+            output/*.worker.js
+            output/images.tar.gz
+            !output/*.wasm.debug.wasm
+
+      # --- e2e tests (gated on run_tests) ------------------------------------
+      - name: Restore wx build cache
+        id: wx-cache
+        if: inputs.run_tests
+        uses: actions/cache@v4
+        with:
+          path: build-wasm/wxwidgets
+          key: wx-${{ runner.os }}-${{ steps.keys.outputs.wx }}-${{ hashFiles('scripts/build-wx-wasm.sh','scripts/common/versions.sh') }}
+
+      - name: Mark restored wx objects current
+        if: inputs.run_tests && steps.wx-cache.outputs.cache-hit == 'true'
+        run: find build-wasm/wxwidgets -exec touch {} +
+
+      - name: Build wxWidgets (wxUniversal WASM)
+        if: inputs.run_tests
+        run: ./scripts/build-wx-wasm.sh
+
+      - name: Build wxWidgets test apps
+        if: inputs.run_tests
+        run: ./scripts/build-wasm-test.sh
+
+      - name: Build GAL WebGL test app
+        if: inputs.run_tests
+        run: ./scripts/build-gal-webgl-test.sh
+
+      - name: Install test deps
+        if: inputs.run_tests
+        working-directory: tests
+        run: npm ci
+
+      - name: Install web workspace deps (collab bundle)
+        if: inputs.run_tests
+        working-directory: web
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        if: inputs.run_tests
+        working-directory: tests
+        run: npx playwright install --with-deps firefox chromium
+
+      - name: Stage KiCad WASM for tests
+        if: inputs.run_tests
+        working-directory: tests
+        run: npm run setup:kicad
+
+      - name: wxWidgets e2e (npm run test)
+        if: inputs.run_tests
+        working-directory: tests
+        run: npm run test
+
+      - name: KiCad e2e (npm run test:kicad:ci)
+        if: inputs.run_tests
+        working-directory: tests
+        run: xvfb-run -a npm run test:kicad:ci
+
+      - name: Upload test logs & screenshots
+        if: always() && inputs.run_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubicloud-e2e-${{ github.run_id }}
+          path: |
+            tests/logs/**
+            tests/test-results/**
+            tests/playwright-report/**
+          if-no-files-found: ignore

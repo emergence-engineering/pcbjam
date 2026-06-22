@@ -1,299 +1,49 @@
-# The build + e2e CI: full KiCad WASM build (all 6 tools, Binaryen 130, host-side
-# asyncify + a lighter wasm-opt -O1 shrink pass via BINARYEN_OPT_LEVEL) + wxWidgets e2e
-# (291 tests) + KiCad e2e (38 tests) on a Ubicloud runner. Runs on pushes to
-# main/ubicloud-ci and on PRs against main.
-# Replaced the ephemeral-Hetzner-VM workflows (ci-full-build.yml / ci.yml,
-# removed 2026-06-12): Ubicloud runners are plain runs-on labels — no
-# create/delete-runner jobs, no shared one-slot lock — and benchmarked
-# faster end-to-end. Proven green: run 27375556034 (329 tests, 1h52m).
-# ubicloud-standard-30 (x86, 30 vcpu) ≈ the old Hetzner ccx53.
-
 name: CI full build + e2e (Ubicloud)
+
+# Main/PR gate: build all 6 KiCad WASM tools + run the wxWidgets + KiCad e2e
+# suites on a Ubicloud runner. The actual recipe lives in the reusable
+# wasm-build.yml (the SINGLE build definition) — this is just the main/PR caller,
+# pinned to -O1 for fast feedback. The tag release (release.yml) calls the same
+# recipe at -O2 (the shipped demo opt level) and then publishes, so the build can
+# never diverge from what ships.
+#
+# Routine edits under scripts/ do NOT bust the WASM output cache — only the subset
+# in scripts/deploy/wasm-cache-hash.mjs does. For inputs the sc-hash can't see
+# (base-image / apt drift, a bad cache) bump .ci-cache-epoch; for a one-off
+# rebuild put [no-cache] or [rebuild-wasm] in the commit message / PR title.
 
 on:
   push:
     branches: ["main", "ubicloud-ci"]
-    # docs-only commits must not burn a paid runner slot
     paths-ignore: ["docs/**", "**.md"]
   pull_request:
     branches: ["main"]
     paths-ignore: ["docs/**", "**.md"]
   workflow_dispatch:
     inputs:
-      binaryen_version: { description: "Binaryen version for the host asyncify step", required: false, default: "130" }
-      no_cache: { description: "Bypass the KiCad WASM output cache (force a full rebuild this run)", type: boolean, required: false, default: false }
+      binaryen_version:
+        description: "Binaryen version for the host asyncify step"
+        required: false
+        default: "130"
+      no_cache:
+        description: "Bypass the KiCad WASM output cache (force a full rebuild this run)"
+        type: boolean
+        required: false
+        default: false
 
 concurrency:
-  # Per-ref: a new push to a PR (or to main) queues behind its own in-flight run
-  # instead of cancelling it (cancel-in-progress: false). Note GitHub keeps at most
-  # one pending run per group — rapid successive pushes collapse to "running + latest
-  # pending", superseding any earlier still-pending run.
+  # Per-ref: a new push queues behind its own in-flight run (don't cancel).
   group: ci-ubicloud-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-and-test:
-    name: Build all tools + KiCad e2e (Ubicloud)
-    # Don't run untrusted fork PRs on the paid runner (push/dispatch always run;
-    # same-repo PRs run). Remove this `if:` to enable fork-PR CI.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubicloud-standard-30
-    timeout-minutes: 300
-    env:
-      KICAD_LOG_NESTED: "1"
-      BINARYEN_VERSION: ${{ inputs.binaryen_version || '130' }}
-      # Use the lighter wasm-opt -O1 shrink pass instead of -O2
-      # (scripts/common/apply-asyncify.sh). -O1 still runs CoalesceLocals, so the
-      # asyncify-instrumented coroutine functions stay under V8's per-function
-      # locals limit: it produces the same ~187 MB pcbnew.wasm as -O2 and is green
-      # on the load-pcb chromium-ci spec, but is a faster pass. (Skipping the
-      # optimization entirely via ASYNCIFY_ONLY=1 shipped a 336 MB wasm that
-      # crashed headless Chromium — that flag is benchmark-only, not for e2e.)
-      BINARYEN_OPT_LEVEL: "-O1"
-      # Stable docker-compose project → deterministic build-cache volume name
-      # (kicad-wasm-ci_kicad-build-cache) for the deps cache below.
-      COMPOSE_PROJECT_NAME: kicad-wasm-ci
-    steps:
-      # Docker comes preinstalled on Ubicloud images (validated by the arm64
-      # repro run) — only the Binaryen from-source toolchain is needed.
-      - name: Install build toolchain (Binaryen from-source)
-        run: |
-          export DEBIAN_FRONTEND=noninteractive
-          sudo apt-get update
-          # xvfb: kicad e2e runs headed Firefox under a virtual display — headless
-          # Firefox cannot create any GL context on the GPU-less VM (see
-          # tests/playwright-kicad.config.ts CI prefs).
-          # autoconf/automake/make: the host-side wxWidgets + wx test-app builds
-          # (build-wx-wasm.sh regenerates ./configure on fresh checkouts).
-          sudo apt-get install -y cmake ninja-build g++ libjemalloc2 xvfb autoconf automake make
-
-      - uses: actions/checkout@v4
-        with: { submodules: recursive }
-
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-
-      # --- KiCad WASM output cache -------------------------------------------
-      # The expensive work is `./docker/build.sh all` below: the in-Docker compile
-      # of all tools + the 1-2h host-side asyncify/wasm-opt chain. Its output bytes
-      # are fixed by the kicad + wxwidgets submodule SHAs (sources), the Binaryen
-      # version + opt-level (job env), and the build-logic files hashed by
-      # scripts/deploy/wasm-cache-hash.mjs (the "sc" hash). When all match, the
-      # artifacts are bit-identical — so we cache output/ (+ the sysroot headers the
-      # host GAL build needs) and skip Docker entirely on a hit: build.sh, the deps
-      # restore/seed, and the sysroot export are all gated on a miss below.
-      #
-      # Routine edits under scripts/ do NOT auto-bust this — only the subset listed
-      # in wasm-cache-hash.mjs does. For inputs the sc-hash can't see (base-image /
-      # apt drift, a bad cache), bump .ci-cache-epoch in a commit; for a one-off
-      # rebuild, put [no-cache] or [rebuild-wasm] in the commit message / PR title.
-      #
-      # Backend: Ubicloud's transparent cache (NOT GitHub's — gh's cache API reads
-      # 0), 30 GB/repo/week, LRU + 7-day eviction. The *.wasm.debug.wasm files
-      # (5+ GB, unused by the tests) are excluded to keep the entry ~0.5 GB.
-      - name: Compute build inputs
-        id: keys
-        run: |
-          echo "kicad=$(git -C kicad rev-parse HEAD)"             >> "$GITHUB_OUTPUT"
-          echo "wx=$(git -C wxwidgets rev-parse HEAD)"            >> "$GITHUB_OUTPUT"
-          echo "sc=$(node scripts/deploy/wasm-cache-hash.mjs)"    >> "$GITHUB_OUTPUT"
-          echo "epoch=$(cat .ci-cache-epoch 2>/dev/null || echo 0)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache control (commit message / dispatch)
-        id: cachectl
-        env:
-          HEAD_MSG: ${{ github.event.head_commit.message }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          DISPATCH_NOCACHE: ${{ github.event.inputs.no_cache }}
-        run: |
-          SKIP=false
-          if printf '%s\n%s' "$HEAD_MSG" "$PR_TITLE" | grep -qiE '\[(no-cache|rebuild-wasm)\]'; then SKIP=true; fi
-          [ "$DISPATCH_NOCACHE" = "true" ] && SKIP=true
-          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
-          echo "KiCad WASM output-cache restore skip=$SKIP"
-
-      - name: Restore KiCad WASM output cache
-        id: output-cache
-        if: steps.cachectl.outputs.skip != 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            output/*.js
-            output/*.wasm
-            output/*.wasm.map
-            output/*.worker.js
-            output/images.tar.gz
-            build-wasm/sysroot/include
-            !output/*.wasm.debug.wasm
-          key: kwasm-${{ runner.os }}-bin${{ env.BINARYEN_VERSION }}${{ env.BINARYEN_OPT_LEVEL }}-k${{ steps.keys.outputs.kicad }}-wx${{ steps.keys.outputs.wx }}-sc${{ steps.keys.outputs.sc }}-e${{ steps.keys.outputs.epoch }}
-
-      # Cache the ~10-min --build-deps output (boost/cairo/occ/... sysroot + stamps,
-      # which live in the kicad-build-cache docker volume). Key on the deps inputs
-      # only — deps don't depend on the kicad/wx submodule SHAs, so it stays warm
-      # across most PRs. On a hit we seed the volume so build.sh's per-dep
-      # check_stamp short-circuits; on a miss the deps build and we tar them out.
-      - name: Restore deps cache
-        id: deps-cache
-        if: steps.output-cache.outputs.cache-hit != 'true'
-        uses: actions/cache@v4
-        with:
-          path: deps-cache
-          key: deps-${{ runner.os }}-${{ hashFiles('scripts/deps/**','scripts/common/versions.sh','scripts/common/functions.sh','scripts/common/env.sh','docker/Dockerfile','docker/docker-compose.yml') }}
-
-      - name: Seed deps volume from cache
-        if: steps.output-cache.outputs.cache-hit != 'true' && steps.deps-cache.outputs.cache-hit == 'true'
-        run: |
-          docker volume create kicad-wasm-ci_kicad-build-cache
-          docker run --rm -v kicad-wasm-ci_kicad-build-cache:/bw -v "$PWD/deps-cache":/cache \
-            alpine sh -c 'tar xzf /cache/deps.tar.gz -C /bw'
-
-      # Same build recipe as ci-full-build.yml: full KiCad WASM build of ALL 6
-      # tools, host-side asyncify on Binaryen v130 (BINARYEN_VERSION in env →
-      # get-wasm-opt.sh) + a lighter -O1 shrink pass (BINARYEN_OPT_LEVEL in job env).
-      # 'all' = pcbnew eeschema calculator pl_editor symbol_editor gerbview,
-      # built in sequence. --build-deps short-circuits on a cache hit.
-      - name: Build all KiCad tools WASM with Binaryen ${{ env.BINARYEN_VERSION }}
-        if: steps.output-cache.outputs.cache-hit != 'true'
-        run: |
-          # Lift the docker-compose dev-Mac caps and pipeline the host-side
-          # asyncify pass with the next tool's container compile — same tuning
-          # as the Hetzner workflow (rationale in ci-full-build.yml and
-          # docs/ci-build-slowness-findings.md). standard-30: 30 vcpu / 120 GB.
-          # nproc-1: Ubicloud's preinstalled docker daemon rejects a cpus limit
-          # equal to the host CPU count ("range of CPUs is from 0.01 to 30.00",
-          # run 27330725978); the Hetzner box accepted 32-of-32.
-          export KICAD_DOCKER_CPUS="$(( $(nproc) - 1 ))" KICAD_DOCKER_MEM=110G
-          export KICAD_PIPELINE=1 BINARYEN_CORES=16
-          # Self-built wasm-opt: official x86_64-linux tarballs run asyncify
-          # ~4x slower than a stock gcc -O3+LTO build (A/B run 27276830256).
-          export BINARYEN_BUILD_FROM_SOURCE=1
-          # Build the experimental WASM 3D viewer (default OFF) so tests/kicad/3d-viewer.spec.ts
-          # has a viewer-enabled pcbnew to open. Propagates into the container via docker/build.sh.
-          export BUILD_3D_VIEWER=ON
-          echo "Building ALL tools with BINARYEN_VERSION=${BINARYEN_VERSION}, compile -j $(nproc) on ${KICAD_DOCKER_CPUS} CPUs, pipelined wasm-opt"
-          ./docker/build.sh all --build-deps -j "$(nproc)"
-          echo "wasm-opt used:"; ./scripts/common/get-wasm-opt.sh --version 2>/dev/null || true
-          ls -lh output/*.wasm
-
-      # On a cache miss, tar the freshly-built deps (sysroot + stamps) out of the
-      # volume so actions/cache saves them (post-job) under the key above.
-      - name: Package deps for cache
-        if: steps.output-cache.outputs.cache-hit != 'true' && steps.deps-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p deps-cache
-          docker run --rm -v kicad-wasm-ci_kicad-build-cache:/bw -v "$PWD/deps-cache":/cache \
-            alpine sh -c 'cd /bw && tar czf /cache/deps.tar.gz sysroot stamps'
-
-      # Cache the host wxWidgets build (build-wasm/wxwidgets, ~11 min, incremental
-      # but uncached) keyed on the wx submodule SHA + the build script/versions.
-      # On a hit, touch the tree so make treats the restored objects as current
-      # (same SHA ⇒ identical sources), so build-wx-wasm.sh just relinks fast.
-      - name: Restore wx build cache
-        id: wx-cache
-        uses: actions/cache@v4
-        with:
-          path: build-wasm/wxwidgets
-          key: wx-${{ runner.os }}-${{ steps.keys.outputs.wx }}-${{ hashFiles('scripts/build-wx-wasm.sh','scripts/common/versions.sh') }}
-
-      - name: Mark restored wx objects current
-        if: steps.wx-cache.outputs.cache-hit == 'true'
-        run: find build-wasm/wxwidgets -exec touch {} +
-
-      # Host-side wxWidgets build producing the wx test apps for `npm run test`
-      # (separate from the in-docker wxWidgets that KiCad links against).
-      # Auto-installs emsdk into tools/ on first run.
-      - name: Build wxWidgets (wxUniversal WASM)
-        run: ./scripts/build-wx-wasm.sh
-
-      - name: Build wxWidgets test apps
-        run: ./scripts/build-wasm-test.sh
-
-      # The GAL test compiles against kicad headers that include boost from
-      # build-wasm/sysroot — a real host dir on dev machines, but inside the
-      # docker build-cache volume on CI (run 27370316200 failed with
-      # "boost/ptr_container/ptr_vector.hpp not found"). Its Makefile only
-      # needs $(SYSROOT)/include, so copy just the headers out of the volume.
-      - name: Expose docker sysroot headers to host builds
-        if: steps.output-cache.outputs.cache-hit != 'true'
-        run: |
-          VOL=kicad-wasm-ci_kicad-build-cache
-          echo "sysroot volume: $VOL"
-          mkdir -p build-wasm/sysroot
-          docker run --rm -v "$VOL":/bw -v "$PWD/build-wasm/sysroot":/host alpine \
-            sh -c 'cp -r /bw/sysroot/include /host/'
-          sudo chown -R "$(id -u):$(id -g)" build-wasm/sysroot
-
-      # Persist the freshly built KiCad WASM artifacts (+ the sysroot headers the
-      # GAL build needs) for future runs. Split save (not a combined cache action)
-      # so the [no-cache]/dispatch bypass can skip the restore yet still refresh
-      # here. Runs on a miss OR a bypass (cache-hit != 'true'); placed before the
-      # tests so artifacts are cached regardless of test outcome. No-op if the key
-      # already exists.
-      - name: Save KiCad WASM output cache
-        if: steps.output-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            output/*.js
-            output/*.wasm
-            output/*.wasm.map
-            output/*.worker.js
-            output/images.tar.gz
-            build-wasm/sysroot/include
-            !output/*.wasm.debug.wasm
-          key: kwasm-${{ runner.os }}-bin${{ env.BINARYEN_VERSION }}${{ env.BINARYEN_OPT_LEVEL }}-k${{ steps.keys.outputs.kicad }}-wx${{ steps.keys.outputs.wx }}-sc${{ steps.keys.outputs.sc }}-e${{ steps.keys.outputs.epoch }}
-
-      # gal_webgl_test.{js,wasm} are gitignored build artifacts with their own
-      # build script — without this, all 29 gal-webgl scenarios time out on
-      # galTest.isReady() because the page 404s the wasm (run 27359020746).
-      - name: Build GAL WebGL test app
-        run: ./scripts/build-gal-webgl-test.sh
-
-      - name: Install test deps
-        working-directory: tests
-        run: npm ci
-
-      # The collab e2e specs rebuild apps/kicad/collab-bundle.js with esbuild
-      # (collab/build.mjs), which bundles web/standalone/src/wasm/collab/* and
-      # its `@pcbjam/shared` import. That package is the web/pcbjam-shared
-      # submodule, resolved through the web/ pnpm workspace — so install it
-      # (and the bundle's runtime deps: zod, @ts-rest/core, yjs) here. Without
-      # this the bundle build fails: [ERROR] Could not resolve "@pcbjam/shared".
-      - name: Install web workspace deps (collab bundle)
-        working-directory: web
-        run: |
-          corepack enable
-          pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        working-directory: tests
-        run: npx playwright install --with-deps firefox chromium
-
-      - name: Stage KiCad WASM for tests
-        working-directory: tests
-        run: npm run setup:kicad
-
-      # wxWidgets e2e: bundled headless Chromium + SwiftShader (CI-gated launch
-      # arg in tests/playwright.config.ts).
-      - name: wxWidgets e2e (npm run test)
-        working-directory: tests
-        run: npm run test
-
-      - name: KiCad e2e (npm run test:kicad:ci)
-        working-directory: tests
-        # xvfb-run: headed Firefox on a virtual display — WebGL needs GLX + Mesa
-        # llvmpipe, which headless Firefox can't reach on a GPU-less VM.
-        # test:kicad:ci adds the chromium-ci project: pcbnew's wasm exceeds
-        # SpiderMonkey's x86-64 code budget, so those specs run on Chromium.
-        run: xvfb-run -a npm run test:kicad:ci
-
-      - name: Upload test logs & screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ubicloud-e2e-${{ github.run_id }}
-          path: |
-            tests/logs/**
-            tests/test-results/**
-            tests/playwright-report/**
-          if-no-files-found: ignore
+  build:
+    uses: ./.github/workflows/wasm-build.yml
+    with:
+      # -O1: faster asyncify shrink, sufficient for the test gate (the demo ships
+      # -O2 via release.yml). 3D viewer ON so 3d-viewer.spec.ts has a viewer.
+      opt_level: "-O1"
+      build_3d_viewer: "ON"
+      binaryen_version: ${{ inputs.binaryen_version || '130' }}
+      run_tests: true
+      no_cache: ${{ inputs.no_cache || false }}

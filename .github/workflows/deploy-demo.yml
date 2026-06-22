@@ -1,19 +1,19 @@
-name: deploy-demo
+name: deploy-demo (manual re-deploy)
 
-# Tag a release (vX.Y.Z) → reuse the already-published WASM (snapshot it into a
-# per-release manifest), publish the example gallery, build the standalone pinned
-# to the CDN, and deploy it to demo.pcbjam.com (Cloudflare Pages).
+# MANUAL re-deploy of demo.pcbjam.com WITHOUT rebuilding/publishing WASM — it
+# snapshots the WASM already in the registry into manifest-<tag>.json, publishes
+# the gallery, builds the standalone, and deploys. Use it to re-ship the demo for
+# an existing tag (e.g. a Pages config fix) when the WASM is already published.
 #
-# The heavy WASM build+upload is DECOUPLED (workflow: publish-wasm.yml / a local
-# seed) because the WASM changes rarely; this pipeline never rebuilds it. See
-# docs/features/demo-deploy/.
+# The tag-triggered release pipeline lives in release.yml (build -O2 → publish
+# WASM → deploy), so a tag NO LONGER triggers this — this is the manual escape
+# hatch only. If the registry has no WASM for the tag, the snapshot step fails
+# (run release.yml, which builds + publishes). See docs/features/demo-deploy/.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to deploy, e.g. v1.2.3"
+        description: "Release tag to re-deploy, e.g. v1.2.3 (WASM must already be published)"
         required: true
 
 # Serialize demo deploys so two tags don't race the live site (don't cancel a
