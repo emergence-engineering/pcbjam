@@ -92,12 +92,50 @@ if [ "$CLEAN_BUILD" = "1" ]; then
     make -f Makefile.wasm clean 2>/dev/null || true
 fi
 
+# Native wasm-EH (docs/features/wasm-exceptions/): the emsdk-bundled Binaryen v121 crashes
+# asyncifying wasm-EH, so stub the in-link Asyncify and run --hoist-cpp-catches + --asyncify
+# post-link on Binaryen v130 (scripts/common/hoist-and-asyncify.sh).
+EMSDK_WASM_OPT="$PROJECT_ROOT/tools/emsdk/upstream/bin/wasm-opt"
+WASMOPT_STUB="$PROJECT_ROOT/wasm/stubs/wasm-opt-stub.sh"
+_eh_restore_wasmopt() { [ -f "${EMSDK_WASM_OPT}.ehbak" ] && mv -f "${EMSDK_WASM_OPT}.ehbak" "${EMSDK_WASM_OPT}"; }
+EH_MARKER=""
+if [ "${WX_NATIVE_EH:-0}" = "1" ]; then
+    echo ""
+    echo "=== Native wasm-EH: resolving Binaryen v130 + hoist-pass wasm-opt ==="
+    export V130_WASMOPT="$(BINARYEN_VERSION=130 "$SCRIPT_DIR/common/get-wasm-opt.sh" 2>/dev/null | tail -1)"
+    export HOIST_WASMOPT="$("$SCRIPT_DIR/binaryen-hoist-pass/build-wasm-opt.sh")"
+    echo "  v130:  $V130_WASMOPT"
+    echo "  hoist: $HOIST_WASMOPT"
+    echo "Stubbing in-link Asyncify (will run post-link instead)..."
+    cp "$EMSDK_WASM_OPT" "${EMSDK_WASM_OPT}.ehbak"
+    cp "$WASMOPT_STUB" "$EMSDK_WASM_OPT"; chmod +x "$EMSDK_WASM_OPT"
+    trap _eh_restore_wasmopt EXIT
+    EH_MARKER="$(mktemp)"
+fi
+
 # Build (pass DEBUG flag if requested). App links are independent, so honor
 # JOBS/PARALLEL_JOBS from env.sh (each emcc link is slow due to Asyncify).
 if [ "$DEBUG_BUILD" = "1" ]; then
     make -j"${JOBS:-1}" -f Makefile.wasm DEBUG=1 "$MAKE_TARGET"
 else
     make -j"${JOBS:-1}" -f Makefile.wasm "$MAKE_TARGET"
+fi
+
+# Native wasm-EH: restore the emsdk wasm-opt, then hoist + asyncify each freshly-linked app.
+if [ "${WX_NATIVE_EH:-0}" = "1" ]; then
+    _eh_restore_wasmopt; trap - EXIT
+    echo ""
+    echo "=== Post-link --hoist-cpp-catches + --asyncify (native wasm-EH) ==="
+    while IFS= read -r w; do
+        "$SCRIPT_DIR/common/hoist-and-asyncify.sh" "$w"
+        # Bind the asyncify-instrumented dynCall_* trampolines (needs -sDYNCALLS=1) so unwind/rewind
+        # through indirect calls works — same shim KiCad uses (scripts/common/inject-dyncall-shims.sh).
+        js="${w%.wasm}.js"
+        if [ -f "$js" ]; then
+            ( cd "$(dirname "$js")" && "$SCRIPT_DIR/common/inject-dyncall-shims.sh" "$(basename "$js")" )
+        fi
+    done < <(find "$STANDALONE_DIR" -name '*_test.wasm' -newer "$EH_MARKER")
+    rm -f "$EH_MARKER"
 fi
 
 echo ""

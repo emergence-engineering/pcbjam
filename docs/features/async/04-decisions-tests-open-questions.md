@@ -1,5 +1,7 @@
 # 04 — How the fixes relate, the test matrix, open questions
 
+> **STATUS (2026-06-23):** the top-level `set_main_loop(...,1)` `throw "unwind"` treated as current here **is gone** — replaced by the Asyncify **de-park** rAF pump (fatal under native wasm-EH; see [`../wasm-exceptions/09`](../wasm-exceptions/09-event-loop-deparking-plan.md)). The de-park regressed the coroutine suite, and **Design B is now being built to fix it** ([`12`](12-design-b-asyncify-implementation-plan.md) + [`13`](13-design-b-engineering-spec.md)). Read below as the pre-de-park analysis.
+
 > The goal is **one universal mechanism**, not patches scattered around. This file classifies the
 > candidate fixes by *root cause* so it's clear what is part of the one solution, what is
 > subsumed, and what is genuinely separate.

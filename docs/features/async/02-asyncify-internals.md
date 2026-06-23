@@ -1,5 +1,7 @@
 # 02 — The machine: Asyncify internals and control flows
 
+> **STATUS (2026-06-23):** the top-level `emscripten_set_main_loop(...,1)` `throw "unwind"` this doc treats as current **is gone** — it was fatal under native wasm-EH and was replaced by the Asyncify **de-park** rAF pump (`wxWasmParkMainLoop`); see [`../wasm-exceptions/09`](../wasm-exceptions/09-event-loop-deparking-plan.md). The de-park regressed the coroutine suite, and **Design B is now being built to fix it** ([`12`](12-design-b-asyncify-implementation-plan.md) + [`13`](13-design-b-engineering-spec.md)). Read below as the pre-de-park analysis (the internals are still accurate).
+
 This is the legible model: what suspends, who owns the single slot, and exact line-by-line
 control flow for the park, the hang, the crash, and **de-parking**.
 

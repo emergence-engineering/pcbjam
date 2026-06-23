@@ -51,13 +51,24 @@ endif
 # crashes apps at startup with "RuntimeError: function signature mismatch".
 CXXFLAGS += -MMD -MP
 
+# Native wasm-EH (WX_NATIVE_EH=1): compile + link with -fwasm-exceptions (legacy encoding) +
+# wasm setjmp/longjmp, matching the libwx build (scripts/build-wx-wasm.sh). The in-link Asyncify
+# (emsdk Binaryen v121) crashes on wasm-EH, so build-wasm-test.sh stubs it and runs the real
+# pipeline (--hoist-cpp-catches + --asyncify, scripts/common/hoist-and-asyncify.sh) post-link.
+ifdef WX_NATIVE_EH
+EH_FLAGS = -fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1 -sDYNCALLS=1
+else
+EH_FLAGS =
+endif
+CXXFLAGS += $(EH_FLAGS)
+
 # Base Emscripten flags (for all apps)
 # ASYNCIFY enables blocking modal dialogs (ShowModal waits for user)
 # ASYNCIFY_IMPORTS tells Emscripten which imported JS functions can unwind the stack
 # - startModal: for modal dialogs
 # - js_writeTextToClipboard, js_readTextFromClipboard, js_clipboardHasText, js_clearClipboard: for clipboard
 # - js_enumerateFonts: for font enumeration via Local Font Access API
-BASE_LDFLAGS = -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+BASE_LDFLAGS = $(EH_FLAGS) -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
                -s "EXPORTED_RUNTIME_METHODS=['HEAPU8','HEAP8','HEAP32','ccall']" \
                -sASYNCIFY=1 \
                -sASYNCIFY_STACK_SIZE=8192 \
@@ -92,7 +103,7 @@ LDFLAGS_PTHREAD = $(DEBUG_LDFLAGS) $(BASE_LDFLAGS) -pthread \
                   $(WX_LDFLAGS_NOGL)
 
 # Coroutine harness flags - mirror KiCad's fiber-related runtime needs
-COROUTINE_BASE_LDFLAGS = -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
+COROUTINE_BASE_LDFLAGS = $(EH_FLAGS) -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
                -s "EXPORTED_RUNTIME_METHODS=['HEAPU8','HEAP8','HEAP32','ccall']" \
                -sASYNCIFY=1 \
                -sASYNCIFY_STACK_SIZE=65536 \

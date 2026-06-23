@@ -158,9 +158,21 @@ if [ $NEEDS_CONFIGURE -eq 1 ]; then
         echo "Building wxWidgets in RELEASE mode"
     fi
 
+    # Exception model. WX_NATIVE_EH=1 builds wx with native WebAssembly exceptions
+    # (-fwasm-exceptions, legacy encoding) + wasm setjmp/longjmp instead of the default
+    # Emscripten JS exceptions. The catch-arm-hoisting pass (run post-link, see
+    # build-wasm-test.sh) then lets Asyncify suspend from inside C++ catch blocks.
+    # See docs/features/wasm-exceptions/.
+    if [ "${WX_NATIVE_EH:-0}" = "1" ]; then
+        WX_EH_FLAGS="-fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1"
+    else
+        WX_EH_FLAGS="-fexceptions"
+    fi
+    echo "wx EH model flags: ${WX_EH_FLAGS}"
+
     # Include emscripten cache sysroot for zlib headers
-    export CFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include ${WX_DEBUG_FLAGS} -fexceptions -pthread -matomics -mbulk-memory"
-    export CXXFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include -I$PCRE2_INCLUDE ${WX_DEBUG_FLAGS} -fexceptions -pthread -matomics -mbulk-memory"
+    export CFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include ${WX_DEBUG_FLAGS} ${WX_EH_FLAGS} -pthread -matomics -mbulk-memory"
+    export CXXFLAGS="-DZ_HAVE_UNISTD_H=1 -I$EM_CACHE_SYSROOT/include -I$PCRE2_INCLUDE ${WX_DEBUG_FLAGS} ${WX_EH_FLAGS} -pthread -matomics -mbulk-memory"
     export LDFLAGS="-L$EM_CACHE_SYSROOT/lib/wasm32-emscripten"
 
     emconfigure "$WX_SOURCE/configure" \

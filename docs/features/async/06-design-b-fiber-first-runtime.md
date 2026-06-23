@@ -1,5 +1,7 @@
 # 06 - Design B: fiber-first async runtime
 
+> **STATUS (2026-06-23):** Design B is **now being implemented** on Asyncify — see [`12`](12-design-b-asyncify-implementation-plan.md) (plan/phases/test-matrix) and [`13`](13-design-b-engineering-spec.md) (engineering spec/work log). The de-park ([`../wasm-exceptions/09`](../wasm-exceptions/09-event-loop-deparking-plan.md)) replaced the top-level `throw` with an Asyncify park and regressed the coroutine suite — the red scenario this design fixes. External research (Ruby-WASM, Julia-WASM, Qt-for-WASM) confirms the fiber-scheduler is the proven path.
+
 > Goal: make the architecture conceptually cleaner by reducing the number of suspension
 > primitives. Instead of having tool coroutines use fibers while modal/clipboard/font/nested loops
 > use `EM_ASYNC_JS` sleeps, put every blocking-looking operation onto a fiber-like runtime and let

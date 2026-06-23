@@ -1,5 +1,7 @@
 # 05 - Design A: JS Asyncify arbiter
 
+> **STATUS (2026-06-23):** the throw-based top loop assumed here **is gone** (de-park; [`../wasm-exceptions/09`](../wasm-exceptions/09-event-loop-deparking-plan.md)). This arbiter is the **core of Design B's scheduler**, now being implemented — the de-park created the red scenario (coroutine regression) that 07/D3 said this arbiter lacked. See [`12`](12-design-b-asyncify-implementation-plan.md) + [`13`](13-design-b-engineering-spec.md); this doc's arbiter design is reused there.
+
 > Goal: fix the current system with the smallest architectural move. Keep
 > `EM_ASYNC_JS` modal/clipboard/font calls and Emscripten fibers, but introduce one JS-side
 > authority that owns `Asyncify.currData`, `Asyncify.state` transitions, the fiber trampoline,

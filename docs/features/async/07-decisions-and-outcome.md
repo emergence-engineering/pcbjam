@@ -1,5 +1,7 @@
 # 07 — Decisions and outcome (2026-06-12)
 
+> **STATUS (2026-06-23):** **D4 (kept the throw-based main-loop park) has been reversed.** Native wasm-EH made the `throw "unwind"` fatal (its catch_all cleanup destroys the main frame), so the top loop is now the Asyncify **de-park** ([`../wasm-exceptions/09`](../wasm-exceptions/09-event-loop-deparking-plan.md)). That de-park regressed the coroutine suite — the red scenario D3 said the arbiter lacked — so **Design B is now being built** ([`12`](12-design-b-asyncify-implementation-plan.md) + [`13`](13-design-b-engineering-spec.md)). The D1–D5 outcomes below were correct for the JS-EH / throw world.
+
 > The dossier (01–06) ended with designs and open questions. This file records what was
 > actually decided, built, and deliberately NOT built — and the trigger conditions for
 > revisiting each road not taken. Working artifacts: `docs/features/asyncify-arbiter/`
