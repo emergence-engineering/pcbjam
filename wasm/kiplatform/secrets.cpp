@@ -72,5 +72,26 @@ bool GetSecret( const wxString& aService, const wxString& aKey, wxString& aSecre
 #endif
 }
 
+bool DeleteSecret( const wxString& aService, const wxString& aKey )
+{
+#ifdef __EMSCRIPTEN__
+    int result = EM_ASM_INT({
+        try {
+            var service = UTF8ToString($0);
+            var key = UTF8ToString($1);
+            var storageKey = 'kicad_secret_' + service + '_' + key;
+            localStorage.removeItem(storageKey);
+            return 1;
+        } catch(e) {
+            console.warn('Failed to delete secret:', e);
+            return 0;
+        }
+    }, aService.utf8_str().data(), aKey.utf8_str().data());
+    return result == 1;
+#else
+    return false;
+#endif
+}
+
 } // namespace SECRETS
 } // namespace KIPLATFORM

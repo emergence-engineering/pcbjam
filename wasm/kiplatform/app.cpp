@@ -83,5 +83,12 @@ void AddDynamicLibrarySearchPath( const wxString& aPath )
     // No dynamic library loading in WASM
 }
 
+void EnableDarkMode( bool aForce )
+{
+    // Native platforms use this to theme window chrome (title bars, etc.).
+    // In the browser the page/host controls theming via CSS, so this is a no-op.
+    (void) aForce;
+}
+
 } // namespace APP
 } // namespace KIPLATFORM

@@ -191,5 +191,21 @@ void SetFloatLevel( wxWindow* aWindow )
     // No floating window levels in browser
 }
 
+void AllowNetworkFileSystems( wxDialog* aDialog )
+{
+    // Native platforms use this to let file dialogs browse network mounts.
+    // The browser's file dialogs are virtual (MEMFS / JS bridge), so this is
+    // a no-op.
+    (void) aDialog;
+}
+
+void CancelPendingScroll( wxDataViewCtrl* aCtrl )
+{
+    // Native (GTK/macOS) platforms cancel an in-flight kinetic/async scroll on
+    // the data view. The browser wx port has no such pending-scroll state, so
+    // this is a no-op.
+    (void) aCtrl;
+}
+
 } // namespace UI
 } // namespace KIPLATFORM

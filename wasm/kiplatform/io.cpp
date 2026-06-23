@@ -6,7 +6,9 @@
 #include <kiplatform/io.h>
 #include <wx/string.h>
 #include <wx/filename.h>
+#include <wx/dir.h>
 #include <stdio.h>
+#include <sys/stat.h>
 
 namespace KIPLATFORM
 {
@@ -43,6 +45,39 @@ bool IsFileHidden( const wxString& aFileName )
 void LongPathAdjustment( wxFileName& aFilename )
 {
     // No-op on non-Windows platforms
+}
+
+long long TimestampDir( const wxString& aDirPath, const wxString& aFilespec )
+{
+    // Mirror the native implementations: accumulate (mtime, size) over files
+    // matching the spec so callers can detect library-directory changes. The
+    // Emscripten virtual filesystem supports stat(), so this works for MEMFS-
+    // backed local libraries (git/network libraries are handled JS-side).
+    long long timestamp = 0;
+
+    wxDir dir( aDirPath );
+
+    if( !dir.IsOpened() )
+        return timestamp;
+
+    wxString filename;
+    bool     cont = dir.GetFirst( &filename, aFilespec, wxDIR_FILES );
+
+    while( cont )
+    {
+        wxString    fullPath = aDirPath + wxFILE_SEP_PATH + filename;
+        struct stat entryStat;
+
+        if( stat( fullPath.fn_str(), &entryStat ) == 0 )
+        {
+            timestamp += static_cast<long long>( entryStat.st_mtime ) * 1000;
+            timestamp += entryStat.st_size;
+        }
+
+        cont = dir.GetNext( &filename );
+    }
+
+    return timestamp;
 }
 
 } // namespace IO

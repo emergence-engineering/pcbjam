@@ -201,8 +201,8 @@ test.describe('PCB load probe', () => {
             '/home/kicad',
             '/home/kicad/documents',
             '/home/kicad/documents/kicad',
-            '/home/kicad/documents/kicad/9.99',
-            '/home/kicad/documents/kicad/9.99/projects',
+            '/home/kicad/documents/kicad/10.0',
+            '/home/kicad/documents/kicad/10.0/projects',
             '/tmp',
             '/workspace',
         ]);
@@ -238,7 +238,7 @@ test.describe('PCB load probe', () => {
 
         // Final check: re-dump MEMFS so we can confirm nothing changed under us
         await dumpMemfs(page, [
-            '/home/kicad/documents/kicad/9.99/projects',
+            '/home/kicad/documents/kicad/10.0/projects',
             '/tmp',
         ]);
 

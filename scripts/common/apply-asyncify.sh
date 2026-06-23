@@ -112,7 +112,7 @@ echo "This may take several minutes and use significant RAM..."
 echo "  BINARYEN_CORES=${BINARYEN_CORES}"
 echo "  LD_PRELOAD=${WASM_OPT_PRELOAD:-<none>}"
 
-"${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${WASM_OPT}" --asyncify \
+"${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${WASM_OPT}" --asyncify ${ASYNCIFY_EXTRA_OPTS:-} \
     "--pass-arg=asyncify-imports@${ASYNCIFY_IMPORTS}" \
     "--pass-arg=asyncify-removelist@${ASYNCIFY_REMOVE_ARG}" \
     --pass-arg=asyncify-propagate-addlist \

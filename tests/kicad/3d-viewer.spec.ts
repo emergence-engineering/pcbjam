@@ -21,7 +21,8 @@ import { waitForPcbnew } from './utils/pcbnew-ready';
  * models — deferred), the viewer shows copper/silk/mask/edge geometry in 3D.
  */
 
-const KICAD_VERSION_DIR = '9.99';
+// KiCad 10 stores projects under /home/kicad/documents/kicad/10.0/projects.
+const KICAD_VERSION_DIR = '10.0';
 const PROJECT_DIR_MEMFS = `/home/kicad/documents/kicad/${KICAD_VERSION_DIR}/projects`;
 
 // pic_programmer frames correctly in the default 3D camera (the microwave demo

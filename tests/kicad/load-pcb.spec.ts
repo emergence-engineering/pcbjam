@@ -16,7 +16,7 @@ import { waitForBoardLoaded } from './utils/board-ready';
  *      if it appears — depends on whether MEMFS already has config).
  *   2. Inject the demo's .kicad_pcb (+ .kicad_pro for completeness) into
  *      MEMFS at PATHS::GetDefaultUserProjectsPath() — confirmed by
- *      load-pcb-probe.spec.ts to be /home/kicad/documents/kicad/9.99/projects/.
+ *      load-pcb-probe.spec.ts to be /home/kicad/documents/kicad/10.0/projects/.
  *   3. Drive File → Open via menu helpers.
  *   4. Click on the file row in wxFileListCtrl (wasm port doesn't register
  *      listctrl rows in wxElementRegistry, so we click by the filelist's
@@ -36,7 +36,9 @@ import { waitForBoardLoaded } from './utils/board-ready';
  * `features/<branch>/rtree-debug-findings.md` for the full trail.
  */
 
-const KICAD_VERSION_DIR = '9.99';
+// KiCad 10 stores projects under /home/kicad/documents/kicad/10.0/projects
+// (GetMajorMinorVersion() = "10.0"); the old WASM port used "9.99".
+const KICAD_VERSION_DIR = '10.0';
 const PROJECT_DIR_MEMFS = `/home/kicad/documents/kicad/${KICAD_VERSION_DIR}/projects`;
 
 type DemoCfg = {
