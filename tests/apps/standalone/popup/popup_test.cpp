@@ -4,6 +4,22 @@
 #include "wx/wx.h"
 #include "wx/popupwin.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
+// Mirror key popup events to the browser console so e2e tests can observe
+// open/click/dismiss (the on-screen wxTextCtrl log isn't easily readable from JS).
+static void ConsoleLog(const wxString& msg)
+{
+#ifdef __EMSCRIPTEN__
+    const wxScopedCharBuffer utf8 = msg.utf8_str();
+    EM_ASM({ console.log('[POPUP] ' + UTF8ToString($0)); }, utf8.data());
+#else
+    wxUnusedVar(msg);
+#endif
+}
+
 // Simple popup window (like KiCad STATUS_POPUP)
 class StatusPopup : public wxPopupWindow
 {
@@ -66,6 +82,7 @@ private:
     {
         int toolNum = event.GetId() - 1000;
         m_log->AppendText(wxString::Format("Tool %d clicked\n", toolNum));
+        ConsoleLog(wxString::Format("Tool %d clicked", toolNum));
         Dismiss();  // Close popup after selection
     }
 
@@ -264,6 +281,7 @@ private:
         popup->SetPosition(pos);
         popup->Popup();
         Log("Tool palette shown (click outside to dismiss)");
+        ConsoleLog("tool palette shown");
     }
 
     void OnShowColorPicker(wxCommandEvent& event)
