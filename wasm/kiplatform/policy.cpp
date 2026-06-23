@@ -5,6 +5,7 @@
 
 #include <kiplatform/policy.h>
 #include <wx/string.h>
+#include <optional>
 
 namespace KIPLATFORM
 {
@@ -17,10 +18,10 @@ PBOOL GetPolicyBool( const wxString& aKey )
     return PBOOL::NOT_CONFIGURED;
 }
 
-std::uint32_t GetPolicyEnumUInt( const wxString& aKey )
+std::optional<std::uint32_t> GetPolicyEnumUInt( const wxString& aKey )
 {
     // No enterprise policies in browser environment
-    return 0;
+    return std::nullopt;
 }
 
 } // namespace POLICY

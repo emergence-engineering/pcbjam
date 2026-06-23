@@ -83,8 +83,11 @@ API_PLUGIN_MANAGER::API_PLUGIN_MANAGER( wxEvtHandler* aParent ) :
 {
 }
 
-void API_PLUGIN_MANAGER::ReloadPlugins()
+void API_PLUGIN_MANAGER::ReloadPlugins( std::optional<wxString> aDirectoryToScan,
+                                        std::shared_ptr<REPORTER> aReporter )
 {
+    (void) aDirectoryToScan;
+    (void) aReporter;
     // No-op: plugins not available in WASM
 }
 
@@ -93,9 +96,11 @@ void API_PLUGIN_MANAGER::RecreatePluginEnvironment( const wxString& aIdentifier 
     (void)aIdentifier;
 }
 
-void API_PLUGIN_MANAGER::InvokeAction( const wxString& aIdentifier )
+void API_PLUGIN_MANAGER::InvokeAction( const wxString& aIdentifier,
+                                       std::shared_ptr<REPORTER> aReporter )
 {
     (void)aIdentifier;
+    (void) aReporter;
 }
 
 std::optional<const PLUGIN_ACTION*> API_PLUGIN_MANAGER::GetAction( const wxString& aIdentifier )
