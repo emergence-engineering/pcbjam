@@ -179,13 +179,6 @@ test.describe('Eeschema crosshair modes', () => {
     // generically by tests/e2e/popup.spec.ts. Each click advances the group's selected action;
     // the tooltip + the rendered crosshair both change.
     test('crosshair toolbar button cycles small -> full -> 45 on click', async ({ page, testLogger }) => {
-        // Click-to-cycle is upstream KiCad's ACTION_TOOLBAR::onToolEvent behavior. This branch's
-        // kicad submodule is a pre-10.0 (9.99.0) snapshot that predates it, so the cycle is
-        // absent until the kicad submodule is rebased onto master. Expected-to-fail until then;
-        // remove this line once the rebase lands (Playwright will flag it as "unexpectedly
-        // passed", reminding us to drop the annotation).
-        test.fail(true, 'needs upstream ACTION_TOOLBAR::onToolEvent cycle (kicad rebase onto master)');
-
         await completeWizard(page);
         await hideCursor(page);
 
