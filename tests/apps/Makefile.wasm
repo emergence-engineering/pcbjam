@@ -51,14 +51,15 @@ endif
 # crashes apps at startup with "RuntimeError: function signature mismatch".
 CXXFLAGS += -MMD -MP
 
-# Native wasm-EH (WX_NATIVE_EH=1): compile + link with -fwasm-exceptions (legacy encoding) +
-# wasm setjmp/longjmp, matching the libwx build (scripts/build-wx-wasm.sh). The in-link Asyncify
-# (emsdk Binaryen v121) crashes on wasm-EH, so build-wasm-test.sh stubs it and runs the real
-# pipeline (--hoist-cpp-catches + --asyncify, scripts/common/apply-asyncify.sh --hoist) post-link.
-ifdef WX_NATIVE_EH
-EH_FLAGS = -fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1 -sDYNCALLS=1
-else
+# Native wasm-EH is the DEFAULT (this branch IS the native-EH migration): compile + link with
+# -fwasm-exceptions (legacy encoding) + wasm setjmp/longjmp, matching the libwx build
+# (scripts/build-wx-wasm.sh). Set WX_LEGACY_EH=1 for the legacy Emscripten JS exceptions. The
+# in-link Asyncify (emsdk Binaryen v121) crashes on wasm-EH, so build-wasm-test.sh stubs it and
+# runs the real pipeline (--hoist-cpp-catches + --asyncify, apply-asyncify.sh --hoist) post-link.
+ifeq ($(WX_LEGACY_EH),1)
 EH_FLAGS =
+else
+EH_FLAGS = -fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1 -sDYNCALLS=1
 endif
 CXXFLAGS += $(EH_FLAGS)
 
@@ -66,11 +67,11 @@ CXXFLAGS += $(EH_FLAGS)
 # and do not link libwx, so they do not pick it up from the global EH model). Under native
 # wasm-EH they must use $(EH_FLAGS) instead; JSEH_FEXC carries -fexceptions ONLY in the JS-EH
 # build, so each repro follows the active EH model in both worlds (paired with $(EH_FLAGS) on
-# their links). This keeps them building+running as real tests under WX_NATIVE_EH, not skipped.
-ifdef WX_NATIVE_EH
-JSEH_FEXC =
-else
+# their links). This keeps them building+running as real tests in the default native-EH build.
+ifeq ($(WX_LEGACY_EH),1)
 JSEH_FEXC = -fexceptions
+else
+JSEH_FEXC =
 endif
 
 # Base Emscripten flags (for all apps)
@@ -132,6 +133,13 @@ LDFLAGS_RACES = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -sASSERTIONS=0 $(WX_L
 # stack KiCad actually ships (emscripten_sleep needs Asyncify to yield).
 LDFLAGS_RAYTRACE = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -pthread \
                   -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' \
+                  -sPTHREAD_POOL_SIZE_STRICT=0 \
+                  $(WX_LDFLAGS_NOGL)
+
+# LDFLAGS for the real-pool test (Phase 1a). Like LDFLAGS_RAYTRACE but pre-warm +2 workers so
+# the lifecycle mode's small BS::pause_thread_pool(2) gets pre-warmed workers (no on-demand spawn).
+LDFLAGS_REALPOOL = $(DEBUG_LDFLAGS) $(COROUTINE_BASE_LDFLAGS) -pthread \
+                  -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency + 2' \
                   -sPTHREAD_POOL_SIZE_STRICT=0 \
                   $(WX_LDFLAGS_NOGL)
 
@@ -602,6 +610,100 @@ raytrace-threads: $(S)/raytrace-threads/raytrace_threads_test.html
 
 # Include the raytracer-threading repro in the default `all` build (prereqs accumulate).
 all: $(S)/raytrace-threads/raytrace_threads_test.html
+
+# Un-shimmed copy of KiCad's BS::thread_pool: the single-thread #ifdef __EMSCRIPTEN__ shim in
+# detach_task is disabled (-> #if 0) so the pool tests exercise REAL multithreading WITHOUT
+# modifying the pristine KiCad header and WITHOUT a compile macro. Regenerated at parse time to
+# stay in sync. (HASH is a literal '#', escaped so make does not treat it as a comment.)
+HASH := \#
+POOL_UNSHIMMED := $(S)/_pool_unshimmed
+$(shell mkdir -p $(POOL_UNSHIMMED); sed 's/$(HASH)ifdef __EMSCRIPTEN__/$(HASH)if 0/' $(KICAD_ROOT)/thirdparty/thread-pool/bs_thread_pool.hpp > $(POOL_UNSHIMMED)/bs_thread_pool.hpp)
+
+# Real KiCad thread-pool test (Phase 1a / native-EH). Compiles the REAL
+# kicad/common/thread_pool.cpp (GetKiCadThreadPool) with minimal pgm_base/advanced_config
+# stubs; the pool is un-shimmed via a generated bs_thread_pool.hpp (POOL_UNSHIMMED below) so
+# tasks run on workers.
+TP_REAL = $(S)/threadpool-real
+TP_REAL_INC = $(JSEH_FEXC) -std=c++20 \
+              -I$(TP_REAL)/stubs -I$(POOL_UNSHIMMED) -I$(KICAD_ROOT)/include -I$(KICAD_ROOT)/thirdparty/thread-pool
+
+$(TP_REAL)/threadpool_real_test.o: $(TP_REAL)/threadpool_real_test.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $(TP_REAL_INC) $< -o $@
+
+$(TP_REAL)/thread_pool.o: $(KICAD_ROOT)/common/thread_pool.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $(TP_REAL_INC) $< -o $@
+
+$(TP_REAL)/kicad_pool_stubs.o: $(TP_REAL)/stubs/kicad_pool_stubs.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $(TP_REAL_INC) $< -o $@
+
+$(TP_REAL)/threadpool_real_test.html: $(TP_REAL)/threadpool_real_test.o $(TP_REAL)/thread_pool.o $(TP_REAL)/kicad_pool_stubs.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $(filter %.o %.a,$^) $(LDFLAGS_REALPOOL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+threadpool-real: $(TP_REAL)/threadpool_real_test.html
+.PHONY: threadpool-real
+
+all: $(TP_REAL)/threadpool_real_test.html
+
+# On-demand non-warm Worker test (Phase 2). The real pool (compiled-in thread_pool.cpp)
+# consumes the pre-warmed Workers, then raw fly-threads force on-demand creation;
+# wasm/shims/nanosleep_yield.c (a strong nanosleep override; -Wl,--wrap crashes wasm-ld)
+# makes the main-thread sleep_for join Asyncify-yield so the on-demand Workers boot.
+# Reuses threadpool-real's pool stubs.
+OD = $(S)/pthread-ondemand
+OD_INC = $(JSEH_FEXC) -std=c++20 \
+         -I$(S)/threadpool-real/stubs -I$(POOL_UNSHIMMED) -I$(KICAD_ROOT)/include -I$(KICAD_ROOT)/thirdparty/thread-pool
+SHIMS = ../../wasm/shims
+
+$(OD)/pthread_ondemand_test.o: $(OD)/pthread_ondemand_test.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $(OD_INC) $< -o $@
+
+$(OD)/thread_pool.o: $(KICAD_ROOT)/common/thread_pool.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $(OD_INC) $< -o $@
+
+$(OD)/kicad_pool_stubs.o: $(S)/threadpool-real/stubs/kicad_pool_stubs.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $(OD_INC) $< -o $@
+
+# Compiled as C (no -std=c++): em++ keys language off the .c extension.
+$(OD)/nanosleep_yield.o: $(SHIMS)/nanosleep_yield.c
+	$(CXX) -c -pthread $< -o $@
+
+$(OD)/pthread_ondemand_test.html: $(OD)/pthread_ondemand_test.o $(OD)/thread_pool.o $(OD)/kicad_pool_stubs.o $(OD)/nanosleep_yield.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $(filter %.o %.a,$^) $(LDFLAGS_RAYTRACE) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+pthread-ondemand: $(OD)/pthread_ondemand_test.html
+.PHONY: pthread-ondemand
+
+all: $(OD)/pthread_ondemand_test.html
+
+# Library-preload native-EH repro (1b). Standalone std::async worker that parses+throws (mode-c)
+# and proxies a fetch to main (emscripten_proxy_*) — mirrors the KiCad-10 PCBJAM preload shape.
+# No KiCad source. Uses the system proxying queue (built into the pthread runtime).
+$(S)/async-preload/async_preload_test.o: $(S)/async-preload/async_preload_test.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $(JSEH_FEXC) $< -o $@
+
+$(S)/async-preload/async_preload_test.html: $(S)/async-preload/async_preload_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_RAYTRACE) --pre-js $(JS) --shell-file $(HTML) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+async-preload: $(S)/async-preload/async_preload_test.html
+.PHONY: async-preload
+
+all: $(S)/async-preload/async_preload_test.html
+
+# A raytracer worker-join run inside a wx modal pump. The pump dispatches the work via
+# ProcessEvents (ccall async:true) at Asyncify state==Normal, so both joins complete:
+# m=0 sleep_for busy-wait, m=1 emscripten_sleep yield.
+$(S)/raytrace-modal/raytrace_modal_test.o: $(S)/raytrace-modal/raytrace_modal_test.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $< -o $@
+
+$(S)/raytrace-modal/raytrace_modal_test.html: $(S)/raytrace-modal/raytrace_modal_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_RAYTRACE) --pre-js $(JS) --shell-file $(HTML) -o $@
+	../../scripts/common/inject-dyncall-shims.sh $(basename $@).js
+
+raytrace-modal: $(S)/raytrace-modal/raytrace_modal_test.html
+.PHONY: raytrace-modal
+
+all: $(S)/raytrace-modal/raytrace_modal_test.html
 
 # Log Error test (no GL) - reproduces KiCad's kiface error dialog
 $(S)/logerror/logerror_test.o: $(S)/logerror/logerror_test.cpp

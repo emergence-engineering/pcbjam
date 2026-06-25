@@ -92,14 +92,15 @@ if [ "$CLEAN_BUILD" = "1" ]; then
     make -f Makefile.wasm clean 2>/dev/null || true
 fi
 
-# Native wasm-EH (docs/features/wasm-exceptions/): the emsdk-bundled Binaryen v121 crashes
-# asyncifying wasm-EH, so stub the in-link Asyncify and run --hoist-cpp-catches + --asyncify
-# post-link on Binaryen v130 (scripts/common/apply-asyncify.sh --hoist --no-removelist).
+# Native wasm-EH is the DEFAULT (this branch IS the native-EH migration); set WX_LEGACY_EH=1 to
+# build the legacy Emscripten JS exceptions instead. For the native build, the emsdk-bundled
+# Binaryen v121 crashes asyncifying wasm-EH, so we stub the in-link Asyncify and run
+# --hoist-cpp-catches + --asyncify post-link on Binaryen v130 (apply-asyncify.sh --hoist).
 EMSDK_WASM_OPT="$PROJECT_ROOT/tools/emsdk/upstream/bin/wasm-opt"
 WASMOPT_STUB="$PROJECT_ROOT/wasm/stubs/wasm-opt-stub.sh"
 _eh_restore_wasmopt() { [ -f "${EMSDK_WASM_OPT}.ehbak" ] && mv -f "${EMSDK_WASM_OPT}.ehbak" "${EMSDK_WASM_OPT}"; }
 EH_MARKER="$(mktemp)"   # created before the build so 'find -newer' below selects freshly-linked apps (both EH modes)
-if [ "${WX_NATIVE_EH:-0}" = "1" ]; then
+if [ "${WX_LEGACY_EH:-0}" != "1" ]; then
     echo ""
     echo "=== Native wasm-EH: resolving Binaryen v130 + hoist-pass wasm-opt ==="
     export V130_WASMOPT="$(BINARYEN_VERSION=130 "$SCRIPT_DIR/common/get-wasm-opt.sh" 2>/dev/null | tail -1)"
@@ -123,7 +124,7 @@ make_rc=$?
 if [ "$make_rc" -ne 0 ]; then
     # Fail loudly. Silently continuing to the post-link leaves the freshly-linked apps
     # asyncify-stubbed / un-injected, which looks like mass test failures rather than a build
-    # error. (The EXIT trap restores the stubbed emsdk wasm-opt under WX_NATIVE_EH.)
+    # error. (The EXIT trap restores the stubbed emsdk wasm-opt in the native-EH build.)
     echo "" >&2
     echo "ERROR: make failed (exit $make_rc); aborting before the post-link step." >&2
     exit "$make_rc"
@@ -136,13 +137,13 @@ fi
 # while the main loop is parked. The Makefile only injects it for the coroutine apps;
 # inject-dyncall-shims.sh is idempotent (skips an already-shimmed glue), so re-running it
 # here is safe. Native wasm-EH additionally needs post-link hoist + asyncify on the .wasm first.
-if [ "${WX_NATIVE_EH:-0}" = "1" ]; then
+if [ "${WX_LEGACY_EH:-0}" != "1" ]; then
     _eh_restore_wasmopt; trap - EXIT
     echo ""
     echo "=== Post-link --hoist-cpp-catches + --asyncify (native wasm-EH) ==="
 fi
 while IFS= read -r w; do
-    if [ "${WX_NATIVE_EH:-0}" = "1" ]; then
+    if [ "${WX_LEGACY_EH:-0}" != "1" ]; then
         "$SCRIPT_DIR/common/apply-asyncify.sh" --hoist --no-removelist "$w"
     fi
     js="${w%.wasm}.js"

@@ -158,15 +158,15 @@ if [ $NEEDS_CONFIGURE -eq 1 ]; then
         echo "Building wxWidgets in RELEASE mode"
     fi
 
-    # Exception model. WX_NATIVE_EH=1 builds wx with native WebAssembly exceptions
-    # (-fwasm-exceptions, legacy encoding) + wasm setjmp/longjmp instead of the default
-    # Emscripten JS exceptions. The catch-arm-hoisting pass (run post-link, see
-    # build-wasm-test.sh) then lets Asyncify suspend from inside C++ catch blocks.
-    # See docs/features/wasm-exceptions/.
-    if [ "${WX_NATIVE_EH:-0}" = "1" ]; then
-        WX_EH_FLAGS="-fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1"
-    else
+    # Exception model. Native WebAssembly exceptions (-fwasm-exceptions, legacy encoding) +
+    # wasm setjmp/longjmp are the DEFAULT (this branch IS the native-EH migration). Set
+    # WX_LEGACY_EH=1 to build the legacy Emscripten JS exceptions instead. The catch-arm-hoisting
+    # pass (run post-link, see build-wasm-test.sh) then lets Asyncify suspend from inside C++
+    # catch blocks. See docs/features/wasm-exceptions/.
+    if [ "${WX_LEGACY_EH:-0}" = "1" ]; then
         WX_EH_FLAGS="-fexceptions"
+    else
+        WX_EH_FLAGS="-fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1"
     fi
     echo "wx EH model flags: ${WX_EH_FLAGS}"
 

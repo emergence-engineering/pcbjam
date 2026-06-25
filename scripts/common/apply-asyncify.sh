@@ -6,8 +6,8 @@
 #   (default)         KiCad / JS-EH: --asyncify + remove-list + -O2.
 #   --hoist           native wasm-EH: run our --hoist-cpp-catches fork pass FIRST (lets Asyncify
 #                     suspend from inside C++ catch blocks) and enable all wasm features (-all) so
-#                     binaryen understands the EH instructions. Used by build-wasm-test.sh under
-#                     WX_NATIVE_EH and (later) the native-EH KiCad build.
+#                     binaryen understands the EH instructions. Used by build-wasm-test.sh for the
+#                     default native-EH build (gate JS-EH via WX_LEGACY_EH=1) + the native-EH KiCad build.
 #   --no-removelist   skip the KiCad big-function remove-list (the small wx test apps don't contain
 #                     those symbols, and one bare entry — "match" — could collide).
 #
