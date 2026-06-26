@@ -59,6 +59,25 @@ cd "${OCC_BUILD}"
 # OpenCASCADE build configuration for WASM
 # Disable GUI, visualization that needs X11/OpenGL native
 # Enable core geometry and data exchange modules only
+#
+# Native wasm-EH only: OCC's CMake unconditionally adds -DOCC_CONVERT_SIGNALS (occt_defs_flags.cmake),
+# which turns the OCC_CATCH_SIGNALS macro into setjmp(handler.Label()). The STEP read/write code
+# (STEPControl_Reader/ActorRead, ...) uses OCC_CATCH_SIGNALS pervasively. Under -fwasm-exceptions that
+# setjmp is lowered (emscripten's LowerEmscriptenEHSjLj) into a wasm-SjLj state-machine br_table whose
+# branch targets are inconsistently typed -> INVALID wasm that V8, wabt AND Binaryen all reject (this
+# is the "popping from empty stack" / br_table type-mismatch that blocks pcbnew's OCC link). WASM has
+# no POSIX signals, so OCC_CONVERT_SIGNALS (signal->exception conversion) is meaningless here anyway;
+# OCC's normal C++ Standard_Failure throw/catch is unaffected. Disabling it means OCC_CATCH_SIGNALS
+# expands to nothing (clang) -> no setjmp -> no wasm-SjLj -> valid native-EH wasm. Left intact under
+# legacy JS-EH (where the wasm-SjLj lowering is fine).
+case "${DEPS_EH_FLAGS}" in *fwasm-exceptions*)
+  _occ_defs="${OCC_DIR}/adm/cmake/occt_defs_flags.cmake"
+  if grep -q '^[[:space:]]*add_definitions(-DOCC_CONVERT_SIGNALS)' "${_occ_defs}" 2>/dev/null; then
+    sed -i 's|add_definitions(-DOCC_CONVERT_SIGNALS)|# add_definitions(-DOCC_CONVERT_SIGNALS) # disabled for native wasm-EH by build-opencascade.sh (no POSIX signals in WASM; setjmp breaks -fwasm-exceptions)|' "${_occ_defs}"
+    log_info "Disabled OCC_CONVERT_SIGNALS for native wasm-EH (avoids invalid wasm-SjLj br_table)"
+  fi
+  ;;
+esac
 emcmake cmake "${OCC_DIR}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Debug} \
