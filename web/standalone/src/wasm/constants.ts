@@ -7,8 +7,12 @@ import type { Tool } from "@pcbjam/shared";
  * NOTE (spec §11.1): this path is KiCad-version dependent and confirmed by
  * tests/kicad/load-pcb-probe.spec.ts. If the build's version dir changes, this
  * must change too — a candidate for reading from the module at runtime later.
+ * It MUST match KiCad's GetMajorMinorVersion() (== PATHS::GetUserSettingsPath()'s
+ * version subdir); otherwise the seeded sym-lib-table/config is written to a dir
+ * the WASM never reads and the symbol/footprint choosers come up empty. The
+ * KiCad 10.0.4 rebase bumped this from "9.99" to "10.0".
  */
-export const KICAD_VERSION_DIR = "9.99";
+export const KICAD_VERSION_DIR = "10.0";
 export const MEMFS_PROJECTS_DIR = `/home/kicad/documents/kicad/${KICAD_VERSION_DIR}/projects`;
 
 /** Where KiCad expects images.tar.gz (compiled-in KICAD_DATA path). */
