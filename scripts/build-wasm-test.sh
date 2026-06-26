@@ -102,11 +102,12 @@ _eh_restore_wasmopt() { [ -f "${EMSDK_WASM_OPT}.ehbak" ] && mv -f "${EMSDK_WASM_
 EH_MARKER="$(mktemp)"   # created before the build so 'find -newer' below selects freshly-linked apps (both EH modes)
 if [ "${WX_LEGACY_EH:-0}" != "1" ]; then
     echo ""
-    echo "=== Native wasm-EH: resolving Binaryen v130 + hoist-pass wasm-opt ==="
-    export V130_WASMOPT="$(BINARYEN_VERSION=130 "$SCRIPT_DIR/common/get-wasm-opt.sh" 2>/dev/null | tail -1)"
+    echo "=== Native wasm-EH: building the Binaryen submodule (version_130 + hoist pass) ==="
+    # One binaryen everywhere: the submodule fork is version_130 (asyncify unchanged) + our hoist
+    # pass, so the same binary does --hoist-cpp-catches AND --asyncify/-O2. No separate v130 clone.
     export HOIST_WASMOPT="$("$SCRIPT_DIR/binaryen-hoist-pass/build-wasm-opt.sh")"
-    echo "  v130:  $V130_WASMOPT"
-    echo "  hoist: $HOIST_WASMOPT"
+    export V130_WASMOPT="$HOIST_WASMOPT"
+    echo "  submodule wasm-opt: $HOIST_WASMOPT"
     echo "Stubbing in-link Asyncify (will run post-link instead)..."
     cp "$EMSDK_WASM_OPT" "${EMSDK_WASM_OPT}.ehbak"
     cp "$WASMOPT_STUB" "$EMSDK_WASM_OPT"; chmod +x "$EMSDK_WASM_OPT"

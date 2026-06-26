@@ -24,12 +24,11 @@ HARNESS_INC="${PROJECT_ROOT}/tests/apps/standalone/coroutine"
 EMSDK_WASM_OPT="${PROJECT_ROOT}/tools/emsdk/upstream/bin/wasm-opt"
 STUB="${PROJECT_ROOT}/wasm/stubs/wasm-opt-stub.sh"
 
-# Stock Binaryen v130 for the post-link asyncify.
-V130="$(BINARYEN_VERSION=130 "${SCRIPT_DIR}/common/get-wasm-opt.sh" 2>/dev/null | tail -1)"
-echo "Binaryen for post-link asyncify: ${V130} ($("${V130}" --version))"
-# Forked wasm-opt with --hoist-cpp-catches (built on demand unless overridden).
+# One binaryen everywhere: the submodule fork is version_130 (asyncify unchanged) + our hoist pass,
+# so the same binary does --hoist-cpp-catches AND the post-link --asyncify. No separate v130 download.
 HOIST_WASMOPT="${HOIST_WASMOPT:-$("${SCRIPT_DIR}/binaryen-hoist-pass/build-wasm-opt.sh")}"
-echo "Binaryen with hoist pass: ${HOIST_WASMOPT}"
+V130="$HOIST_WASMOPT"
+echo "Binaryen (submodule, hoist + asyncify): ${HOIST_WASMOPT} ($("${HOIST_WASMOPT}" --version))"
 
 COMPILE="-O2 -I${LIBCTX} -I${HARNESS_INC}"
 LINK="-O2 -sASYNCIFY=1 -sASYNCIFY_STACK_SIZE=65536 -sASSERTIONS=0 \

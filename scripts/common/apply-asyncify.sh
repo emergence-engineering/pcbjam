@@ -17,9 +17,8 @@
 # (more RAM), with a pinned Binaryen. The cost: emcc's automatic asyncify-imports generation is
 # bypassed, so the BOUNDARY import list lives in asyncify-imports.txt (see that file).
 #
-# Binaryen selection (env overrides win, set by build-wasm-test.sh):
-#   V130_WASMOPT   = wasm-opt for --asyncify + -O2 (else get-wasm-opt.sh = emsdk-matched).
-#   HOIST_WASMOPT  = wasm-opt fork carrying --hoist-cpp-catches (else built on demand).
+# Binaryen selection (env overrides win, set by build-wasm-test.sh): one binaryen everywhere — the
+# submodule fork (version_130 + our --hoist-cpp-catches). Override the path via HOIST_WASMOPT / V130_WASMOPT.
 
 set -eo pipefail
 
@@ -41,17 +40,30 @@ INPUT_WASM="${1:-output/pcbnew.wasm}"
 OUTPUT_WASM="${2:-${INPUT_WASM}}"
 [ -f "${INPUT_WASM}" ] || { echo "ERROR: Input file not found: ${INPUT_WASM}" >&2; exit 1; }
 
-# --- Binaryen tools (env overrides from build-wasm-test.sh win) ---
-WASM_OPT="${V130_WASMOPT:-$("${SCRIPT_DIR}/get-wasm-opt.sh")}"
-if [ "$DO_HOIST" = 1 ]; then
-    HOIST_OPT="${HOIST_WASMOPT:-$("${SCRIPT_DIR}/../binaryen-hoist-pass/build-wasm-opt.sh")}"
-fi
+# --- Binaryen tool: ONE binaryen everywhere (incl. docker/CI) — the submodule fork. It IS Binaryen
+# version_130 (its Asyncify.cpp is unmodified upstream) + our HoistCppCatches pass, so the SAME binary
+# does --hoist-cpp-catches AND --asyncify/-O2, for both native-EH and legacy JS-EH wasm. Built once via
+# build-wasm-opt.sh; no separate binaryen downloads (the emsdk-bundled v121 can't even asyncify wasm-EH).
+SUBMODULE_WASMOPT="${HOIST_WASMOPT:-$("${SCRIPT_DIR}/../binaryen-hoist-pass/build-wasm-opt.sh")}"
+WASM_OPT="${V130_WASMOPT:-$SUBMODULE_WASMOPT}"
+[ "$DO_HOIST" = 1 ] && HOIST_OPT="$SUBMODULE_WASMOPT"
 
 # native wasm-EH needs -all so binaryen parses the EH instructions; HOIST_KEEP_NAMES keeps the
 # names section through -O2 for callstack debugging. KiCad/JS-EH uses neither (matches old behavior).
 FEAT=()
 [ "$DO_HOIST" = 1 ] && FEAT=(-all)
 G="${HOIST_KEEP_NAMES:+-g}"
+
+# The asyncify removelist matches functions by NAME. wasm-opt strips the names section by default, so
+# the hoist pass (run before asyncify) would otherwise hand asyncify nameless functions — the
+# removelist then matches NOTHING and the giant try-dense functions it is meant to exclude
+# (BuildBitmapInfo: ~4986 native tries, etc.) get instrumented, which is the dominant driver of the
+# multi-GB asyncify RAM blowup on native-EH. So force the hoist pass to keep names whenever a
+# removelist is in play, so asyncify can see + exclude them. asyncify/-O2 keep their own G, so the
+# FINAL wasm is unchanged unless HOIST_KEEP_NAMES is set (asyncify matches on its INPUT names, which
+# the hoist output now carries).
+HOIST_G="${G}"
+[ "$USE_REMOVELIST" = 1 ] && HOIST_G="-g"
 
 # --- the import boundary (shared) + the KiCad remove-list (opt-out), read from sibling files ---
 _join_list() { grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$1" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr '\n' ',' | sed 's/,$//'; }
@@ -98,8 +110,8 @@ SRC="${INPUT_WASM}"
 
 # 1. (native wasm-EH only) hoist C++ catch arms so Asyncify can suspend from inside them.
 if [ "$DO_HOIST" = 1 ]; then
-    echo "Running --hoist-cpp-catches..."
-    "${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${HOIST_OPT}" --hoist-cpp-catches "${FEAT[@]}" ${G} "${SRC}" -o "${OUTPUT_WASM}"
+    echo "Running --hoist-cpp-catches${HOIST_G:+ (keeping names for removelist matching)}..."
+    "${PRELOAD_CMD[@]}" "${TIME_CMD[@]}" "${HOIST_OPT}" --hoist-cpp-catches "${FEAT[@]}" ${HOIST_G} "${SRC}" -o "${OUTPUT_WASM}"
     SRC="${OUTPUT_WASM}"
 fi
 

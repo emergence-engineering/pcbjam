@@ -1,6 +1,5 @@
 #!/bin/bash
-# Apply wasm-emscripten-finalize transformation on host
-# Uses the same Binaryen v121 as wasm-opt to ensure version consistency
+# Apply wasm-emscripten-finalize transformation on host.
 #
 # Usage: ./scripts/common/apply-finalize.sh <input.wasm> <output.wasm>
 
@@ -9,13 +8,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Get wasm-opt path (this downloads Binaryen if needed)
-WASM_OPT=$("${SCRIPT_DIR}/get-wasm-opt.sh")
-BINARYEN_BIN=$(dirname "${WASM_OPT}")
-FINALIZE="${BINARYEN_BIN}/wasm-emscripten-finalize"
-# Same stub hazard as wasm-opt (see get-wasm-opt.sh): a host-mode kicad build
-# leaves the emsdk finalize stubbed with the real binary at .real — prefer it,
-# the stub exits 0 having done nothing.
+# wasm-emscripten-finalize ships with emscripten (it was removed from Binaryen ~v116), so use the
+# emsdk's own — the one emscripten would run in-link — directly. No binaryen download. A host-mode
+# kicad/test build stubs the emsdk finalize and keeps the real binary at .real; prefer it (the stub
+# exits 0 having done nothing).
+EMSDK_DIR="${EMSDK:-${PROJECT_ROOT}/tools/emsdk}"
+FINALIZE="${EMSDK_DIR}/upstream/bin/wasm-emscripten-finalize"
 if [ -x "${FINALIZE}.real" ]; then
     FINALIZE="${FINALIZE}.real"
 fi
