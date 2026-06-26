@@ -36,6 +36,19 @@ export WX_BUILD="$BUILD_ROOT/wxwidgets"
 # Emscripten settings
 export EMSDK_QUIET=1
 
+# Exception model for the C/C++ dependencies. Must agree with wxWidgets + KiCad
+# (scripts/build-wx-wasm.sh and scripts/kicad/build-kicad-target.sh read the same WX_LEGACY_EH
+# switch): native wasm-EH compiles with wasm setjmp/longjmp, which means the deps that use
+# setjmp/longjmp (freetype, cairo, OpenCASCADE) must also be built -sSUPPORT_LONGJMP=wasm — emscripten
+# implements legacy JS longjmp via JS exceptions, which cannot coexist with -fwasm-exceptions, so a
+# JS-longjmp dep linked into a wasm-EH binary leaves emscripten_longjmp undefined. Empty under
+# WX_LEGACY_EH=1 (legacy JS exceptions, the old default).
+if [ "${WX_LEGACY_EH:-0}" = "1" ]; then
+    export DEPS_EH_FLAGS=""
+else
+    export DEPS_EH_FLAGS="-fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1"
+fi
+
 # Emscripten SDK setup
 # If EMSDK is already set (e.g. Docker entrypoint sourced emsdk_env.sh), use it.
 # Otherwise auto-install a local copy under tools/emsdk/.

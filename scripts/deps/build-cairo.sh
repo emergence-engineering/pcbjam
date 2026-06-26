@@ -53,6 +53,12 @@ fi
 
 log_info "Building Cairo ${CAIRO_VERSION} for WASM..."
 
+# Always start meson fresh on a (re)build: meson caches its configuration, so a `meson setup` on an
+# existing build dir IGNORES a regenerated cross-file.txt — which silently dropped the EH/longjmp
+# flags (DEPS_EH_FLAGS) when switching JS-EH -> native-EH and left libcairo.a referencing
+# emscripten_longjmp. Wiping here (we only reach this past the stamp check, i.e. on a real rebuild)
+# forces meson to re-read the cross-file. Cairo is small, so the full reconfigure is cheap.
+rm -rf "${CAIRO_BUILD}"
 mkdir -p "${CAIRO_BUILD}"
 cd "${CAIRO_BUILD}"
 
@@ -64,6 +70,11 @@ else
     MESON_BUILD_TYPE="release"
     MESON_DEBUG_FLAGS="'-O2'"
 fi
+
+# Exception-model flags (DEPS_EH_FLAGS from env.sh) as meson list elements, e.g.
+# ", '-fwasm-exceptions', '-sSUPPORT_LONGJMP=wasm', '-sWASM_LEGACY_EXCEPTIONS=1'". Empty for legacy.
+MESON_EH_FLAGS=""
+for _ehf in ${DEPS_EH_FLAGS}; do MESON_EH_FLAGS="${MESON_EH_FLAGS}, '${_ehf}'"; done
 
 # Cairo uses meson
 cat > cross-file.txt << EOF
@@ -94,8 +105,8 @@ b_pie = false
 # to prevent Cairo from defining its own conflicting implementations
 # Include ft2build.h and ftcolor.h to fix FT_Color forward declaration bug in cairo-ft-private.h
 # (the forward declaration is inside HAVE_FT_SVG_DOCUMENT but used in HAVE_FT_COLR_V1)
-c_args = [${MESON_DEBUG_FLAGS}, '-pthread', '-matomics', '-mbulk-memory', '-I${SYSROOT}/include', '-I${SYSROOT}/include/freetype2', '-I${SYSROOT}/include/pixman-1', '-DHAVE_CTIME_R=1', '-DHAVE_LOCALTIME_R=1', '-DHAVE_GMTIME_R=1', '-DHAVE_STRNDUP=1', '-include', 'ft2build.h', '-include', 'freetype/ftcolor.h']
-c_link_args = ['-pthread', '-L${SYSROOT}/lib']
+c_args = [${MESON_DEBUG_FLAGS}${MESON_EH_FLAGS}, '-pthread', '-matomics', '-mbulk-memory', '-I${SYSROOT}/include', '-I${SYSROOT}/include/freetype2', '-I${SYSROOT}/include/pixman-1', '-DHAVE_CTIME_R=1', '-DHAVE_LOCALTIME_R=1', '-DHAVE_GMTIME_R=1', '-DHAVE_STRNDUP=1', '-include', 'ft2build.h', '-include', 'freetype/ftcolor.h']
+c_link_args = ['-pthread'${MESON_EH_FLAGS}, '-L${SYSROOT}/lib']
 pkg_config_path = '${SYSROOT}/lib/pkgconfig'
 EOF
 

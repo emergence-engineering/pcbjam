@@ -231,26 +231,37 @@ log_info "Building wxWidgets..."
 log_info "Building KiCad ${APP_NAME} ${KICAD_VERSION} for WASM..."
 
 # Step 5: Set build type
+# Exception model. KiCad and wxWidgets must agree (mixing -fexceptions and -fwasm-exceptions
+# objects link-fails / traps), so this reads the SAME WX_LEGACY_EH switch as build-wx-wasm.sh:
+#   default        native WebAssembly exceptions (legacy encoding) + wasm setjmp/longjmp.
+#   WX_LEGACY_EH=1 legacy Emscripten JS exceptions (-fexceptions).
+# Either way wxWidgets is built with exceptions enabled, so the app must carry the matching flag.
+# -matomics -mbulk-memory are required for shared memory (pthreads).
+if [ "${WX_LEGACY_EH:-0}" = "1" ]; then
+    KICAD_EH_FLAGS="-fexceptions"
+else
+    KICAD_EH_FLAGS="-fwasm-exceptions -sSUPPORT_LONGJMP=wasm -sWASM_LEGACY_EXCEPTIONS=1"
+fi
+log_info "KiCad EH model flags: ${KICAD_EH_FLAGS}"
+
 # Use environment DEBUG_BUILD if set, otherwise check local --debug flag
-# -fexceptions is required because wxWidgets is built with exceptions enabled
-# -matomics -mbulk-memory are required for shared memory (pthreads)
 # NOTE: We use -O1 for debug builds because -O0 produces WASM with too many
 # locals for V8/Chrome to compile (error: "local count too large").
 # -O1 keeps debug info but optimizes enough to stay under V8's limits.
 if [ "${DEBUG_BUILD:-0}" = "1" ] || [ $DEBUG -eq 1 ]; then
     BUILD_TYPE="Debug"
-    EXTRA_FLAGS="-g -O1 -fexceptions -matomics -mbulk-memory"
+    EXTRA_FLAGS="-g -O1 ${KICAD_EH_FLAGS} -matomics -mbulk-memory"
     # -gseparate-dwarf puts debug info in a separate .debug.wasm file
     # This keeps the main WASM small (~200MB) while preserving full debug info
     # DevTools loads the debug file on-demand when debugging
-    LINKER_DEBUG_FLAGS="-O1 -g -gseparate-dwarf -fexceptions"
+    LINKER_DEBUG_FLAGS="-O1 -g -gseparate-dwarf ${KICAD_EH_FLAGS}"
     log_info "Building KiCad in DEBUG mode (separate DWARF for smaller main binary)"
 else
     BUILD_TYPE="Release"
-    EXTRA_FLAGS="-O2 -fexceptions -matomics -mbulk-memory"
+    EXTRA_FLAGS="-O2 ${KICAD_EH_FLAGS} -matomics -mbulk-memory"
     # -O0 at link time skips wasm-opt (which can OOM on large WASM files)
     # Compilation is still -O2 for optimized code, but we skip post-link wasm-opt
-    LINKER_DEBUG_FLAGS="-O0 -fexceptions"
+    LINKER_DEBUG_FLAGS="-O0 ${KICAD_EH_FLAGS}"
     log_info "Building KiCad in RELEASE mode (skipping wasm-opt due to memory limits)"
 fi
 

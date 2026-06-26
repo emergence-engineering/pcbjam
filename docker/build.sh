@@ -22,7 +22,7 @@
 #
 # The build is split into two phases:
 # 1. Docker: Compile KiCad to WASM (without asyncify)
-# 2. Host: dyncall shims + finalize + asyncify + -O2 (Binaryen via get-wasm-opt.sh)
+# 2. Host: dyncall shims + finalize + asyncify + -O2 (Binaryen submodule via build-wasm-opt.sh)
 #
 # KICAD_PIPELINE=1 (multi-app builds only): run phase 2 of each app in the
 # background while the next app compiles in the container. wasm-opt is
@@ -237,9 +237,14 @@ postprocess_app() {
 
     # Apply asyncify transformation on host. The converter is a synchronous node
     # CLI built with ASYNCIFY=0, so asyncify is unnecessary and would be wrong.
+    # Native wasm-EH (the default; WX_LEGACY_EH=1 opts into legacy) additionally needs the
+    # --hoist-cpp-catches pass FIRST so Asyncify can suspend from inside C++ catch arms.
+    # The KiCad removelist is kept either way (large functions blow V8's per-function locals limit).
     if [ "$app" != "sym_convert" ]; then
         kw_stage asyncify
-        ./scripts/common/apply-asyncify.sh "${out_dir}/${app}.wasm" "${out_dir}/${app}.wasm"
+        ASYNCIFY_HOIST=()
+        [ "${WX_LEGACY_EH:-0}" != "1" ] && ASYNCIFY_HOIST=(--hoist)
+        ./scripts/common/apply-asyncify.sh "${ASYNCIFY_HOIST[@]}" "${out_dir}/${app}.wasm" "${out_dir}/${app}.wasm"
     fi
 }
 
@@ -303,9 +308,9 @@ pipeline_wait_all() {
 TOTAL_APPS="${#APPS[@]}"
 if [[ "${KICAD_PIPELINE:-0}" == "1" ]] && [ "$TOTAL_APPS" -gt 1 ]; then
     mkdir -p "$PIPELINE_LOG_DIR"
-    # Pre-warm the Binaryen download once — two concurrent postprocesses racing
-    # the first download would collide on the extract/mv.
-    ./scripts/common/get-wasm-opt.sh >/dev/null
+    # Pre-build the Binaryen submodule once — two concurrent postprocesses racing
+    # the first from-source build would collide.
+    ./scripts/binaryen-hoist-pass/build-wasm-opt.sh >/dev/null
     # If a compile fails, set -e aborts the script — don't leave orphaned
     # wasm-opt jobs chewing 30 GB in the background. Keep the monitor's
     # done/fail marker from the original EXIT trap (killing finished pids is a
