@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/link-wasm.mjs && vite",
+    "dev:demo": "node ../../scripts/deploy/dev-demo.mjs",
     "link-wasm": "node scripts/link-wasm.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
