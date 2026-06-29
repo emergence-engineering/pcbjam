@@ -286,6 +286,15 @@ STUBS_DIR="${PROJECT_ROOT}/wasm/stubs"
 STUBS_BUILD="${BUILD_ROOT}/stubs"
 mkdir -p "${STUBS_BUILD}"
 
+# ABI-affecting flags shared by EVERY C++ TU compiled OUTSIDE CMake (the embind + the app stubs below).
+# The core CMake TUs get all of these (DEBUG via Config=Debug -> kicad/CMakeLists.txt:351;
+# KICAD_USE_PLATFORM_WASM; the char16_t char_traits force-include). A TU that misses any of them can
+# diverge in vtable layout / ABI from the core — task #54: the embind missing -DDEBUG shifted its vtable
+# slot offsets by one and hung the collab apply (call_indirect signature-mismatch). Keep them in ONE
+# place so no out-of-CMake C++ TU can skew again. (EMBIND_CONFIG_DEFINES holds the build-config -DDEBUG,
+# set in the BUILD_TYPE block above; empty in Release where neither side defines DEBUG.)
+KICAD_TU_ABI_FLAGS="${EMBIND_CONFIG_DEFINES} -DKICAD_USE_PLATFORM_WASM=1 -include ${STUBS_DIR}/char_traits_uint16_workaround.h"
+
 kw_stage kicad-stubs
 log_info "Building stub libraries..."
 # Compile libgit2 stub
@@ -332,7 +341,7 @@ APP_STUB_LINK=""
 APP_SCRIPTING_STUB_SRC="${STUBS_DIR}/${STUB_APP}_scripting_stub.cpp"
 if [ -f "${APP_SCRIPTING_STUB_SRC}" ]; then
     log_info "Building app scripting stub: ${STUB_APP}_scripting_stub.cpp"
-    em++ -c ${WX_CXXFLAGS} "${APP_SCRIPTING_STUB_SRC}" -o "${STUBS_BUILD}/${STUB_APP}_scripting_stub.o"
+    em++ -c ${KICAD_TU_ABI_FLAGS} ${WX_CXXFLAGS} "${APP_SCRIPTING_STUB_SRC}" -o "${STUBS_BUILD}/${STUB_APP}_scripting_stub.o"
     emar rcs "${STUBS_BUILD}/lib${STUB_APP}_scripting_stub.a" "${STUBS_BUILD}/${STUB_APP}_scripting_stub.o"
     APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${STUB_APP}_scripting_stub.a"
 fi
@@ -340,7 +349,7 @@ fi
 APP_FRAME_STUB_SRC="${STUBS_DIR}/${STUB_APP}_frame_stub.cpp"
 if [ -f "${APP_FRAME_STUB_SRC}" ] && [ -s "${APP_FRAME_STUB_SRC}" ]; then
     log_info "Building app frame stub: ${STUB_APP}_frame_stub.cpp"
-    em++ -c ${WX_CXXFLAGS} "${APP_FRAME_STUB_SRC}" -o "${STUBS_BUILD}/${STUB_APP}_frame_stub.o"
+    em++ -c ${KICAD_TU_ABI_FLAGS} ${WX_CXXFLAGS} "${APP_FRAME_STUB_SRC}" -o "${STUBS_BUILD}/${STUB_APP}_frame_stub.o"
     emar rcs "${STUBS_BUILD}/lib${STUB_APP}_frame_stub.a" "${STUBS_BUILD}/${STUB_APP}_frame_stub.o"
     APP_STUB_LINK="${APP_STUB_LINK} ${STUBS_BUILD}/lib${STUB_APP}_frame_stub.a"
 fi
@@ -529,7 +538,7 @@ if [ -f "${EMBIND_SRC}" ]; then
     KICAD_INCLUDES+=" -I${KICAD_DIR}/thirdparty/libcontext"
     KICAD_INCLUDES+=" -I${SYSROOT}/include"
     # KiCad requires C++20 for concepts
-    em++ -std=c++20 -c ${EXTRA_FLAGS} ${EMBIND_CONFIG_DEFINES} ${WX_CXXFLAGS} ${KICAD_INCLUDES} "${EMBIND_SRC}" -o "${EMBIND_OBJ}"
+    em++ -std=c++20 -c ${EXTRA_FLAGS} ${KICAD_TU_ABI_FLAGS} ${WX_CXXFLAGS} ${KICAD_INCLUDES} "${EMBIND_SRC}" -o "${EMBIND_OBJ}"
 else
     log_info "No embind source for ${APP_NAME} (expected at ${EMBIND_SRC}); using empty placeholder"
     EMPTY_C="${STUBS_BUILD}/${APP_NAME}_embind_empty.c"
