@@ -1,6 +1,6 @@
 import type { DriftReportBody, Project } from "@pcbjam/shared";
 import { useQuery } from "@tanstack/react-query";
-import { API_BASE_URL, libsSourceConfig } from "./config";
+import { API_BASE_URL, currentScope, libsSourceConfig } from "./config";
 import { client } from "./contract-client";
 import type { LibInfo } from "@/wasm/libs/source";
 import { downloadBytes } from "./download";
@@ -119,7 +119,10 @@ export async function reportDrift(
   slug: string,
   body: DriftReportBody,
 ): Promise<void> {
-  await client.reportDrift({ params: { project: slug }, body });
+  await client.reportDrift({
+    params: { scope: currentScope(), project: slug },
+    body,
+  });
 }
 
 /**
@@ -128,7 +131,7 @@ export async function reportDrift(
  * a keepalive `fetch` is the fallback when the beacon is rejected (too large).
  */
 export function reportDriftBeacon(slug: string, body: DriftReportBody): void {
-  const url = `${API_BASE_URL}/api/projects/${encodeURIComponent(slug)}/drift`;
+  const url = `${API_BASE_URL}/api/scopes/${encodeURIComponent(currentScope())}/projects/${encodeURIComponent(slug)}/drift`;
   const blob = new Blob([JSON.stringify(body)], { type: "application/json" });
   try {
     if (navigator.sendBeacon(url, blob)) return;

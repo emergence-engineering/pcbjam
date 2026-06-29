@@ -28,6 +28,9 @@ async function loadStatic() {
     // Local IDB store off ⇒ the active source is the plain static gallery
     // (no composite), which is what these read-only assertions cover.
     LOCAL_PROJECTS_ENABLED: false,
+    // The contract client (imported transitively) reads these at module load.
+    userSlug: () => "test-user",
+    currentScope: () => "demo",
   }));
   return (await import("./project-source")).projectSource;
 }

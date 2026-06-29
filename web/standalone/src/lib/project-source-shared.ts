@@ -4,11 +4,11 @@
  * both can import the descriptor types + the deterministic-uuid helper without a
  * runtime import cycle.
  *
- * A source has one of three KINDS, surfaced verbatim in the UI so the user always
- * knows where their edits go:
- *   - "remote-rw" — a backend the editor reads AND writes (saves upload).
- *   - "remote-ro" — a read-only remote (the demo's CDN gallery); saves download.
- *   - "local"     — this browser's IndexedDB; saves persist locally, export by zip.
+ * A source has one of three KINDS, surfaced in the UI so the user always knows
+ * where their edits go:
+ *   - "remote-rw" — a backend the editor reads AND writes (Cloud; saves upload).
+ *   - "remote-ro" — the curated CDN gallery (Demo); editing auto-forks a local copy.
+ *   - "local"     — this browser's IndexedDB (Local); saves persist, export by zip.
  */
 export type SourceKind = "remote-rw" | "remote-ro" | "local";
 
@@ -26,22 +26,24 @@ export const SOURCE_DESCRIPTORS: Record<SourceKind, SourceDescriptor> = {
   "remote-rw": {
     kind: "remote-rw",
     writable: true,
-    label: "Remote · editable",
+    label: "Cloud",
     description: "Stored on the backend — your saves are uploaded there.",
   },
   "remote-ro": {
     kind: "remote-ro",
+    // Not directly writable, but editing transparently forks a local copy, so
+    // the UI never shows a scary "read-only" — it's just a Demo you can edit.
     writable: false,
-    label: "Remote · read-only",
+    label: "Demo",
     description:
-      "A read-only example from the server — edits aren't saved back; Save downloads the file to your machine.",
+      "A demo project — open it and your edits become a local copy you can save and export.",
   },
   local: {
     kind: "local",
     writable: true,
-    label: "Local (this browser)",
+    label: "Local",
     description:
-      "Stored in this browser only — saves persist here across visits. Export with Download .zip (nothing is uploaded).",
+      "Stored in this browser — saves persist here across visits. Export with Download .zip.",
   },
 };
 

@@ -1,7 +1,13 @@
 import * as React from "react";
-import { TOOL_LABELS, type Tool } from "@pcbjam/shared";
+import {
+  LOCAL_SCOPE,
+  TOOL_LABELS,
+  type Tool,
+  projectPath,
+} from "@pcbjam/shared";
 import { Loader2 } from "lucide-react";
 import { uploadFileBytes } from "@/lib/api";
+import { currentScope } from "@/lib/config";
 import { localProjectStore } from "@/lib/project-source";
 import { useLocalProjects } from "@/lib/api";
 import {
@@ -92,9 +98,10 @@ export function NewFileDialog({
         await uploadFileBytes(slug, finalName, bytes);
       }
       // Full navigation so Emscripten boots into a clean page opening the file.
-      window.location.assign(
-        `/p/${encodeURIComponent(slug)}/${tool}/${finalName}`,
-      );
+      // A home-created project is browser-local (@local scope); an in-project new
+      // file keeps the current scope. The tool is inferred from the file's ext.
+      const scope = homeMode ? LOCAL_SCOPE : currentScope();
+      window.location.assign(projectPath(scope, slug, finalName));
     } catch (e) {
       setBusy(false);
       setError(e instanceof Error ? e.message : String(e));

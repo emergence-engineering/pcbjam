@@ -1,5 +1,5 @@
-import { useParams } from "react-router-dom";
-import { toolSchema } from "@pcbjam/shared";
+import { useParams, useSearchParams } from "react-router-dom";
+import { parseToolParam, toolForFile, type Tool } from "@pcbjam/shared";
 import {
   fetchFileBytes,
   uploadFileBytes,
@@ -12,17 +12,24 @@ import { PreflightGate } from "@/preflight/PreflightGate";
 
 export function ToolPage() {
   const params = useParams();
-  const slug = params.project ?? "";
-  const targetPath = params["*"] || undefined;
+  const [search] = useSearchParams();
+  const slug = params.name ?? "";
+  // Two shapes render here: a fileless tool boot (`…/-/:tool`) sets params.tool;
+  // a file route (`…/*`) sets the splat — the tool is inferred from its extension
+  // unless `?tool=` overrides it.
+  const splat = params["*"] || undefined;
+  const tool: Tool | null = params.tool
+    ? parseToolParam(params.tool)
+    : (parseToolParam(search.get("tool")) ?? (splat ? toolForFile(splat) : null));
+  const targetPath = params.tool ? undefined : splat;
 
-  const parsedTool = toolSchema.safeParse(params.tool);
   const { data, isLoading, error } = useProject(slug);
   const { data: sourceDescriptor } = useSourceDescriptor(slug);
 
-  if (!parsedTool.success) {
+  if (!tool) {
     return (
       <div className="container py-10 text-destructive">
-        Unknown tool: {params.tool}
+        Unknown tool: {params.tool ?? splat}
       </div>
     );
   }
@@ -54,7 +61,7 @@ export function ToolPage() {
   return (
     <PreflightGate>
       <WasmTool
-        tool={parsedTool.data}
+        tool={tool}
         slug={slug}
         projectId={data.project.id}
         files={data.files}

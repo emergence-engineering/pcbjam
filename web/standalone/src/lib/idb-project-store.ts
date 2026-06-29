@@ -1,4 +1,9 @@
-import type { Project, ProjectFile, ProjectWithFiles } from "@pcbjam/shared";
+import {
+  LOCAL_SCOPE,
+  type Project,
+  type ProjectFile,
+  type ProjectWithFiles,
+} from "@pcbjam/shared";
 import type { ProjectSource } from "./project-source";
 import {
   SOURCE_DESCRIPTORS,
@@ -114,6 +119,7 @@ function slugify(name: string): string {
 function toProject(r: ProjectRecord): Project {
   return {
     id: deterministicUuid(`local:project:${r.slug}`),
+    scope: LOCAL_SCOPE,
     slug: r.slug,
     name: r.name,
     createdAt: r.createdAt,

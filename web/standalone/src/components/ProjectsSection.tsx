@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Project } from "@pcbjam/shared";
+import { type Project, projectPath } from "@pcbjam/shared";
 import { Download, Loader2, Pencil, Trash2 } from "lucide-react";
 import { useLocalProjects, useProjects } from "@/lib/api";
 import { PROJECT_SOURCE_KIND } from "@/lib/config";
@@ -149,7 +149,7 @@ function ProjectRow({
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button asChild variant="secondary" size="sm">
-          <Link to={`/p/${project.slug}`}>Open</Link>
+          <Link to={projectPath(project.scope, project.slug)}>Open</Link>
         </Button>
         {children}
       </div>

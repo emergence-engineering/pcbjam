@@ -5,6 +5,8 @@ import {
   EXTENSION_TOOL,
   FILELESS_TOOLS,
   fileToDoc,
+  projectPath,
+  projectToolPath,
   toolSchema,
   ydocHasState,
   yToDoc,
@@ -13,6 +15,7 @@ import {
 } from "@pcbjam/shared";
 import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import {
+  currentScope,
   libsSourceConfig,
   yjsProviderConfig,
   type DocSource,
@@ -160,10 +163,6 @@ function chooseToolFile(
   return candidates[0]?.path;
 }
 
-function encodeRelPath(path: string): string {
-  return path.split("/").map(encodeURIComponent).join("/");
-}
-
 function installToolNavigationHook(
   win: ToolWindow,
   opts: {
@@ -191,10 +190,13 @@ function installToolNavigationHook(
       return false;
     }
 
+    // Scope/kind/name grammar: a fileless tool boots at `…/-/:tool`; a file route
+    // carries the path (its tool is inferred). Scope = the current URL's scope.
+    const scope = currentScope();
     const url =
-      `/p/${encodeURIComponent(opts.slug)}/${nextTool}` +
-      (nextPath ? `/${encodeRelPath(nextPath)}` : "") +
-      win.location.search;
+      (FILELESS_TOOLS.has(nextTool)
+        ? projectToolPath(scope, opts.slug, nextTool)
+        : projectPath(scope, opts.slug, nextPath)) + win.location.search;
 
     opts.log(`[nav] ${rawToolName} ${rawFileName || "(no file)"} -> ${url}`);
     win.location.assign(url);

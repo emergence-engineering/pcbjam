@@ -1,4 +1,9 @@
-import { contract, OWNER_HEADER, PROJECT_HEADER } from "@pcbjam/shared";
+import {
+  contract,
+  PROJECT_HEADER,
+  SCOPE_HEADER,
+  USER_HEADER,
+} from "@pcbjam/shared";
 import { initClient } from "@ts-rest/core";
 import type { LibInfo, LibItemInfo, LibsSource } from "./source";
 
@@ -6,32 +11,34 @@ import type { LibInfo, LibItemInfo, LibsSource } from "./source";
  * A `LibsSource` backed by a contract-conforming backend (the closed registry
  * server, or the GPL example backend). Read list ops go through the ts-rest
  * client; item bodies stream from the raw text route
- * `GET /api/libs/:lib/items/:kind/:name`, and writes hit the symmetric
- * `PUT` route (binary/text doesn't round-trip ts-rest). Every request carries
- * the `owner` (thin per-user) and the `project` (project-scoped server-side
- * resolution) via `OWNER_HEADER`/`PROJECT_HEADER`; absent ⇒ backend default.
+ * `GET /api/scopes/:scope/libs/:lib/items/:kind/:name`, and writes hit the
+ * symmetric `PUT` route. The `scope` is a path param; `user` (thin per-user) and
+ * `project` (project-scoped resolution) ride USER_HEADER/PROJECT_HEADER.
  */
 export function remoteLibsSource(
   apiBase: string,
-  owner?: string,
+  scope: string,
+  user?: string,
   project?: string,
 ): LibsSource {
   const reqHeaders: Record<string, string> = {
-    ...(owner ? { [OWNER_HEADER]: owner } : {}),
+    [SCOPE_HEADER]: scope,
+    ...(user ? { [USER_HEADER]: user } : {}),
     ...(project ? { [PROJECT_HEADER]: project } : {}),
   };
   const client = initClient(contract, {
     baseUrl: apiBase,
     baseHeaders: reqHeaders,
   });
+  const enc = encodeURIComponent;
 
   const itemUrl = (libId: string, kind: string, name: string) =>
-    `${apiBase}/api/libs/${encodeURIComponent(libId)}/items/` +
-    `${encodeURIComponent(kind)}/${encodeURIComponent(name)}`;
+    `${apiBase}/api/scopes/${enc(scope)}/libs/${enc(libId)}/items/` +
+    `${enc(kind)}/${enc(name)}`;
 
   return {
     async listLibs(kind?: string): Promise<LibInfo[]> {
-      const res = await client.listLibs({ query: { kind } });
+      const res = await client.listLibs({ params: { scope }, query: { kind } });
       if (res.status !== 200) return [];
       return res.body.map((l) => ({
         id: l.id,
@@ -43,7 +50,7 @@ export function remoteLibsSource(
     },
 
     async listItems(libId: string): Promise<LibItemInfo[]> {
-      const res = await client.listLibItems({ params: { lib: libId } });
+      const res = await client.listLibItems({ params: { scope, lib: libId } });
       if (res.status !== 200) return [];
       return res.body.map((i) => ({ kind: i.kind, name: i.name }));
     },
@@ -75,7 +82,7 @@ export function remoteLibsSource(
     },
 
     async createLib(name: string): Promise<LibInfo | null> {
-      const res = await client.createLib({ body: { name } });
+      const res = await client.createLib({ params: { scope }, body: { name } });
       if (res.status !== 201) return null;
       return {
         id: res.body.id,

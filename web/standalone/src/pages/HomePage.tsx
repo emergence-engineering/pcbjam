@@ -1,10 +1,14 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Tool } from "@pcbjam/shared";
+import { type Tool, libPath, projectPath } from "@pcbjam/shared";
 import { FolderOpen, Library, Loader2, Package } from "lucide-react";
 import { useLibs } from "@/lib/api";
-import { LOCAL_PROJECTS_ENABLED, PROJECT_SOURCE_KIND } from "@/lib/config";
+import {
+  LOCAL_PROJECTS_ENABLED,
+  PROJECT_SOURCE_KIND,
+  currentScope,
+} from "@/lib/config";
 import { localFileLibsSource } from "@/wasm/libs/local-file-source";
 import type { LibsSource } from "@/wasm/libs/source";
 import { downloadBytes } from "@/lib/download";
@@ -151,7 +155,7 @@ export function HomePage() {
     if (!store) return;
     const project = await store.createProject(imported.name, imported.files);
     await queryClient.invalidateQueries({ queryKey: ["local-projects"] });
-    navigate(`/p/${project.slug}`);
+    navigate(projectPath(project.scope, project.slug));
   };
 
   // Tool launched from the home page: no project, no files. File-less editors
@@ -388,7 +392,7 @@ function LibGroup({
             {shown.map((lib) => (
               <a
                 key={lib.id}
-                href={`/l/${encodeURIComponent(lib.id)}/${tool}`}
+                href={`${libPath(currentScope(), lib.id)}?tool=${tool}`}
                 title={lib.description ?? undefined}
                 className="inline-flex h-fit items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm hover:bg-accent"
               >

@@ -1,9 +1,15 @@
-import type { Project, ProjectFile, ProjectWithFiles } from "@pcbjam/shared";
+import {
+  DEMO_SCOPE,
+  type Project,
+  type ProjectFile,
+  type ProjectWithFiles,
+} from "@pcbjam/shared";
 import {
   API_BASE_URL,
   LOCAL_PROJECTS_ENABLED,
   PROJECT_MANIFEST_URL,
   PROJECT_SOURCE_KIND,
+  currentScope,
 } from "./config";
 import { client } from "./contract-client";
 import { idbProjectStore, type LocalProjectStore } from "./idb-project-store";
@@ -51,18 +57,24 @@ function encodePath(relPath: string): string {
 }
 
 function remoteProjectSource(): ProjectSource {
+  // The active scope is the URL's first segment (config.currentScope), read at
+  // call time so a single source instance serves whatever scope is open.
+  const projectsBase = () =>
+    `${API_BASE_URL}/api/scopes/${encodeURIComponent(currentScope())}/projects`;
   const fileUrl = (slug: string, relPath: string) =>
-    `${API_BASE_URL}/api/projects/${encodeURIComponent(slug)}/files/${encodePath(relPath)}`;
+    `${projectsBase()}/${encodeURIComponent(slug)}/files/${encodePath(relPath)}`;
   return {
     descriptor: SOURCE_DESCRIPTORS["remote-rw"],
     readOnly: false,
     async listProjects() {
-      const res = await client.listProjects();
+      const res = await client.listProjects({ params: { scope: currentScope() } });
       if (res.status !== 200) throw new Error("failed to list projects");
       return res.body;
     },
     async getProject(slug) {
-      const res = await client.getProject({ params: { project: slug } });
+      const res = await client.getProject({
+        params: { scope: currentScope(), project: slug },
+      });
       if (res.status === 404) throw new Error("project not found");
       if (res.status !== 200) throw new Error("failed to load project");
       return res.body;
@@ -78,10 +90,10 @@ function remoteProjectSource(): ProjectSource {
       // The form FIELD NAME carries the project-relative path (upsert by
       // (project, path)) — same convention as the management app's folder upload.
       form.append(relPath, new File([bytes as BlobPart], name));
-      const res = await fetch(
-        `${API_BASE_URL}/api/projects/${encodeURIComponent(slug)}/files`,
-        { method: "POST", body: form },
-      );
+      const res = await fetch(`${projectsBase()}/${encodeURIComponent(slug)}/files`, {
+        method: "POST",
+        body: form,
+      });
       if (!res.ok) throw new Error(`upload failed (${res.status}): ${relPath}`);
     },
   };
@@ -125,6 +137,8 @@ function staticProjectSource(manifestUrl: string): ProjectSource {
 
   const toProject = (p: StaticManifestProject, ts: string): Project => ({
     id: deterministicUuid(`project:${p.slug}`),
+    // The curated gallery lives under the reserved `demo` scope.
+    scope: DEMO_SCOPE,
     slug: p.slug,
     name: p.name,
     createdAt: ts,

@@ -10,9 +10,12 @@ export default function App() {
     <>
       <Routes>
         <Route path="/" element={<HomePage />} />
-        <Route path="/p/:project" element={<ProjectView />} />
-        <Route path="/p/:project/:tool/*" element={<ToolPage />} />
-        <Route path="/l/:lib/:tool" element={<LibToolPage />} />
+        {/* scope/kind/name grammar (see @pcbjam/shared routes.ts). The tool is
+            inferred from the file (or lib kind); `-/:tool` boots a fileless tool. */}
+        <Route path="/:scope/projects/:name" element={<ProjectView />} />
+        <Route path="/:scope/projects/:name/-/:tool" element={<ToolPage />} />
+        <Route path="/:scope/projects/:name/*" element={<ToolPage />} />
+        <Route path="/:scope/libs/:name" element={<LibToolPage />} />
       </Routes>
       {/* Version + source link, bottom-right on every route (home + editor). */}
       <VersionBadge />

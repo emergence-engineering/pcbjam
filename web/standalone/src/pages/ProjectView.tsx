@@ -6,6 +6,8 @@ import {
   FILELESS_TOOLS,
   TOOL_LABELS,
   type Tool,
+  projectPath,
+  projectToolPath,
 } from "@pcbjam/shared";
 import {
   ArrowLeft,
@@ -38,7 +40,7 @@ function toolForPath(path: string): Tool | null {
  * shadows the gallery and this view re-resolves as a local, editable project.
  */
 export function ProjectView() {
-  const { project: slug = "" } = useParams();
+  const { scope = "", name: slug = "" } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data, isLoading, error } = useProject(slug);
@@ -106,7 +108,7 @@ export function ProjectView() {
   // scoped with a full reload; document tools create a templated file first.
   const launchTool = (tool: Tool) => {
     if (FILELESS_TOOLS.has(tool)) {
-      window.location.assign(`/p/${encodeURIComponent(slug)}/${tool}/`);
+      window.location.assign(projectToolPath(scope, slug, tool));
     } else {
       setNewFileTool(tool);
     }
@@ -128,7 +130,7 @@ export function ProjectView() {
         {tool && (
           <a
             className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
-            href={`/p/${slug}/${tool}/${path}`}
+            href={projectPath(scope, slug, path)}
           >
             <ExternalLink size={14} /> Open in {TOOL_LABELS[tool]}
           </a>
@@ -161,7 +163,9 @@ export function ProjectView() {
               {data.project.name}
               {descriptor && <SourceChip descriptor={descriptor} />}
             </h1>
-            <p className="text-sm text-muted-foreground">/p/{data.project.slug}</p>
+            <p className="text-sm text-muted-foreground">
+              {data.project.scope}/projects/{data.project.slug}
+            </p>
           </div>
 
           {movingToLocal ? (

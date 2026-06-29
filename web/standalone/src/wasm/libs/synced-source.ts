@@ -1,4 +1,4 @@
-import { OWNER_HEADER, PROJECT_HEADER } from "@pcbjam/shared";
+import { PROJECT_HEADER, SCOPE_HEADER, USER_HEADER } from "@pcbjam/shared";
 import { SyncStack, type LayerDescriptor } from "@pcbjam/sync-client";
 import type { LibInfo, LibItemInfo, LibsSource } from "./source";
 
@@ -18,7 +18,8 @@ export function syncedLibsSource(
   libId: string,
   opts: {
     apiBase: string;
-    owner?: string;
+    scope: string;
+    user?: string;
     project?: string;
     log?: (msg: string) => void;
   },
@@ -85,15 +86,16 @@ export function syncedLibsSource(
 
 async function resolveAndOpen(
   libId: string,
-  opts: { apiBase: string; owner?: string; project?: string },
+  opts: { apiBase: string; scope: string; user?: string; project?: string },
   log: (msg: string) => void,
 ): Promise<{ stack: SyncStack; info: LibInfo }> {
   const headers: Record<string, string> = {
-    ...(opts.owner ? { [OWNER_HEADER]: opts.owner } : {}),
+    [SCOPE_HEADER]: opts.scope,
+    ...(opts.user ? { [USER_HEADER]: opts.user } : {}),
     ...(opts.project ? { [PROJECT_HEADER]: opts.project } : {}),
   };
   const res = await fetch(
-    `${opts.apiBase}/api/libs/${encodeURIComponent(libId)}/sync-stack`,
+    `${opts.apiBase}/api/scopes/${encodeURIComponent(opts.scope)}/libs/${encodeURIComponent(libId)}/sync-stack`,
     { method: "POST", headers },
   );
   if (!res.ok) throw new Error(`sync-stack resolve failed: HTTP ${res.status}`);

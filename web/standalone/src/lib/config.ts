@@ -151,16 +151,38 @@ export function docSourceConfig(): DocSource {
  *   "off"              — disable libs (empty sym-lib-table).
  */
 /**
- * The (thin, pre-auth) owner the editor writes libs as, sent on every lib
- * request via OWNER_HEADER. `?libowner=` (e2e isolation) wins over
- * `VITE_LIBS_OWNER`, else a stable local default.
+ * The (thin, pre-auth) current user — sent on every request via USER_HEADER and
+ * doubling as the personal scope slug. `?user=`/`?libowner=` (e2e isolation) win
+ * over `VITE_USER`/`VITE_LIBS_OWNER`, else a stable local default.
  */
-export function libsOwner(): string {
+export function userSlug(): string {
   if (typeof window !== "undefined") {
-    const p = new URLSearchParams(window.location.search).get("libowner");
+    const q = new URLSearchParams(window.location.search);
+    const p = q.get("user") ?? q.get("libowner");
     if (p) return p;
   }
-  return import.meta.env.VITE_LIBS_OWNER ?? "local-user";
+  return (
+    import.meta.env.VITE_USER ?? import.meta.env.VITE_LIBS_OWNER ?? "local-user"
+  );
+}
+
+/**
+ * The active scope (first URL segment) for API calls. Mirrors how `userSlug()`
+ * reads the URL, so the source layer scopes requests without threading scope
+ * through every signature. Falls back to `?scope=` / `VITE_SCOPE` / the personal
+ * scope (the user slug). Client-only scopes (e.g. `@local`) are routed by the
+ * project source and never sent to a backend.
+ */
+export function currentScope(): string {
+  if (typeof window !== "undefined") {
+    const seg = window.location.pathname.split("/").filter(Boolean)[0];
+    if (seg && seg !== "projects" && seg !== "libs") {
+      return decodeURIComponent(seg);
+    }
+    const q = new URLSearchParams(window.location.search).get("scope");
+    if (q) return q;
+  }
+  return import.meta.env.VITE_SCOPE ?? userSlug();
 }
 
 /** Full URL of the CDN libs top manifest (required for VITE_LIBS_SOURCE=cdn),
@@ -187,7 +209,7 @@ export function libsSourceConfig(projectId?: string): LibsSource | null {
           ? CDN_LIBS_MANIFEST_URL
             ? cdnLibsSource(CDN_LIBS_MANIFEST_URL)
             : staticLibsSource() // misconfigured cdn ⇒ offline fallback
-          : remoteLibsSource(API_BASE_URL, libsOwner(), project);
+          : remoteLibsSource(API_BASE_URL, currentScope(), userSlug(), project);
 
   // 0004-A spike: `?libwrite=1` adds one in-memory writable user SYMBOL lib so the
   // editor save path works with no backend (a dev/test aid). The real remote
@@ -221,7 +243,8 @@ export function libsSourceForLib(
   if (import.meta.env.VITE_LIBS_SOURCE === "synced") {
     return syncedLibsSource(libId, {
       apiBase: API_BASE_URL,
-      owner: libsOwner(),
+      scope: currentScope(),
+      user: userSlug(),
       project,
       log: (m) => console.log(m),
     });
