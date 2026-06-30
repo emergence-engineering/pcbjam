@@ -145,7 +145,9 @@ function ProjectRow({
           <p className="truncate font-medium">{project.name}</p>
           <SourceChip descriptor={descriptor} />
         </div>
-        <p className="text-xs text-muted-foreground">/p/{project.slug}</p>
+        <p className="text-xs text-muted-foreground">
+          {project.scope}/projects/{project.slug}
+        </p>
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <Button asChild variant="secondary" size="sm">
