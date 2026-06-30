@@ -128,6 +128,20 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     expect(await tryLoadApp(page), 'App should load').toBe(true);
     await waitForRegistry(page);
 
+    // The bare test shell lays out #window-container BELOW the full-size main
+    // canvas, so the modal (and its DOM title bar) render off the bottom of the
+    // viewport — the real app shells overlay it. Overlay it here so the DOM title
+    // bar is reachable by the pointer (the old canvas bar was reached indirectly
+    // via #canvas registry coords; the DOM bar must be clicked where it renders).
+    await page.evaluate(() => {
+      const wc = document.getElementById('window-container');
+      if (wc) {
+        wc.style.position = 'absolute';
+        wc.style.top = '0';
+        wc.style.left = '0';
+      }
+    });
+
     await clickByLabel(page, 'Custom Dialog');
     await waitForModalRect(page); // wait for the .window.toplevel to exist
     await page.waitForTimeout(400);
@@ -147,12 +161,16 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     );
     await page.screenshot({ path: 'test-results/modal-02-before-drag.png', fullPage: true });
 
-    // Grab the title-bar strip (top TITLE_BAR_HEIGHT=22px), away from the close
-    // button at top-right. The wasm pointer-move handler is asyncified, so dwell
-    // after the first move to let the hovered window settle before pressing
-    // (same pattern the GAL draw tests need).
-    const startX = dlgBefore.centerX;
-    const startY = dlgBefore.screenY + 8;
+    // The dialog now drags via its real DOM title bar (`.window-titlebar`):
+    // pointer events on it → wx_window_move → wxWindow::Move. So grab the element
+    // at its actual on-screen position (getBoundingClientRect), NOT the registry
+    // coords the old canvas title bar needed. Center is over the title text, clear
+    // of the close × at the right.
+    const titlebar = page.locator(`${MODAL_SEL} .window-titlebar`);
+    const tbox = await titlebar.boundingBox();
+    expect(tbox, 'modal should have a DOM title bar').not.toBeNull();
+    const startX = tbox!.x + tbox!.width / 2;
+    const startY = tbox!.y + tbox!.height / 2;
     await page.mouse.move(startX, startY);
     await page.waitForTimeout(350);
     await page.mouse.down();

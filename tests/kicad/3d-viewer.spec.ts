@@ -284,4 +284,80 @@ test.describe('3D viewer from pcbnew', () => {
             .filter((l) => l.includes('Aborted('));
         expect(aborts, `WASM aborted while opening the 3D viewer:\n${aborts.join('\n\n')}`).toEqual([]);
     });
+
+    /**
+     * Regression gate for "the 3D viewer can't be dragged / can't be X-closed".
+     *
+     * The viewer is a non-main wxFrame; it now gets a real DOM `.window-titlebar`
+     * (drag + `.window-titlebar-close`) instead of a canvas-painted, pointer-
+     * events:none bar whose clicks an overlapping main-frame DOM control stole.
+     * This drives the REAL viewer: it must have a DOM title bar, that bar must be
+     * the top hit-test element at its own location (even with the main editor's
+     * pointer-events:auto controls present), dragging it must move the frame, and
+     * the × must close it.
+     */
+    test('real 3D viewer has a draggable, X-closable DOM title bar', async ({ page, testLogger }) => {
+        await page.goto('/kicad/pcbnew.html');
+        await waitForPcbnew(page);
+        await loadBoard(page, testLogger);
+
+        const winsBefore = await page.evaluate(() =>
+            Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id));
+        const glBefore = await countGlCanvases(page);
+        await openThreeDViewer(page, glBefore);
+        await page.waitForTimeout(1500);
+
+        const winId = await page.evaluate((before: string[]) => {
+            const all = Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id);
+            return all.find((id) => !before.includes(id)) ?? all[all.length - 1] ?? null;
+        }, winsBefore);
+        expect(winId, 'the 3D viewer should open a new top-level window').toBeTruthy();
+        await page.screenshot({ path: 'test-results/3d-viewer-titlebar.png', scale: 'device' });
+
+        // It must have a real DOM title bar (the frames-only fix covers the viewer).
+        const bar = page.locator(`#${winId} .window-titlebar`);
+        expect(await bar.count(), 'the 3D viewer (a wxFrame) should have a DOM title bar').toBe(1);
+
+        // Root-cause check: the title bar is the top hit-test element at its own
+        // location, despite the main pcbnew frame's pointer-events:auto controls
+        // (which used to intercept and break drag/close).
+        const box = await bar.boundingBox();
+        expect(box, 'the title bar should have a layout box').not.toBeNull();
+        const cx = box!.x + box!.width / 2;
+        const cy = box!.y + box!.height / 2;
+        const topEl = await page.evaluate(([x, y]) => {
+            const el = document.elementFromPoint(x, y) as HTMLElement | null;
+            return el ? el.className.toString() : 'null';
+        }, [cx, cy]);
+        expect(topEl, `the top element at the title bar must be the title bar (was "${topEl}")`)
+            .toContain('window-titlebar');
+
+        // Drag the title bar → the frame moves (wx_window_move → wxWindow::Move).
+        const styleTop = (wid: string) =>
+            page.evaluate((id) => {
+                const el = document.getElementById(id) as HTMLElement | null;
+                return el ? (parseInt(el.style.top || '0', 10) || 0) : null;
+            }, wid);
+        const beforeTop = await styleTop(winId as string);
+        await page.mouse.move(cx, cy);
+        await page.mouse.down();
+        await page.mouse.move(cx, cy + 80, { steps: 10 });
+        await page.mouse.up();
+        await page.waitForTimeout(300);
+        const afterTop = await styleTop(winId as string);
+        expect(afterTop, 'dragging the title bar should move the 3D viewer frame').not.toBe(beforeTop);
+
+        // Close via the × (wx_window_close → wx Close() → OnCloseWindow).
+        await page.locator(`#${winId} .window-titlebar-close`).click();
+        await page.waitForTimeout(600);
+        const gone = await page.evaluate((wid) => {
+            const el = document.getElementById(wid);
+            return !el || getComputedStyle(el).display === 'none';
+        }, winId);
+        expect(gone, 'the × should close the 3D viewer').toBe(true);
+
+        // Opening/dragging/closing didn't blow up the runtime.
+        const aborts = [...testLogger.consoleLogs, ...testLogger.errors].filter((l) => l.includes('Aborted('));
+        expect(aborts, `WASM aborted during the title-bar test:\n${aborts.join('\n\n')}`).toEqual([]);
+    });
 });

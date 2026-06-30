@@ -985,3 +985,18 @@ secondary-glcanvas: $(S)/secondary-glcanvas/secondary-glcanvas_test.html
 
 # Include the new app in the default `all` build (prerequisites accumulate).
 all: $(S)/secondary-glcanvas/secondary-glcanvas_test.html
+
+# --- secondary-frame chrome probe (GL-enabled) --------------------------------
+# Isolation harness for the "secondary top-level frame has no usable title bar"
+# behaviour (KiCad 3D viewer / footprint editor). Reuses LDFLAGS_GL defined in the
+# secondary-glcanvas block above. See tests/e2e/secondary-frame-chrome.spec.ts.
+$(S)/secondary-frame-chrome/secondary-frame-chrome_test.o: $(S)/secondary-frame-chrome/secondary-frame-chrome_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/secondary-frame-chrome/secondary-frame-chrome_test.html: $(S)/secondary-frame-chrome/secondary-frame-chrome_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_GL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+secondary-frame-chrome: $(S)/secondary-frame-chrome/secondary-frame-chrome_test.html
+.PHONY: secondary-frame-chrome
+
+all: $(S)/secondary-frame-chrome/secondary-frame-chrome_test.html
