@@ -40,6 +40,11 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // @pcbjam/shared is in a second pnpm workspace with its own `yjs`; dedupe so
+    // the bundled editor links ONE yjs (a mutable, instanceof-checked singleton).
+    // Without it shared's collab code (kicad-y) and the app's yjs are two
+    // instances → "Unexpected content type" the moment a doc is seeded.
+    dedupe: ["yjs"],
   },
   server: {
     // Default :3048. The closed `pnpm dev:gpl` runs a second editor instance on
