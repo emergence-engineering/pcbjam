@@ -1,6 +1,7 @@
 ---
 title: "Porting KiCad's Graphics to WebGL in 2026"
 description: "How to make KiCad run in a browser pt. 1. Check the demo!"
+author: Viktor Váczi
 pubDate: 2026-06-18
 ---
 
@@ -26,22 +27,22 @@ the [tiny_tapeout](https://tinytapeout.com/) demo -- entirely client-side.
 
 First I just wanted KiCad to build with a WASM target.
 It took a while, thankfully I've found https://github.com/ahilss/wxWidgets-wasm, a wxWidgets port for the web for an old version.
-I've used that port as a starting point, but it missed a lot of features. After multiple lines of find-whats-missing and a lot of e2e tests with a lot of screenshots
-I had a working~ish wxWidgets port, a good start.
+I've used that port as a starting point, but it missed a lot of features. After multiple lines of "Claude! Find whats missing!" and a lot of e2e tests with a lot of screenshots
+I had a working~ish wxWidgets port, as a good start.
 
-Then it lot of corner cutting, lot of shimming things away that I wanted to work to make KiCad build. The first time the welcome dialog loaded I was happy, very happy, even though
-clicks did nothing.
+Then after a lot of corner cutting, even more "shimming things away" because I wanted to make KiCad to build; the first time the welcome dialog loaded I was happy, very happy (even though
+clicks did nothing).
 
 Then when I got through that eventually KiCad loaded up. It was horribly slow.
 
-I had two main sources of errors: Asyncify and the OpenGL `-sLEGACY_GL_EMULATION` that made it possible to run OpenGL apps on the web.
-Asyncify is a huge error source on its own, I wanted to get rid of all OpenGL errors ( and get some speed if possible ), so I have a chance to debug them.
+I had two major sources of errors: Asyncify and the OpenGL `-sLEGACY_GL_EMULATION`, which lets OpenGL apps run on the web.
+Asyncify alone introduced a lot of instability, so I decided to get rid of all OpenGL errors first ( and hopefully gain some speed ), to make debugging manageable.
 The errors were an infinite loop of Emulation and WebGL sprinkled with some Asyncify interplay. I had no other option.
 
 # Let's rewrite to WebGL!
 
-Thankfully KiCad has a Graphics Abstraction Layer ( GAL ). There's already an alternative CPU renderer, an OpenGL one, let's do a WebGL one then!
-I don't know OpenGL but there's Claude Code. So: the core idea was to create WebGL and native test apps that check each GAL feature, compare the screenshots to double check.
+Thankfully KiCad has a Graphics Abstraction Layer ( GAL ). There's already an alternative CPU renderer, an OpenGL one, so I "just" needed to write a WebGL one!
+I don't familiar with OpenGL but there's Claude Code. So: the core idea was to create WebGL and native test apps. Both check each GAL feature, and compare the screenshots to double check.
 For the native GAL test apps I had to pull the headers inside KiCad from my test code, it needed a few shims ( KiCad usually brings the kitchen sink too ), but in the end worked.
 
 At first I wanted to do byte-to-byte comparison but it is not possible ( AFAIK ),
@@ -52,7 +53,7 @@ Here are two scenarios straight out of that regression suite -- the same GAL cal
 <GalCompare />
 
 So in the end I relied on asking Claude to check the screenshots, prodding, checking again, but in the end I got two screenshots folders that looked the same.
-Claude back then wasn't that good at understanding screenshots, sometimes LGTM'd totally black things, couldn't see colors, but it was still helpful.
+At that time Claude wasn't that good at understanding screenshots. Sometimes LGTM'd totally black things, couldn't see colors, etc., but in general it was still helpful.
 
 # Moment of truth
 And then I wired up my new WebGL GAL into KiCad and... It worked! And it was fast.
