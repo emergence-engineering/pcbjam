@@ -31,7 +31,7 @@
 set -e
 
 if [ -z "$1" ]; then
-    echo "Error: missing <app> argument (pcbnew | eeschema | calculator | pl_editor | symbol_editor | gerbview)" >&2
+    echo "Error: missing <app> argument (pcbnew | eeschema | calculator | pl_editor | gerbview)" >&2
     exit 1
 fi
 APP_NAME="$1"
@@ -42,7 +42,8 @@ shift
 # Most apps share all three names; the exceptions:
 #   - calculator:    target+subdir are both pcb_calculator (OUTPUT_NAME=calculator)
 #   - pl_editor:     subdir is pagelayout_editor (upstream source dir name)
-#   - symbol_editor: served by the eeschema kiface, so it builds in eeschema/
+# The footprint/symbol editors have no target of their own — the pcbnew/eeschema
+# bundle opens them at runtime via single_top.cpp's --frame flag.
 case "$APP_NAME" in
     pcbnew|eeschema|gerbview)
         KICAD_TARGET="$APP_NAME"
@@ -56,15 +57,6 @@ case "$APP_NAME" in
         KICAD_TARGET="pcb_calculator"
         KICAD_SUBDIR="pcb_calculator"
         ;;
-    symbol_editor)
-        KICAD_TARGET="symbol_editor"
-        KICAD_SUBDIR="eeschema"
-        ;;
-    footprint_editor)
-        # served by the pcbnew kiface, so it builds in pcbnew/ (like symbol_editor in eeschema/)
-        KICAD_TARGET="footprint_editor"
-        KICAD_SUBDIR="pcbnew"
-        ;;
     sym_convert)
         # Standalone .lib -> .kicad_sym converter (node CLI). Its add_executable
         # lives in eeschema/CMakeLists.txt (gated by KICAD_SYM_CONVERTER_WASM), so
@@ -73,33 +65,23 @@ case "$APP_NAME" in
         KICAD_SUBDIR="eeschema"
         ;;
     *)
-        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor | symbol_editor | footprint_editor | gerbview | sym_convert)" >&2
+        echo "Error: unknown app '$APP_NAME' (expected: pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert)" >&2
         exit 1
         ;;
 esac
 
 # Which app's embind bindings to compile + link. Most apps use their own; the
-# symbol_editor is the eeschema kiface launched at a different TOP_FRAME and has
-# no embind of its own, so it reuses eeschema's — whose bindings (kicadCollabOnSave
-# et al.) the shared kiface objects reference. Without this the symbol_editor link
-# fails with "undefined symbol: kicadCollabOnSave" (the placeholder defines nothing).
+# sym_convert CLI links the eeschema kiface objects, which reference eeschema's
+# embind symbols (kicadCollabOnSave et al.) — reuse eeschema's embind object.
 case "$APP_NAME" in
-    symbol_editor)    EMBIND_APP="eeschema" ;;
-    footprint_editor) EMBIND_APP="pcbnew" ;;
-    # sym_convert links the eeschema kiface objects, which reference eeschema's
-    # embind symbols (kicadCollabOnSave et al.) — reuse eeschema's embind object.
     sym_convert)      EMBIND_APP="eeschema" ;;
     *)                EMBIND_APP="$APP_NAME" ;;
 esac
 
-# Which app's WASM stub libraries (scripting/frame placeholders) to link. Like
-# EMBIND_APP, the footprint_editor reuses pcbnew's: it links the pcbnew kiface
-# objects, which reference pcbnew's action-plugin scripting symbols
-# (pcbnewGetScriptsSearchPaths et al., defined in pcbnew_scripting_stub.cpp).
+# Which app's WASM stub libraries (scripting/frame placeholders) to link.
+# sym_convert links the eeschema kiface objects, so it needs eeschema's frame
+# stub (eeschema_frame_stub.cpp).
 case "$APP_NAME" in
-    footprint_editor) STUB_APP="pcbnew" ;;
-    # sym_convert links the eeschema kiface objects, so it needs eeschema's
-    # frame stub (eeschema_frame_stub.cpp) like symbol_editor does.
     sym_convert)      STUB_APP="eeschema" ;;
     *)                STUB_APP="$APP_NAME" ;;
 esac
@@ -519,8 +501,8 @@ if [ -f "${EMBIND_SRC}" ]; then
     # ${KICAD_BUILD}/common by make_lexer custom commands on the pcbcommon target).
     # On a fresh build dir they don't exist until make runs — build pcbcommon first.
     # No wasted work: the app target depends on pcbcommon anyway; incremental no-op.
-    # Guard on EMBIND_APP (not APP_NAME) so footprint_editor — whose embind IS
-    # pcbnew's — also pre-builds pcbcommon.
+    # Guard on EMBIND_APP (not APP_NAME) so any app whose embind IS pcbnew's also
+    # pre-builds pcbcommon.
     if [ "${EMBIND_APP}" = "pcbnew" ]; then
         log_info "Pre-building pcbcommon so generated lexer headers exist for the embind compile..."
         emmake make -j${JOBS} pcbcommon

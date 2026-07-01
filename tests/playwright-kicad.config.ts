@@ -94,6 +94,9 @@ const PCBNEW_FAMILY_SPECS = [
   "**/3d-viewer-deadlock.spec.ts",
   "**/3d-viewer-models.spec.ts",
   "**/footprint-3d-preview.spec.ts",
+  // Parametrized over both library editors; the footprint case boots the pcbnew
+  // module (footprint_editor.html loads pcbnew.js) — same V8 routing, whole file.
+  "**/frame-runtime.spec.ts",
 ];
 
 // Runtime-perf specs run ONLY on the Chromium 'perf' project below: they need

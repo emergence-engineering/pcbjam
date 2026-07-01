@@ -36,7 +36,7 @@ import {
   MODELS_LOADING_EVENT,
   type ModelsLoadingDetail,
 } from "@/wasm/libs/models-bridge";
-import { memfsFilePath, memfsProjectDir } from "@/wasm/constants";
+import { memfsFilePath, memfsProjectDir, TOOL_FRAME } from "@/wasm/constants";
 import { driveProjectIntoTool, type ToolFile } from "@/wasm/kicad-runner";
 import { registerSaveHook, type SaveBytes } from "@/wasm/save-flow";
 import type {
@@ -779,6 +779,9 @@ export function WasmTool({
           // 3D models: lazy per-board source (null unless the CDN manifest is
           // configured) — feeds the board prescan + the viewer's ensure fallback.
           modelsSource: modelsSourceConfig(),
+          // footprint_editor/symbol_editor load the pcbnew/eeschema bundle; the
+          // frame token tells its single_top launcher which editor frame to open.
+          frame: TOOL_FRAME[tool],
         });
         // Register the save sink before the file opens: from here on, every
         // editor File→Save (MEMFS write) is routed onward through saveBytes.

@@ -35,6 +35,41 @@ export const TOOL_ARGV0: Record<Tool, string> = {
 };
 
 /**
+ * Which deployed WASM bundle actually backs each tool. `footprint_editor` and
+ * `symbol_editor` are the SAME compiled engine as `pcbnew` / `eeschema` — they
+ * were only ever a second launcher pinned to a different build-time frame — so
+ * after editor-unification they load the parent bundle and select their frame at
+ * runtime (see `TOOL_FRAME`). Every other tool backs its own bundle. Used to
+ * resolve the CDN asset folder and the `<bundle>.{wasm,js}` filenames.
+ */
+export const TOOL_BUNDLE: Record<Tool, Tool> = {
+  pcbnew: "pcbnew",
+  eeschema: "eeschema",
+  calculator: "calculator",
+  pl_editor: "pl_editor",
+  symbol_editor: "eeschema",
+  footprint_editor: "pcbnew",
+  gerbview: "gerbview",
+};
+
+/**
+ * The frame token passed to the WASM launcher via `Module.arguments`
+ * (`--frame=<token>`, parsed in `kicad/common/single_top.cpp`) so a shared bundle
+ * opens a specific editor frame. Tools whose bundle already defaults to the right
+ * frame need no token (`undefined`). Tokens mirror `kicad/kicad.cpp`'s `--frame`
+ * parser, plus `symedit` for the symbol editor (which upstream's CLI lacks).
+ */
+export const TOOL_FRAME: Record<Tool, string | undefined> = {
+  pcbnew: undefined,
+  eeschema: undefined,
+  calculator: undefined,
+  pl_editor: undefined,
+  symbol_editor: "symedit",
+  footprint_editor: "fpedit",
+  gerbview: undefined,
+};
+
+/**
  * Every standalone tool here boots through common/single_top.cpp, which runs
  * STARTWIZARD::CheckAndRun() — the first-run "KiCad Setup" wizard. It shows
  * whenever any provider (SETTINGS / LIBRARIES / PRIVACY) reports

@@ -5,6 +5,7 @@ import {
   MODELS_3D_ROOT,
   RESOURCE_PATH,
   TOOL_ARGV0,
+  TOOL_BUNDLE,
   TOOL_LIB_KIND,
   TOOL_NEEDS_CONFIG_SEED,
 } from "./constants";
@@ -67,6 +68,11 @@ export interface BootOptions {
   /** 3D model source (lazy, per-board). Null/omitted ⇒ the viewer renders the
    *  bare board only, exactly as before models existed. */
   modelsSource?: Model3dSource | null;
+  /** Editor frame to open when the bundle serves more than one (e.g. `"fpedit"`
+   *  so the pcbnew bundle opens the Footprint Editor). Passed through as
+   *  `--frame=<token>` in `Module.arguments`; parsed in single_top.cpp. Omitted
+   *  ⇒ the bundle's build-time default frame. See `TOOL_FRAME` in constants.ts. */
+  frame?: string;
 }
 
 let booted: { tool: Tool; promise: Promise<void> } | null = null;
@@ -195,6 +201,10 @@ async function doBoot(opts: BootOptions): Promise<void> {
     libsSource,
     modelsSource,
   } = opts;
+  // The deployed bundle backing this tool. footprint_editor/symbol_editor share
+  // the pcbnew/eeschema engine, so their `.wasm`/`.js`/pthread-worker files are the
+  // parent's; `tool` still drives identity (thisProgram), config-seed and lib-kind.
+  const bundle = TOOL_BUNDLE[tool] ?? tool;
   const w = window as ToolWindow;
 
   // The wasm reads the top-level frame geometry from a GLOBAL `mainWindow`
@@ -380,6 +390,11 @@ async function doBoot(opts: BootOptions): Promise<void> {
   w.Module = {
     thisProgram: TOOL_ARGV0[tool], // argv[0] for KiCad's DEBUG check
     ...(traceMask ? { ENV: { KICAD_TRACE: traceMask } } : {}),
+    // Runtime frame selection: emscripten feeds these to main() as argv[1..], which
+    // single_top.cpp parses ("--frame=<token>") to open the requested editor frame
+    // from a shared bundle. Set in the Module literal so it's present before the
+    // glue's run()/callMain fires. Empty ⇒ the bundle's build-time default frame.
+    arguments: opts.frame ? [`--frame=${opts.frame}`] : [],
     preRun,
     postRun: [],
     print: (...args: unknown[]) => {
@@ -415,7 +430,7 @@ async function doBoot(opts: BootOptions): Promise<void> {
     locateFile: (path: string) => `${base}/${path}`,
     // Pin the pthread worker script. Same-origin → direct URL; cross-origin CDN
     // → a same-origin blob shim that importScripts the glue (see helper above).
-    mainScriptUrlOrBlob: pthreadWorkerScript(base, tool, traceMask),
+    mainScriptUrlOrBlob: pthreadWorkerScript(base, bundle, traceMask),
     // Own the wasm fetch so we can report download progress (see helper). Streams
     // straight into the compiler; passing `module` to the callback lets emscripten
     // share it with the pthread workers (this hook fires on the main thread only).
@@ -426,7 +441,7 @@ async function doBoot(opts: BootOptions): Promise<void> {
       void (async () => {
         try {
           onStatus("Downloading…");
-          const resp = await fetchWasmWithProgress(`${base}/${tool}.wasm`, onProgress);
+          const resp = await fetchWasmWithProgress(`${base}/${bundle}.wasm`, onProgress);
           const ct = resp.headers.get("content-type") ?? "";
           if (ct.includes("application/wasm") && WebAssembly.instantiateStreaming) {
             const { instance, module } = await WebAssembly.instantiateStreaming(
@@ -460,6 +475,6 @@ async function doBoot(opts: BootOptions): Promise<void> {
   //               Emscripten's _scriptName.
   await loadScript(`${base}/wx.js`);
   await loadScript(`${base}/wx-dom.js`);
-  await loadScript(`${base}/${tool}.js`);
-  log(`[boot] injected wx.js + wx-dom.js + ${tool}.js (base=${base})`);
+  await loadScript(`${base}/${bundle}.js`);
+  log(`[boot] injected wx.js + wx-dom.js + ${bundle}.js (base=${base})`);
 }

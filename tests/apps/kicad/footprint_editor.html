@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-  <title>KiCad Symbol Editor WASM</title>
+  <title>KiCad Footprint Editor WASM</title>
   <style>
     .emscripten { padding-right: 0; margin-left: auto; margin-right: auto; display: block; }
     div.emscripten { text-align: center; }
@@ -22,19 +22,8 @@
       border-radius: 5px;
     }
 
-    #progress {
-      width: 300px;
-      height: 20px;
-      background: #333;
-      margin-top: 5px;
-    }
-
-    #progress-bar {
-      height: 100%;
-      background: #4CAF50;
-      width: 0%;
-      transition: width 0.3s;
-    }
+    #progress { width: 300px; height: 20px; background: #333; margin-top: 5px; }
+    #progress-bar { height: 100%; background: #4CAF50; width: 0%; transition: width 0.3s; }
   </style>
 </head>
 <body style="margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1a1a2e;">
@@ -62,8 +51,6 @@
       var canvas = document.createElement('canvas');
       canvas.id = 'canvas';
       canvas.style.display = 'none';
-      // wx.js owns the backing-store size via setWindowRect(); keep the HTML
-      // shell responsible only for the CSS size.
       var width = window.innerWidth;
       var height = window.innerHeight;
       canvas.style.width = width + 'px';
@@ -87,55 +74,29 @@
       document.getElementById('status').style.display = 'none';
     };
 
-    // Pre-fetched resource data (fetched before symbol_editor.js loads)
     var resourceData = null;
-
-    // Start fetching images.tar.gz immediately (runs in parallel with WASM loading)
     fetch('images.tar.gz')
-      .then(function(response) {
-        if (!response.ok) throw new Error('HTTP ' + response.status);
-        return response.arrayBuffer();
-      })
-      .then(function(buffer) {
-        resourceData = new Uint8Array(buffer);
-        console.log('[KICAD] Prefetched images.tar.gz (' + resourceData.length + ' bytes)');
-      })
-      .catch(function(err) {
-        console.warn('[KICAD] Could not prefetch images.tar.gz:', err.message);
-      });
+      .then(function(response) { if (!response.ok) throw new Error('HTTP ' + response.status); return response.arrayBuffer(); })
+      .then(function(buffer) { resourceData = new Uint8Array(buffer); console.log('[KICAD] Prefetched images.tar.gz (' + resourceData.length + ' bytes)'); })
+      .catch(function(err) { console.warn('[KICAD] Could not prefetch images.tar.gz:', err.message); });
 
-    // Write pre-fetched resources to FS (called in preRun after FS is available)
     var writeResources = function() {
-      // Create directory structure matching KiCad's compiled-in KICAD_DATA path
-      // This path is baked in during CMake configuration
       var resourcePath = '/workspace/build-wasm/sysroot/share/kicad/resources';
       FS.mkdirTree(resourcePath);
-
-      // Write pre-fetched data if available
-      if (resourceData) {
-        FS.writeFile(resourcePath + '/images.tar.gz', resourceData);
-        console.log('[KICAD] Wrote images.tar.gz to ' + resourcePath);
-      } else {
-        console.warn('[KICAD] images.tar.gz not ready yet (WASM loaded faster than fetch)');
-      }
+      if (resourceData) { FS.writeFile(resourcePath + '/images.tar.gz', resourceData); console.log('[KICAD] Wrote images.tar.gz to ' + resourcePath); }
+      else { console.warn('[KICAD] images.tar.gz not ready yet (WASM loaded faster than fetch)'); }
     };
 
-    // single_top.cpp runs STARTWIZARD on launch: a modal first-run "Setup"
-    // wizard shown whenever the settings dir lacks a kicad_common.json or valid
-    // global library tables. In this ephemeral MEMFS that is EVERY load, and the
-    // wizard's modal event loop crashes Asyncify. Seed a minimal default config
-    // before main() so every provider reports NeedsUserInput()==false and the
-    // wizard never opens — same as eeschema.html and the web app's boot.ts.
+    // Seed a minimal default config before main() so STARTWIZARD is skipped (see
+    // symbol_editor.html / eeschema.html). Version dir 10.0 for the KiCad 10.0.4 build.
     var seedKicadConfig = function() {
       var cfgDir = '/home/kicad/.config/kicad/kicad/10.0';
       FS.mkdirTree(cfgDir);
-
       var writeIfAbsent = function(path, contents) {
         try { FS.stat(path); return; } catch (e) { /* absent — seed it */ }
         FS.writeFile(path, contents);
         console.log('[KICAD] Seeded ' + path);
       };
-
       writeIfAbsent(cfgDir + '/kicad_common.json', JSON.stringify({
         do_not_show_again: { update_check_prompt: true, data_collection_prompt: true }
       }, null, 2));
@@ -145,37 +106,23 @@
     };
 
     var Module = {
-      thisProgram: '/usr/bin/symbol_editor',  // Fake absolute path for argv[0] (KiCad DEBUG check)
+      thisProgram: '/usr/bin/footprint_editor',  // argv[0] for KiCad's DEBUG check
 
-      // The symbol editor is served by the eeschema bundle (editor-unification):
-      // load eeschema.js below and select FRAME_SCH_SYMBOL_EDITOR at runtime.
-      arguments: ['--frame=symedit'],
+      // The footprint editor is served by the pcbnew bundle (editor-unification):
+      // load pcbnew.js below and select FRAME_FOOTPRINT_EDITOR at runtime.
+      arguments: ['--frame=fpedit'],
 
       preRun: [createCanvas, writeResources, seedKicadConfig],
       postRun: [],
 
-      print: function(text) {
-        if (arguments.length > 1)
-          text = Array.prototype.slice.call(arguments).join(' ');
-        console.log('[KICAD_OUT] ' + text);
-      },
-
-      printErr: function(text) {
-        if (arguments.length > 1)
-          text = Array.prototype.slice.call(arguments).join(' ');
-        console.error('[KICAD_ERR] ' + text);
-      },
+      print: function(text) { if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' '); console.log('[KICAD_OUT] ' + text); },
+      printErr: function(text) { if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' '); console.error('[KICAD_ERR] ' + text); },
 
       setStatus: function(text) {
         console.log('[KICAD_STATUS] ' + text);
         statusText.textContent = text;
-
-        // Parse progress from status text
         var match = text.match(/(\d+)\/(\d+)/);
-        if (match) {
-          var pct = (parseInt(match[1]) / parseInt(match[2])) * 100;
-          progressBar.style.width = pct + '%';
-        }
+        if (match) { var pct = (parseInt(match[1]) / parseInt(match[2])) * 100; progressBar.style.width = pct + '%'; }
       },
 
       totalDependencies: 0,
@@ -185,20 +132,14 @@
       },
 
       onRuntimeInitialized: onRuntimeInitialized,
-
-      // Required for locating .wasm and .worker.js files
-      locateFile: function(path) {
-        return path;
-      }
+      locateFile: function(path) { return path; }
     };
 
     Module.setStatus('Downloading...');
 
     window.onerror = function(msg, url, line) {
       showError(msg + ' at ' + url + ':' + line);
-      Module.setStatus = function(text) {
-        if (text) Module.printErr('[post-exception status] ' + text);
-      };
+      Module.setStatus = function(text) { if (text) Module.printErr('[post-exception status] ' + text); };
       return false;
     };
   </script>
@@ -206,7 +147,7 @@
   <!-- wxWidgets WASM glue code (defines getConfigEntryLength, etc.) -->
   <script src="wx.js"></script>
   <script src="wx-dom.js"></script>
-  <!-- Symbol editor = eeschema bundle + --frame=symedit (editor-unification). -->
-  <script async src="eeschema.js"></script>
+  <!-- Footprint editor = pcbnew bundle + --frame=fpedit (editor-unification). -->
+  <script async src="pcbnew.js"></script>
 </body>
 </html>

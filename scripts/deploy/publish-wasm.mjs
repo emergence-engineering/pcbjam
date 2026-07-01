@@ -29,13 +29,15 @@ import {
 
 // --- tools & per-file rules ---------------------------------------------------
 
-// Tools served to the browser editor. sym_convert is a node CLI, not served.
+// Bundles served to the browser editor. symbol_editor / footprint_editor are NOT
+// separate bundles: they are the eeschema / pcbnew bundle booted with a runtime
+// --frame flag (editor-unification), so they publish nothing of their own. The
+// frontend maps them onto their parent bundle via TOOL_BUNDLE. sym_convert is a
+// node CLI, not served.
 const TOOLS = [
   "pcbnew",
   "eeschema",
   "pl_editor",
-  "symbol_editor",
-  "footprint_editor",
   "gerbview",
   "calculator",
 ];

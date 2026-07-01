@@ -1,5 +1,6 @@
 import type { Tool } from "@pcbjam/shared";
 import { WASM_MANIFEST_FILE, WASM_ROOT } from "@/lib/config";
+import { TOOL_BUNDLE } from "./constants";
 
 /**
  * Resolve the per-tool WASM asset base at runtime from the CDN release manifest.
@@ -42,10 +43,14 @@ export async function resolveWasmBase(
 ): Promise<string> {
   if (override) return override.replace(/\/+$/, "");
   if (!WASM_MANIFEST_FILE) return WASM_ROOT; // flat (dev / same-origin)
+  // A tool may be served by a shared bundle (footprint_editor→pcbnew,
+  // symbol_editor→eeschema); resolve the folder/version of the bundle, not the
+  // logical tool (the merged bundles are the only ones published).
+  const bundle = TOOL_BUNDLE[tool] ?? tool;
   const manifest = await loadManifest();
-  const ver = manifest.tools?.[tool];
+  const ver = manifest.tools?.[bundle];
   if (!ver) {
-    throw new Error(`no WASM version for "${tool}" in ${WASM_MANIFEST_FILE}`);
+    throw new Error(`no WASM version for "${bundle}" in ${WASM_MANIFEST_FILE}`);
   }
-  return `${WASM_ROOT}/${tool}/${ver}`;
+  return `${WASM_ROOT}/${bundle}/${ver}`;
 }

@@ -6,11 +6,10 @@
 #   ./docker/build.sh <app>[,<app>...] [args...]
 #
 # Apps:
-#   pcbnew         PCB editor
-#   eeschema       schematic editor
+#   pcbnew         PCB editor (also serves the footprint editor via --frame=fpedit)
+#   eeschema       schematic editor (also serves the symbol editor via --frame=symedit)
 #   calculator     PCB calculator
 #   pl_editor      drawing-sheet editor
-#   symbol_editor  symbol editor (eeschema kiface, FRAME_SCH_SYMBOL_EDITOR)
 #   gerbview       Gerber viewer
 #   all            build all of the above
 #
@@ -66,7 +65,7 @@ trap 'kw_fail 130; exit 130' INT TERM
 
 cd "$(dirname "$0")/.."
 
-VALID_APPS="pcbnew | eeschema | calculator | pl_editor | symbol_editor | footprint_editor | gerbview | sym_convert | all"
+VALID_APPS="pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert | all"
 
 usage() {
     echo "Usage: ./docker/build.sh <app>[,<app>...] [args...]" >&2
@@ -92,12 +91,12 @@ shift
 # pcbnew first in "all" — its 90-min host-side wasm-opt chain is the critical
 # path, so it must start as early as possible (especially with KICAD_PIPELINE=1).
 if [[ "$APP_NAME" == "all" ]]; then
-    APPS=(pcbnew eeschema calculator pl_editor symbol_editor footprint_editor gerbview)
+    APPS=(pcbnew eeschema calculator pl_editor gerbview)
 else
     IFS=',' read -r -a APPS <<< "$APP_NAME"
     for app in "${APPS[@]}"; do
         case "$app" in
-            pcbnew|eeschema|calculator|pl_editor|symbol_editor|footprint_editor|gerbview|sym_convert) ;;
+            pcbnew|eeschema|calculator|pl_editor|gerbview|sym_convert) ;;
             *)
                 echo "Error: unknown app '$app' (expected: ${VALID_APPS})" >&2
                 usage
@@ -196,8 +195,6 @@ kicad_subdir_for() {
     case "$1" in
         calculator)       echo "pcb_calculator" ;;
         pl_editor)        echo "pagelayout_editor" ;;
-        symbol_editor)    echo "eeschema" ;;
-        footprint_editor) echo "pcbnew" ;;
         sym_convert)      echo "eeschema" ;;
         *)                echo "$1" ;;
     esac
