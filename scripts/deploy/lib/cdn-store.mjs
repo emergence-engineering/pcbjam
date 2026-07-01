@@ -17,7 +17,10 @@ import { gzipSync, brotliCompressSync, constants as zc } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
-export const IMMUTABLE = "public, max-age=31536000, immutable";
+// `no-transform` keeps Cloudflare's edge from decompressing our pre-compressed
+// (brotli-q11) blobs and re-serving them at its own on-the-fly quality (br-4);
+// also preserves the original Content-Length. Immutable content-addressed blobs.
+export const IMMUTABLE = "public, max-age=31536000, immutable, no-transform";
 export const NO_STORE = "no-store";
 
 export const sha256hex = (buf) => createHash("sha256").update(buf).digest("hex");

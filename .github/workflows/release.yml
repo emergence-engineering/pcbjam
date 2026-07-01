@@ -82,7 +82,7 @@ jobs:
       - name: Publish WASM to CDN
         run: >
           node scripts/deploy/publish-wasm.mjs --tag "${{ needs.meta.outputs.tag }}"
-          --src output --driver r2 --bucket "$BUCKET" --remote --compress gzip
+          --src output --driver r2 --bucket "$BUCKET" --remote --compress br --quality 11
 
   # 3) Build the standalone pinned to this tag's manifest + libs, deploy to Pages.
   deploy-demo:
