@@ -157,14 +157,15 @@ export function cdnLibsSource(
     },
     async getAllItems(
       libId: string,
-    ): Promise<Array<{ kind: string; name: string; body: string }>> {
-      // One bulk merged read of the whole lib (the IDB cache after cold bundle),
-      // so the WASM plugin hydrates in a single crossing instead of N gets.
+    ): Promise<Array<{ kind: string; name: string; body: Uint8Array }>> {
+      // One bulk merged read of the whole lib (the IDB cache after cold bundle).
+      // "Copy as-is": hand back the raw IDB bytes (no TextDecoder) so the provider
+      // frames them and the bridge memcpy's them into wasm with no string/JSON
+      // detour — the plugin slices them straight out of the wasm heap.
       const stack = await openStack(libId);
-      const dec = new TextDecoder();
       return [...(await stack.readAll())].map(([path, bytes]) => {
         const { kind, name } = splitPath(path);
-        return { kind, name, body: dec.decode(bytes) };
+        return { kind, name, body: bytes };
       });
     },
     async getItemBody(

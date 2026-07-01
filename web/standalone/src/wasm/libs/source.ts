@@ -55,7 +55,7 @@ export interface LibsSource {
    */
   getAllItems?(
     libId: string,
-  ): Promise<Array<{ kind: string; name: string; body: string }>>;
+  ): Promise<Array<{ kind: string; name: string; body: Uint8Array }>>;
   /**
    * Pre-warm this source's per-lib caches (IndexedDB bundles) WITHOUT touching the
    * WASM runtime — call it in parallel with the wasm download so the editor's
@@ -104,7 +104,9 @@ export type KicadLibsRequest = (
   lib: string,
   arg: string,
   kind?: string,
-) => Promise<string | null>;
+  // "bodies" returns a framed Uint8Array (raw item bytes, copied as-is across the
+  // bridge); every other op returns a string (or null).
+) => Promise<string | Uint8Array | null>;
 
 declare global {
   interface Window {
@@ -160,12 +162,14 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function fallbackGetAllItems(
   source: LibsSource,
   libId: string,
-): Promise<Array<{ kind: string; name: string; body: string }>> {
+): Promise<Array<{ kind: string; name: string; body: Uint8Array }>> {
   const items = await source.listItems(libId);
-  const out: Array<{ kind: string; name: string; body: string }> = [];
+  const enc = new TextEncoder();
+  const out: Array<{ kind: string; name: string; body: Uint8Array }> = [];
   for (const it of items) {
     const body = await source.getItemBody(libId, it.kind, it.name);
-    if (body != null) out.push({ kind: it.kind, name: it.name, body });
+    if (body != null)
+      out.push({ kind: it.kind, name: it.name, body: enc.encode(body) });
   }
   return out;
 }
@@ -246,10 +250,26 @@ export function installLibsProvider(
             const all = source.getAllItems
               ? await source.getAllItems(id)
               : await fallbackGetAllItems(source, id);
-            const items = all
-              .filter((i) => i.kind === kind)
-              .map((i) => ({ name: i.name, body: i.body }));
-            return JSON.stringify({ [key]: items });
+            const items = all.filter((i) => i.kind === kind);
+            // "Copy as-is" framing: a one-line JSON header (names + UTF-8 byte
+            // lengths), a newline, then every body's RAW bytes concatenated — no
+            // JSON escaping. The C++ bridge memcpy's this straight into the wasm
+            // heap; the plugin parses the small header and slices the bodies, so
+            // none of the (hundreds of MB of) s-expr gets un-escaped.
+            const header = JSON.stringify({
+              [key]: items.map((i) => ({ name: i.name, len: i.body.length })),
+            });
+            const headerBytes = new TextEncoder().encode(header + "\n");
+            const total =
+              headerBytes.length + items.reduce((n, i) => n + i.body.length, 0);
+            const out = new Uint8Array(total);
+            out.set(headerBytes, 0);
+            let off = headerBytes.length;
+            for (const i of items) {
+              out.set(i.body, off);
+              off += i.body.length;
+            }
+            return out;
           }
           const items = await source.listItems(id);
           const names = items

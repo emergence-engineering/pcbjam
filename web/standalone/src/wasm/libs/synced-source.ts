@@ -54,16 +54,15 @@ export function syncedLibsSource(
       }
     },
     async getAllItems(): Promise<
-      Array<{ kind: string; name: string; body: string }>
+      Array<{ kind: string; name: string; body: Uint8Array }>
     > {
       // Bulk merged read across the opaque layer stack (origin + mirror overlay),
       // top-wins — the mirror invariant readAll() preserves. One crossing, no
-      // per-item gets.
+      // per-item gets. "Copy as-is": raw bytes (no TextDecoder) — see cdn-source.
       const { stack } = await ensure();
-      const dec = new TextDecoder();
       return [...(await stack.readAll())].map(([path, bytes]) => {
         const { kind, name } = splitPath(path);
-        return { kind, name, body: dec.decode(bytes) };
+        return { kind, name, body: bytes };
       });
     },
     async getItemBody(_id, kind, name): Promise<string | null> {
