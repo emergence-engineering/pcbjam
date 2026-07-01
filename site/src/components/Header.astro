@@ -11,6 +11,9 @@ const links = [
     label: 'Built by Emergence Engineering',
     external: true,
   },
+  // Highlighted (accent) link to the public editor demo. A compact text link, not
+  // a button — the header container caps at 1024px and a second button overflows it.
+  { href: 'https://demo.pcbjam.com', label: 'Live demo', external: true, highlight: true },
 ];
 
 const path = Astro.url.pathname;
@@ -36,6 +39,7 @@ const isActive = (href: string, external?: boolean) =>
         links.map((l) => (
           <a
             href={l.href}
+            class:list={[{ 'nav-cta': l.highlight }]}
             aria-current={isActive(l.href, l.external) ? 'page' : undefined}
             rel={l.external ? 'noopener' : undefined}
             target={l.external ? '_blank' : undefined}
@@ -87,11 +91,12 @@ const isActive = (href: string, external?: boolean) =>
   .nav {
     display: flex;
     align-items: center;
-    gap: 1.1rem;
+    gap: 1rem;
   }
   .nav > a {
     color: var(--fg-muted);
     font-size: 0.95rem;
+    white-space: nowrap;
   }
   .nav > a:hover {
     color: var(--fg);
@@ -99,6 +104,15 @@ const isActive = (href: string, external?: boolean) =>
   }
   .nav > a[aria-current='page'] {
     color: var(--fg);
+  }
+  /* Highlighted demo link — accent-colored so it stands out among the neutral
+     nav links without needing a second button (which would overflow the bar). */
+  .nav > a.nav-cta {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .nav > a.nav-cta:hover {
+    filter: brightness(1.1);
   }
   .cta-join {
     padding-block: 0.5rem;
@@ -120,7 +134,10 @@ const isActive = (href: string, external?: boolean) =>
     border-radius: 2px;
   }
 
-  @media (max-width: 820px) {
+  /* Collapse to the hamburger menu once the full one-line nav no longer fits the
+     1024px-capped bar (adding the demo link pushed the crowded desktop nav past
+     the point where it stays on a single row). */
+  @media (max-width: 1024px) {
     .brand-chip {
       display: none;
     }

@@ -2,13 +2,6 @@
 dist/
 .vercel/
 
-# Gerber-viewer demo WASM (synced from /output by scripts/sync-demo-wasm.sh).
-# The big binaries are served from Cloudflare R2 in production — never commit /
-# ship them to Vercel. The small glue JS (wx.js, wx-dom.js, gerbview.js) MUST be
-# committed: it's served same-origin (the pthread worker can't be cross-origin).
-public/gerber-demo/wasm/gerbview.wasm
-public/gerber-demo/wasm/kicad-resources.bin
-
 # generated content collection types & cache
 .astro/
 

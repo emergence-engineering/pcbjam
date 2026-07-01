@@ -27,9 +27,11 @@ import type { Report } from './compare';
 
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_MSG_BYTES = 24 * 1024 * 1024;
-const MAX_FILES_PER_MSG = 10;
-const MAX_TOTAL_FILES = 30; // ~3 messages of images; excess is summarized, not posted
+const MAX_FILES_PER_MSG = 9; // ≤9 images per Discord message; the rest spill into more messages
+const MAX_CONTENT = 1000; // split message text into multiple messages beyond this many chars
+const MAX_TOTAL_FILES = 30; // ~4 messages of images; excess is summarized, not posted
 const FLOOD_N = 12; // more ADDED than this ⇒ show a few exemplars, not all
+const REMOVED_CAP = 40; // cap the REMOVED name list in the message body
 
 type Attachment = { name: string; buffer: Buffer };
 type Message = { content: string; files: Attachment[] };
@@ -91,7 +93,9 @@ function buildHeader(report: Report | null, perfBlock: string, meta: { sha?: str
         lines.push(`⚠️ **screenshot drift**: ${report.changed.length} changed, ${report.added.length} added, ${report.removed.length} removed`);
     }
     if (report?.removed.length) {
-        lines.push('➖ REMOVED: ' + report.removed.map((r) => `\`${r.name}\``).join(', '));
+        const shown = report.removed.slice(0, REMOVED_CAP).map((r) => `\`${r.name}\``).join(', ');
+        const extra = report.removed.length > REMOVED_CAP ? ` (+${report.removed.length - REMOVED_CAP} more)` : '';
+        lines.push('➖ REMOVED: ' + shown + extra);
     }
     return lines.join('\n');
 }
@@ -122,14 +126,34 @@ export function buildAttachments(root: string, report: Report | null): { files: 
     return { files, notes };
 }
 
-/** Split attachments into messages of ≤10 files and ≤MAX_MSG_BYTES; content only on the first. */
+/**
+ * Assemble Discord messages: first the text content split into ≤MAX_CONTENT-char
+ * messages (at line boundaries, never inside a ``` fence so the perf table stays
+ * intact), then the image attachments in messages of ≤MAX_FILES_PER_MSG files.
+ */
 export function paginate(header: string, files: Attachment[]): Message[] {
-    if (!files.length) return [{ content: header, files: [] }];
     const messages: Message[] = [];
+
+    // 1) Text content → one or more text-only messages.
+    let cur = '';
+    let inFence = false;
+    for (const line of header.split('\n')) {
+        const next = cur ? cur + '\n' + line : line;
+        if (!inFence && cur && next.length > MAX_CONTENT) {
+            messages.push({ content: cur, files: [] });
+            cur = line;
+        } else {
+            cur = next;
+        }
+        if (line.trim().startsWith('```')) inFence = !inFence;
+    }
+    if (cur) messages.push({ content: cur, files: [] });
+
+    // 2) Image attachments → messages of ≤MAX_FILES_PER_MSG files and ≤MAX_MSG_BYTES.
     let batch: Attachment[] = [];
     let bytes = 0;
     const flush = () => {
-        messages.push({ content: messages.length === 0 ? header : '', files: batch });
+        if (batch.length) messages.push({ content: '', files: batch });
         batch = [];
         bytes = 0;
     };
@@ -138,8 +162,9 @@ export function paginate(header: string, files: Attachment[]): Message[] {
         batch.push(f);
         bytes += f.buffer.length;
     }
-    if (batch.length || messages.length === 0) flush();
-    return messages;
+    flush();
+
+    return messages.length ? messages : [{ content: header, files: [] }];
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -192,6 +217,13 @@ async function main(): Promise<void> {
 
     const sha = process.env.GITHUB_SHA;
     const report = readReport(root);
+    // Defensive: if the run produced no screenshots at all (renders missing), don't
+    // post a bogus "everything removed" report. (The workflow already gates this step
+    // to successful runs, where renders exist.)
+    if (report && report.changed.length + report.added.length + report.unchangedCount === 0) {
+        console.log('[discord] no screenshots rendered — nothing to report');
+        return;
+    }
     const prevDir = fetchPreviousPerf((args.repo as string) || process.env.GITHUB_REPOSITORY, sha);
     const { block: perfBlock } = buildPerfReport({ prevDir });
 

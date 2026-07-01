@@ -15,6 +15,8 @@ import SectionBand from '../components/SectionBand.astro';
 // in a new tab so the landing page itself never needs isolation.
 const DEMO_HREF = '/gerber-demo/index.html';
 const poster = '/gerber-demo/poster.png';
+// The full in-browser editor (not just the viewer) — the public demo.
+const EDITOR_URL = 'https://demo.pcbjam.com';
 ---
 
 <SectionBand id="demo" labelledby="gerber-demo-h2">
@@ -40,6 +42,12 @@ const poster = '/gerber-demo/poster.png';
     <span class="gerber-launch__cta">Launch the live Gerber viewer</span>
     <span class="gerber-launch__sub">Opens in a new tab · streams ~22&nbsp;MB on demand</span>
   </a>
+
+  <p class="demo-note">
+    Want to do more than look? Open a board in the full editor at
+    <a href={EDITOR_URL} target="_blank" rel="noopener">demo.pcbjam.com</a> — edit
+    the PCB or schematic in your browser, no install, no account.
+  </p>
 </SectionBand>
 
 <style>
@@ -98,6 +106,16 @@ const poster = '/gerber-demo/poster.png';
     color: var(--fg-muted);
     text-align: center;
     padding: 0 1rem;
+  }
+  .demo-note {
+    margin: 1rem 0 0;
+    text-align: center;
+    color: var(--fg-muted);
+    font-size: 0.95rem;
+  }
+  .demo-note a {
+    color: var(--accent);
+    font-weight: 600;
   }
   @media (prefers-reduced-motion: reduce) {
     .gerber-launch {

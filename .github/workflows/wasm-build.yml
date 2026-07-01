@@ -323,15 +323,16 @@ jobs:
         working-directory: tests
         run: xvfb-run -a npm run test:perf
 
-      # Screenshot drift gate + always-on Discord report (screenshots + perf).
+      # ON SUCCESS ONLY: screenshot drift gate + Discord report (perf + triptychs).
+      # Runs only when the build + e2e passed (so renders and test deps exist).
       # Report-only during rollout: compare.ts exits 0 without --fail-on-change and
       # the step is continue-on-error, so it never blocks the build — flip to gating
       # once the per-engine floors are calibrated (tests/tools/screenshots/config.ts,
-      # seeded by `npm run screenshots:noise`). post-discord posts ONLY on push to
-      # main and no-ops without DISCORD_WEBHOOK_URL (inert on PRs/forks). It reads the
-      # already-produced test-results (screenshots + perf-*.json) — no extra build.
-      - name: Screenshot compare + Discord report (screenshots + perf)
-        if: always() && inputs.run_tests
+      # seeded by `npm run screenshots:noise`). Posts ONLY on push to main and no-ops
+      # without DISCORD_WEBHOOK_URL (inert on PRs/forks). No extra build — reads the
+      # already-produced test-results (screenshots + perf-*.json).
+      - name: Screenshot + perf report (on success)
+        if: success() && inputs.run_tests
         continue-on-error: true
         working-directory: tests
         env:
@@ -339,7 +340,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           npm run screenshots:check
-          npm run screenshots:report -- --e2e ${{ (steps.wx_e2e.outcome == 'success' && steps.kicad_e2e.outcome == 'success') && 'pass' || 'fail' }}
+          npm run screenshots:report -- --e2e pass
+
+      # ON FAILURE (build or e2e): a minimal text-only "CI failed" notice, nothing
+      # else (no images / no comparison). Uses curl, NOT the TS reporter, because on a
+      # build failure the test deps (npm ci) never installed. Main-push only.
+      - name: Discord CI-failure notice
+        if: failure() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        continue-on-error: true
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          [ -z "$DISCORD_WEBHOOK_URL" ] && { echo "no webhook — skipping"; exit 0; }
+          SHORT="$(echo "${{ github.sha }}" | cut -c1-7)"
+          URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SUBJ="$(git log -1 --pretty=%s 2>/dev/null || true)"
+          CONTENT="❌ **CI failed** \`$SHORT\` — $SUBJ"$'\n'"$URL"
+          jq -n --arg c "$CONTENT" '{content:$c, allowed_mentions:{parse:[]}}' \
+            | curl -sS -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" -d @- >/dev/null \
+            && echo "posted CI-failure notice"
 
       - name: Upload test logs & screenshots
         if: always() && inputs.run_tests

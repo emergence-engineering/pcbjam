@@ -1,44 +1,51 @@
 /*
  * Self-contained boot harness for the KiCad Gerber viewer (gerbview) WASM,
- * embedded in the blog post via an <iframe>. Adapted from the proven test
- * harness (tests/apps/kicad/gerbview.html) and the React port
- * (web/standalone/src/wasm/boot.ts) — same global `Module`, same preRun steps,
- * same wx.js -> wx-dom.js -> gerbview.js injection order.
+ * embedded in the landing page / blog post via an <iframe>. A faithful port of
+ * the standalone React boot (web/standalone/src/wasm/boot.ts) — same global
+ * `Module`, same preRun steps, same wx.js -> wx-dom.js -> gerbview.js order.
  *
  * Classic script (NOT a module): the non-modularized WASM glue reads a GLOBAL
  * `var Module` and a GLOBAL `mainWindow`, and publishes `FS` onto the global
- * scope. Top-level `var`/`const` here share that global scope.
+ * scope. `window.Module = ...` is what makes the glue see our config.
  *
- * Asset layout, split because the pthread worker script MUST be same-origin
- * (a Worker can't be created from a cross-origin URL). So the small glue stays
- * on the site origin and only the big binaries move to Cloudflare R2:
- *   GLUE_BASE   : wx.js, wx-dom.js, gerbview.js, mainScriptUrlOrBlob (same-origin)
- *   BINARY_BASE : gerbview.wasm, kicad-resources.bin (R2 in prod, local in dev)
+ * ── Assets come from the versioned CDN (cdn.pcbjam.com) — the SAME artifacts the
+ * demo/app deploy publishes, not a hand-synced copy. We resolve gerbview's
+ * immutable, content-addressed folder at runtime from the release manifest:
  *
- * BINARY_BASE auto-switches by hostname: localhost → the local mirror (./wasm),
- * any other host → R2_BASE below. Override either base with ?glue=/?bin=.
- * To point at R2, set R2_BASE to your bucket's public URL — either a custom
- * domain (https://assets.pcbjam.com) or the managed https://<id>.r2.dev URL.
+ *     manifest-latest.json  -> { tag }
+ *     manifest-<tag>.json   -> tools.gerbview -> <ver>
+ *     base = <CDN_ROOT>/gerbview/<ver>
+ *
+ * so the landing always shows the LATEST deployed gerbview with no manual sync.
+ * A tool folder is self-contained + ABI-matched: gerbview.wasm, gerbview.js,
+ * wx.js, wx-dom.js, images.tar.gz. See docs/features/demo-deploy/0001-*.
+ *
+ * The folder is CROSS-ORIGIN to this page (which is COEP `require-corp`); the CDN
+ * sends `Cross-Origin-Resource-Policy: cross-origin` + `Access-Control-Allow-Origin: *`
+ * so the <script>/fetch loads are permitted. The one thing a cross-origin base
+ * breaks is the pthread worker — `new Worker(<cross-origin URL>)` is a
+ * SecurityError — so `mainScriptUrlOrBlob` is a SAME-ORIGIN `blob:` worker that
+ * `importScripts()` the cross-origin glue (a blob URL inherits the page origin;
+ * a classic worker's importScripts is allowed cross-origin under CORP).
+ *
+ * Dev overrides (query string): ?base=<folder> uses that folder verbatim (e.g. a
+ * local build); ?tag=<tag> pins a specific release; ?cdn=<root> swaps the CDN root.
  */
 
 (function () {
   "use strict";
 
-  // R2 bucket public URL (no trailing slash). Custom domain for the
-  // pcbjam-assets bucket (the managed URL https://pub-cecc0239e6f74d99ba7d06630bd87c64.r2.dev
-  // also still works).
-  var R2_BASE = "https://assets.pcbjam.com";
+  // Versioned WASM CDN root (no trailing slash). Overridable with ?cdn=.
+  var CDN_ROOT = "https://cdn.pcbjam.com/wasm";
 
   var params = new URLSearchParams(location.search);
-  var isLocal = /^(localhost|127\.0\.0\.1|\[?::1\]?)$/.test(location.hostname);
-  var GLUE_BASE = (params.get("glue") || "./wasm").replace(/\/+$/, "");
-  var BINARY_BASE = (params.get("bin") || (isLocal ? "./wasm" : R2_BASE)).replace(
-    /\/+$/,
-    ""
-  );
 
   // KiCad paths baked into the WASM build (see web/standalone/src/wasm/constants.ts).
-  var KICAD_VERSION_DIR = "9.99";
+  // KICAD_VERSION_DIR MUST match the deployed build's GetMajorMinorVersion() — the
+  // config we seed to suppress the first-run wizard is only read from THIS dir.
+  // The KiCad 10.0.x rebase bumped it from "9.99" to "10.0"; bump it here if a
+  // future deploy changes KiCad's major.minor.
+  var KICAD_VERSION_DIR = "10.0";
   var KICAD_CONFIG_DIR =
     "/home/kicad/.config/kicad/kicad/" + KICAD_VERSION_DIR;
   var RESOURCE_PATH =
@@ -99,49 +106,35 @@
   var mainWindow = document.getElementById("main-window");
   window.mainWindow = mainWindow;
 
-  // ── Prefetch the heavy, non-wasm assets in parallel with the wasm download ──
-  // images.tar.gz (compiled-in KiCad resources) and the board layers. Both are
-  // ~10x smaller than gerbview.wasm, so they land before preRun runs; a run
-  // dependency guards the rare case where the wasm wins the race.
-  var resourceData = null;
-  // Served without a .gz extension on purpose (see sync-demo-wasm.sh) so no
-  // server adds Content-Encoding: gzip. Written into MEMFS as images.tar.gz.
-  fetch(BINARY_BASE + "/kicad-resources.bin")
-    .then(function (r) {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.arrayBuffer();
-    })
-    .then(function (buf) {
-      resourceData = new Uint8Array(buf);
-      console.log("[KICAD] prefetched images.tar.gz (" + resourceData.length + " bytes)");
-    })
-    .catch(function (err) {
-      console.warn("[KICAD] images.tar.gz prefetch failed:", err.message);
+  // ── Resolve gerbview's versioned CDN folder from the release manifest ────────
+  function fetchJson(url) {
+    // manifest-*.json are served `no-store` so a rollback takes effect next load.
+    return fetch(url, { cache: "no-store" }).then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status + " for " + url);
+      return r.json();
     });
+  }
 
-  var boardData = null; // { name: Uint8Array }
-  var boardPromise = Promise.all(
-    BOARD_FILES.map(function (name) {
-      return fetch("./board/" + name)
-        .then(function (r) {
-          if (!r.ok) throw new Error("HTTP " + r.status + " for " + name);
-          return r.arrayBuffer();
-        })
-        .then(function (buf) {
-          return [name, new Uint8Array(buf)];
+  function resolveBase() {
+    var override = params.get("base");
+    if (override) return Promise.resolve(override.replace(/\/+$/, ""));
+    var root = (params.get("cdn") || CDN_ROOT).replace(/\/+$/, "");
+    var tagParam = params.get("tag");
+    var tagP = tagParam
+      ? Promise.resolve(tagParam)
+      : fetchJson(root + "/manifest-latest.json").then(function (m) {
+          if (!m || !m.tag) throw new Error("manifest-latest.json has no tag");
+          return m.tag;
         });
-    })
-  )
-    .then(function (pairs) {
-      boardData = {};
-      pairs.forEach(function (p) {
-        boardData[p[0]] = p[1];
+    return tagP.then(function (tag) {
+      return fetchJson(root + "/manifest-" + tag + ".json").then(function (m) {
+        var ver = m && m.tools && m.tools.gerbview;
+        if (!ver) throw new Error("no gerbview version in manifest-" + tag);
+        console.log("[KICAD] gerbview " + ver + " (release " + tag + ")");
+        return root + "/gerbview/" + ver;
       });
-      console.log("[KICAD] prefetched " + pairs.length + " board files");
-    })
-    .catch(function (err) {
-      console.error("[KICAD] board prefetch failed:", err.message);
     });
+  }
 
   // ── preRun steps ────────────────────────────────────────────────────────────
   function createCanvas() {
@@ -164,16 +157,6 @@
     mainWindow.appendChild(canvas);
     Module.canvas = canvas;
     console.log("[KICAD] canvas " + window.innerWidth + "x" + window.innerHeight);
-  }
-
-  function writeResources() {
-    FS.mkdirTree(RESOURCE_PATH);
-    if (resourceData) {
-      FS.writeFile(RESOURCE_PATH + "/images.tar.gz", resourceData);
-      console.log("[KICAD] wrote images.tar.gz");
-    } else {
-      console.warn("[KICAD] images.tar.gz not ready at preRun");
-    }
   }
 
   // Suppress the first-run setup wizard (its modal loop crashes Asyncify on our
@@ -206,86 +189,174 @@
     console.log("[KICAD] seeded config (wizard suppressed)");
   }
 
-  // Write the board into MEMFS and point argv at it so gerbview auto-opens it.
-  // argv must be set before main(); a run dependency keeps main() waiting if the
-  // board fetch hasn't landed yet.
-  function preloadBoard() {
-    Module.arguments = OPEN_ARGS;
-    var writeBoard = function () {
-      if (!boardData) return;
-      FS.mkdirTree(BOARD_DIR);
-      Object.keys(boardData).forEach(function (name) {
-        FS.writeFile(BOARD_DIR + "/" + name, boardData[name]);
+  // Boot the tool once its CDN folder is resolved. `base` is the (cross-origin)
+  // versioned folder; every asset — glue, wasm, images.tar.gz — lives under it.
+  function boot(base) {
+    // ── Prefetch the heavy, non-wasm assets in parallel with the wasm download ──
+    // images.tar.gz (compiled-in KiCad resources) comes from the tool folder; the
+    // board layers are same-origin fixtures. Both are far smaller than
+    // gerbview.wasm, so they land before preRun runs; a run dependency guards the
+    // rare case where the wasm wins the race.
+    var resourceData = null;
+    // The CDN stores images.tar.gz as raw gzip with NO Content-Encoding, so the
+    // browser hands us the compressed bytes and KiCad's own gunzip succeeds.
+    fetch(base + "/images.tar.gz")
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.arrayBuffer();
+      })
+      .then(function (buf) {
+        resourceData = new Uint8Array(buf);
+        console.log("[KICAD] prefetched images.tar.gz (" + resourceData.length + " bytes)");
+      })
+      .catch(function (err) {
+        console.warn("[KICAD] images.tar.gz prefetch failed:", err.message);
       });
-      console.log("[KICAD] wrote board into " + BOARD_DIR + "; argv=" + OPEN_ARGS.length + " files");
-    };
-    if (boardData) {
-      writeBoard();
-      return;
+
+    var boardData = null; // { name: Uint8Array }
+    var boardPromise = Promise.all(
+      BOARD_FILES.map(function (name) {
+        return fetch("./board/" + name)
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status + " for " + name);
+            return r.arrayBuffer();
+          })
+          .then(function (buf) {
+            return [name, new Uint8Array(buf)];
+          });
+      })
+    )
+      .then(function (pairs) {
+        boardData = {};
+        pairs.forEach(function (p) {
+          boardData[p[0]] = p[1];
+        });
+        console.log("[KICAD] prefetched " + pairs.length + " board files");
+      })
+      .catch(function (err) {
+        console.error("[KICAD] board prefetch failed:", err.message);
+      });
+
+    function writeResources() {
+      FS.mkdirTree(RESOURCE_PATH);
+      if (resourceData) {
+        FS.writeFile(RESOURCE_PATH + "/images.tar.gz", resourceData);
+        console.log("[KICAD] wrote images.tar.gz");
+      } else {
+        console.warn("[KICAD] images.tar.gz not ready at preRun");
+      }
     }
-    var add = window.addRunDependency;
-    var rm = window.removeRunDependency;
-    if (typeof add === "function" && typeof rm === "function") {
-      add("board-files");
-      boardPromise.then(function () {
+
+    // Write the board into MEMFS and point argv at it so gerbview auto-opens it.
+    // argv must be set before main(); a run dependency keeps main() waiting if the
+    // board fetch hasn't landed yet.
+    function preloadBoard() {
+      Module.arguments = OPEN_ARGS;
+      var writeBoard = function () {
+        if (!boardData) return;
+        FS.mkdirTree(BOARD_DIR);
+        Object.keys(boardData).forEach(function (name) {
+          FS.writeFile(BOARD_DIR + "/" + name, boardData[name]);
+        });
+        console.log("[KICAD] wrote board into " + BOARD_DIR + "; argv=" + OPEN_ARGS.length + " files");
+      };
+      if (boardData) {
         writeBoard();
-        rm("board-files");
-      });
-    } else {
-      // Best-effort fallback (board << wasm, so this path is unlikely to lose).
-      boardPromise.then(writeBoard);
+        return;
+      }
+      var add = window.addRunDependency;
+      var rm = window.removeRunDependency;
+      if (typeof add === "function" && typeof rm === "function") {
+        add("board-files");
+        boardPromise.then(function () {
+          writeBoard();
+          rm("board-files");
+        });
+      } else {
+        // Best-effort fallback (board << wasm, so this path is unlikely to lose).
+        boardPromise.then(writeBoard);
+      }
     }
+
+    // The pthread worker "script" for Module.mainScriptUrlOrBlob. KiCad spawns
+    // CLASSIC workers via `new Worker(...)`; a cross-origin URL is a SecurityError,
+    // so for the CDN base we hand emscripten a SAME-ORIGIN blob worker that
+    // importScripts the cross-origin glue (allowed because the CDN sends CORP).
+    function pthreadWorkerScript() {
+      var abs = new URL(base + "/gerbview.js", location.href);
+      if (abs.origin === location.origin) return base + "/gerbview.js";
+      return new Blob(["importScripts(" + JSON.stringify(abs.href) + ");"], {
+        type: "text/javascript",
+      });
+    }
+
+    // ── Module config (global) ─────────────────────────────────────────────────
+    var Module = {
+      thisProgram: "/usr/bin/gerbview", // argv[0] for KiCad's DEBUG check
+      arguments: OPEN_ARGS,
+      preRun: [createCanvas, writeResources, seedKicadConfig, preloadBoard],
+      postRun: [],
+      print: function () {
+        console.log("[KICAD_OUT] " + Array.prototype.join.call(arguments, " "));
+      },
+      printErr: function () {
+        console.error("[KICAD_ERR] " + Array.prototype.join.call(arguments, " "));
+      },
+      setStatus: function (text) {
+        if (text) console.log("[KICAD_STATUS] " + text);
+        setStatusUI(text);
+      },
+      totalDependencies: 0,
+      monitorRunDependencies: function (left) {
+        this.totalDependencies = Math.max(this.totalDependencies, left);
+        Module.setStatus(
+          left
+            ? "Preparing… (" + (this.totalDependencies - left) + "/" + this.totalDependencies + ")"
+            : "All downloads complete."
+        );
+      },
+      onRuntimeInitialized: function () {
+        console.log("[KICAD] runtime initialized");
+        if (Module.canvas) Module.canvas.style.display = "block";
+        hideStatus();
+      },
+      onAbort: function (what) {
+        showError("aborted: " + (what === undefined ? "" : String(what)));
+      },
+      // Everything (the .wasm and the pthread worker's relative fetches) resolves
+      // against the versioned CDN folder.
+      locateFile: function (path) {
+        return base + "/" + path;
+      },
+      // Pin the pthread worker: same-origin base → direct URL; cross-origin CDN →
+      // a same-origin blob shim that importScripts the glue (see helper above).
+      mainScriptUrlOrBlob: pthreadWorkerScript(),
+    };
+    window.Module = Module;
+
+    Module.setStatus("Downloading…");
+    window.onerror = function (msg, url, line) {
+      showError(msg + " @ " + url + ":" + line);
+      return false;
+    };
+
+    // ── Inject glue scripts in the required order ──────────────────────────────
+    // wx.js → wx-dom.js → gerbview.js, all from the (cross-origin) CDN folder.
+    loadScript(base + "/wx.js")
+      .then(function () {
+        return loadScript(base + "/wx-dom.js");
+      })
+      .then(function () {
+        return loadScript(base + "/gerbview.js");
+      })
+      .then(function () {
+        console.log("[KICAD] injected wx.js + wx-dom.js + gerbview.js (base=" + base + ")");
+      })
+      .catch(function (err) {
+        showError(err.message);
+      });
   }
 
-  // ── Module config (global) ───────────────────────────────────────────────────
-  var Module = {
-    thisProgram: "/usr/bin/gerbview", // argv[0] for KiCad's DEBUG check
-    arguments: OPEN_ARGS,
-    preRun: [createCanvas, writeResources, seedKicadConfig, preloadBoard],
-    postRun: [],
-    print: function () {
-      console.log("[KICAD_OUT] " + Array.prototype.join.call(arguments, " "));
-    },
-    printErr: function () {
-      console.error("[KICAD_ERR] " + Array.prototype.join.call(arguments, " "));
-    },
-    setStatus: function (text) {
-      if (text) console.log("[KICAD_STATUS] " + text);
-      setStatusUI(text);
-    },
-    totalDependencies: 0,
-    monitorRunDependencies: function (left) {
-      this.totalDependencies = Math.max(this.totalDependencies, left);
-      Module.setStatus(
-        left
-          ? "Preparing… (" + (this.totalDependencies - left) + "/" + this.totalDependencies + ")"
-          : "All downloads complete."
-      );
-    },
-    onRuntimeInitialized: function () {
-      console.log("[KICAD] runtime initialized");
-      if (Module.canvas) Module.canvas.style.display = "block";
-      hideStatus();
-    },
-    onAbort: function (what) {
-      showError("aborted: " + (what === undefined ? "" : String(what)));
-    },
-    // Route the .wasm to BINARY_BASE; everything else (the pthread worker) to GLUE_BASE.
-    locateFile: function (path) {
-      return (/\.wasm$/.test(path) ? BINARY_BASE : GLUE_BASE) + "/" + path;
-    },
-    // Pin the pthread worker to the same-origin glue (workers cannot be cross-origin).
-    mainScriptUrlOrBlob: GLUE_BASE + "/gerbview.js",
-  };
-  window.Module = Module;
-
-  Module.setStatus("Downloading…");
-  window.onerror = function (msg, url, line) {
-    showError(msg + " @ " + url + ":" + line);
-    return false;
-  };
-
-  // ── Inject glue scripts in the required order ────────────────────────────────
   function loadScript(src) {
     return new Promise(function (resolve, reject) {
       var s = document.createElement("script");
@@ -298,17 +369,10 @@
     });
   }
 
-  loadScript(GLUE_BASE + "/wx.js")
-    .then(function () {
-      return loadScript(GLUE_BASE + "/wx-dom.js");
-    })
-    .then(function () {
-      return loadScript(GLUE_BASE + "/gerbview.js");
-    })
-    .then(function () {
-      console.log("[KICAD] injected wx.js + wx-dom.js + gerbview.js (glue=" + GLUE_BASE + ", bin=" + BINARY_BASE + ")");
-    })
+  setStatusUI("Resolving latest build…");
+  resolveBase()
+    .then(boot)
     .catch(function (err) {
-      showError(err.message);
+      showError("could not resolve gerbview build: " + err.message);
     });
 })();

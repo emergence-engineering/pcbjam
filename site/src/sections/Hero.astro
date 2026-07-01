@@ -18,6 +18,15 @@ import Icon from '../components/Icon.astro';
       <WaitlistForm source="hero" id="waitlist" class="hero-form" />
 
       <p class="hero-secondary">
+        <a
+          href="https://demo.pcbjam.com"
+          class="try"
+          target="_blank"
+          rel="noopener"
+        >
+          Open the live editor →
+        </a>
+        <span class="dot" aria-hidden="true">·</span>
         <a href="#multiplayer" class="watch">
           <Icon name="icons/play.svg" size="1.1rem" alt="" /> Watch the 90-second demo →
         </a>
@@ -61,6 +70,19 @@ import Icon from '../components/Icon.astro';
   }
   .hero-secondary {
     margin: 1rem 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+  }
+  .try {
+    display: inline-flex;
+    align-items: center;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .dot {
+    color: var(--fg-muted);
   }
   .watch {
     display: inline-flex;

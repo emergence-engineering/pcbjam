@@ -16,6 +16,13 @@ import WaitlistForm from '../components/WaitlistForm.astro';
       microcopy="Get early-access invites and product updates. No spam, unsubscribe anytime."
     />
 
+    <p class="final-demo">
+      Don’t want to wait? <a
+        href="https://demo.pcbjam.com"
+        target="_blank"
+        rel="noopener">Try the live demo now →</a>
+    </p>
+
     <ul class="final-trust">
       <li>Open source</li>
       <li>Built on KiCad</li>
@@ -36,6 +43,15 @@ import WaitlistForm from '../components/WaitlistForm.astro';
   .final-form {
     margin-top: 1.5rem;
     text-align: left;
+  }
+  .final-demo {
+    margin: 1rem 0 0;
+    font-size: 0.95rem;
+    color: var(--fg-muted);
+  }
+  .final-demo a {
+    color: var(--accent);
+    font-weight: 600;
   }
   .final-trust {
     list-style: none;
