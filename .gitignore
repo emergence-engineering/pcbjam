@@ -83,6 +83,11 @@ output/
 /bench/
 /scripts/bench/vm/
 
+# Temporary/disposable prebuilt WASM sets (native-EH + JS-EH × eeschema + pcbnew
+# O1 builds) + the standalone perf harness, used to reproduce the runtime-perf
+# comparison on demand. Large (~1 GB), never committed.
+/benchmark-builds/
+
 /tests/.test-port-asyncify
 /memory/
 

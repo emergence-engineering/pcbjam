@@ -92,6 +92,11 @@ const PCBNEW_FAMILY_SPECS = [
   '**/footprint-3d-preview.spec.ts',
 ];
 
+// Runtime-perf specs run ONLY on the Chromium 'perf' project below: they need
+// CDP CPU throttling (Chromium-only) and pcbnew needs V8. Excluded from the
+// firefox/chromium projects so they don't double-run there.
+const PERF_SPECS = ['**/*-perf.spec.ts'];
+
 const appsDir = 'apps';
 
 export default defineConfig({
@@ -120,9 +125,9 @@ export default defineConfig({
     {
       // Firefox is the default for headless testing (works on ARM Mac)
       name: 'firefox',
-      // On CI the pcbnew-family specs run on chromium-ci instead (see
-      // PCBNEW_FAMILY_SPECS above for why).
-      ...(process.env.CI ? { testIgnore: PCBNEW_FAMILY_SPECS } : {}),
+      // Perf specs always run on the dedicated 'perf' project, never here. On CI
+      // the pcbnew-family specs also move to chromium-ci (see PCBNEW_FAMILY_SPECS).
+      testIgnore: [...PERF_SPECS, ...(process.env.CI ? PCBNEW_FAMILY_SPECS : [])],
       use: {
         ...devices['Desktop Firefox'],
         viewport: { width: 1280, height: 720 },
@@ -157,6 +162,7 @@ export default defineConfig({
       // Chromium issues #1416283, #338414704 (SwiftShader WebGL bug).
       // Run via: npm run test:kicad:headed
       name: 'chromium',
+      testIgnore: PERF_SPECS,
       use: {
         channel: 'chrome',
         viewport: { width: 1280, height: 720 },
@@ -176,6 +182,20 @@ export default defineConfig({
         launchOptions: {
           args: ['--enable-unsafe-swiftshader'],
         },
+      },
+    },
+    {
+      // Runtime-perf specs (*-perf.spec.ts): bundled Chromium for CDP CPU throttling.
+      // Bundled (not system Chrome) because system Chrome paces rAF oddly under CDP
+      // throttle (FPS rose with throttle). --enable-unsafe-swiftshader lets it use
+      // software WebGL headless on CI; harmless with a real GPU locally. Add --headed
+      // locally for real-GPU FPS numbers.
+      name: 'perf',
+      testMatch: PERF_SPECS,
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1280, height: 720 },
+        launchOptions: { args: ['--enable-unsafe-swiftshader'] },
       },
     },
   ],

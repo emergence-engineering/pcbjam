@@ -304,6 +304,16 @@ jobs:
         working-directory: tests
         run: xvfb-run -a npm run test:kicad:ci
 
+      # Runtime-perf E2E (eeschema + pcbnew): measures the current build's
+      # load / open+render / FPS and writes tests/test-results/perf-*.json.
+      # Track-only — never gates the build (continue-on-error). CI is
+      # headless/SwiftShader so FPS is CPU-bound + noisy; openMs is the stable number.
+      - name: KiCad runtime perf (track-only, non-gating)
+        if: inputs.run_tests
+        continue-on-error: true
+        working-directory: tests
+        run: xvfb-run -a npm run test:perf
+
       - name: Upload test logs & screenshots
         if: always() && inputs.run_tests
         uses: actions/upload-artifact@v4
