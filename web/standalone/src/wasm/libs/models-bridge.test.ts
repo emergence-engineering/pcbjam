@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { normalizeModelRef, scanModelRefs } from "./models-bridge";
+import {
+  ensureModelInMemfs,
+  installModel3dHandler,
+  normalizeModelRef,
+  scanModelRefs,
+} from "./models-bridge";
+import type { Model3dSource } from "./models-source";
 
 describe("normalizeModelRef", () => {
   it("strips any vintage of the model-dir var", () => {
@@ -29,6 +35,49 @@ describe("normalizeModelRef", () => {
     expect(normalizeModelRef("kicad_embed://m.wrl")).toBeNull();
     expect(normalizeModelRef("")).toBeNull();
     expect(normalizeModelRef("${UNCLOSED/m.wrl")).toBeNull();
+  });
+});
+
+describe("ensureModelInMemfs format fallback", () => {
+  function installFakes(available: (ref: string) => boolean) {
+    const files = new Map<string, Uint8Array>();
+    const fs = {
+      mkdirTree: () => {},
+      writeFile: (p: string, b: Uint8Array) => void files.set(p, b),
+      analyzePath: (p: string) => ({ exists: files.has(p) }),
+    };
+    (globalThis as unknown as { window: unknown }).window ??= globalThis;
+    (globalThis as unknown as { FS: unknown }).FS = fs;
+    const source: Model3dSource = {
+      getModelBody: async (ref) =>
+        available(ref) ? new TextEncoder().encode(`body:${ref}`) : null,
+      hasModel: async (ref) => available(ref),
+    };
+    installModel3dHandler(source, () => {});
+    return files;
+  }
+
+  it("serves a .wrl ask from the same-stem .step, under the .step path", async () => {
+    // kicad-packages3D is STEP-only from 10.x — old boards still ask for .wrl.
+    const files = installFakes((r) => r.endsWith(".step"));
+    const dest = await ensureModelInMemfs("FallbackLibA.3dshapes/M1.wrl");
+    // Returned (and written) under the SUBSTITUTED extension: the path picks
+    // the parsing plugin, so the .step body must dispatch to oce, not vrml.
+    expect(dest).toBe("/pcbjam/3dmodels/FallbackLibA.3dshapes/M1.step");
+    expect(files.has("/pcbjam/3dmodels/FallbackLibA.3dshapes/M1.step")).toBe(true);
+    expect(files.has("/pcbjam/3dmodels/FallbackLibA.3dshapes/M1.wrl")).toBe(false);
+  });
+
+  it("prefers the exact ref when it exists", async () => {
+    const files = installFakes(() => true);
+    const dest = await ensureModelInMemfs("FallbackLibB.3dshapes/M2.wrl");
+    expect(dest).toBe("/pcbjam/3dmodels/FallbackLibB.3dshapes/M2.wrl");
+    expect(files.has("/pcbjam/3dmodels/FallbackLibB.3dshapes/M2.wrl")).toBe(true);
+  });
+
+  it("resolves null when no format of the model exists", async () => {
+    installFakes(() => false);
+    expect(await ensureModelInMemfs("FallbackLibC.3dshapes/M3.wrl")).toBeNull();
   });
 });
 

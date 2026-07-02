@@ -102,6 +102,29 @@ export async function ensureModelInMemfs(ref: string): Promise<string | null> {
   return p;
 }
 
+/**
+ * Format fallback: kicad-packages3D dropped `.wrl` at the 10.x generation
+ * (STEP-only), but boards authored with KiCad ≤9 still reference `.wrl`. Try
+ * the exact ref, then the same stem in the surviving formats. The substituted
+ * file is written (and returned) under ITS OWN extension — the returned path's
+ * extension is what picks the parsing plugin, so a `.wrl` ask served by a
+ * `.step` body dispatches to oce, not vrml. No C++ involvement.
+ */
+const FALLBACK_EXTS: Record<string, string[]> = {
+  ".wrl": [".step", ".stp"],
+  ".wrz": [".step", ".stp"],
+  ".step": [".wrl"],
+  ".stp": [".wrl"],
+};
+
+function refCandidates(ref: string): string[] {
+  const dot = ref.lastIndexOf(".");
+  if (dot < 0) return [ref];
+  const ext = ref.slice(dot).toLowerCase();
+  const stem = ref.slice(0, dot);
+  return [ref, ...(FALLBACK_EXTS[ext] ?? []).map((e) => `${stem}${e}`)];
+}
+
 async function doEnsure(ref: string, dest: string): Promise<string | null> {
   const source = installedSource;
   const fs = toolFS();
@@ -110,13 +133,19 @@ async function doEnsure(ref: string, dest: string): Promise<string | null> {
     written.add(ref);
     return dest;
   }
-  const body = await source.getModelBody(ref);
-  if (!body) return null;
-  fs.mkdirTree(dest.slice(0, dest.lastIndexOf("/")));
-  fs.writeFile(dest, body);
-  written.add(ref);
-  installedLog(`[3d] materialized ${ref} (${body.length} bytes)`);
-  return dest;
+  for (const candidate of refCandidates(ref)) {
+    const body = await source.getModelBody(candidate);
+    if (!body) continue;
+    const target = `${MODELS_3D_ROOT}/${candidate}`;
+    fs.mkdirTree(target.slice(0, target.lastIndexOf("/")));
+    fs.writeFile(target, body);
+    written.add(ref);
+    installedLog(
+      `[3d] materialized ${candidate}${candidate === ref ? "" : ` (for ${ref})`} (${body.length} bytes)`,
+    );
+    return target;
+  }
+  return null;
 }
 
 /**

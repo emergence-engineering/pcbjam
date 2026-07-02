@@ -44,6 +44,10 @@ function parseArgs(argv) {
       // KiCad library snapshot tag (published once to libs/kicad/<libTag>/).
       // Omitted ⇒ the offline built-in example symbols (back-compat).
       case "--lib-tag": a.libTag = next(); break;
+      // kicad-packages3D snapshot tag (published once to
+      // libs/kicad-models/<modelsTag>/). Omitted ⇒ 3D component models off
+      // (the viewer renders bare boards, exactly as before the feature).
+      case "--models-tag": a.modelsTag = next(); break;
       case "--landing": a.landing = next(); break;
       case "--waitlist": a.waitlist = next(); break;
       case "--plausible": a.plausible = next(); break;
@@ -98,6 +102,13 @@ function main() {
           VITE_LIBS_MANIFEST_URL: `${a.cdn}/libs/kicad/${a.libTag}/manifest.json`,
         }
       : { VITE_LIBS_SOURCE: "static" }),
+    // 3D models: lazy per-board sparse fetch from the versioned models CDN
+    // (docs/features/3d-models). Off unless a --models-tag is given.
+    ...(a.modelsTag
+      ? {
+          VITE_MODELS_MANIFEST_URL: `${a.cdn}/libs/kicad-models/${a.modelsTag}/manifest.json`,
+        }
+      : {}),
     VITE_YJS_PROVIDER: "broadcastchannel",
     // Build identity for the version badge. The commit is the GPLv3
     // corresponding-source pointer (pins the kicad + wxwidgets submodules).
@@ -117,6 +128,7 @@ function main() {
   console.log(`  VITE_PROJECT_MANIFEST_URL=${env.VITE_PROJECT_MANIFEST_URL}`);
   console.log(`  VITE_APP_TAG=${env.VITE_APP_TAG} VITE_GIT_SHA=${env.VITE_GIT_SHA || "(none)"}`);
   console.log(`  VITE_LIBS_SOURCE=${env.VITE_LIBS_SOURCE}${env.VITE_LIBS_MANIFEST_URL ? ` (${env.VITE_LIBS_MANIFEST_URL})` : ""}`);
+  console.log(`  VITE_MODELS_MANIFEST_URL=${env.VITE_MODELS_MANIFEST_URL ?? "(unset — 3D models off)"}`);
   console.log(`  VITE_LANDING_URL=${env.VITE_LANDING_URL} VITE_WAITLIST_URL=${env.VITE_WAITLIST_URL}`);
   console.log(`  VITE_PLAUSIBLE_DOMAIN=${env.VITE_PLAUSIBLE_DOMAIN || "(off)"}`);
 
