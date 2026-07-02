@@ -1,9 +1,9 @@
-import { defineConfig, devices } from '@playwright/test';
-import { execSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
+import { defineConfig, devices } from "@playwright/test";
+import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 
-const PORT_FILE = path.join(__dirname, '.test-port');
+const PORT_FILE = path.join(__dirname, ".test-port");
 
 // NOTE: Chrome headless crashes on ARM Mac due to SwiftShader WebGL bug
 // (Chromium issues #1416283, #338414704). Firefox headless works reliably.
@@ -30,10 +30,10 @@ const PORT_FILE = path.join(__dirname, '.test-port');
 // forked with an empty argv), and it imports this config — and so writes the
 // file — before any worker is spawned.
 function resolvePort(): number {
-  const isMainRunner = process.argv.slice(2).includes('test');
+  const isMainRunner = process.argv.slice(2).includes("test");
   if (!isMainRunner) {
     try {
-      const existing = parseInt(fs.readFileSync(PORT_FILE, 'utf-8').trim(), 10);
+      const existing = parseInt(fs.readFileSync(PORT_FILE, "utf-8").trim(), 10);
       if (existing > 0 && existing < 65536) {
         return existing;
       }
@@ -51,8 +51,8 @@ function resolvePort(): number {
 function findFreePort(): number {
   try {
     const result = execSync(
-      'python3 -c "import socket; s=socket.socket(); s.bind((\'\',0)); print(s.getsockname()[1]); s.close()"',
-      { encoding: 'utf-8' }
+      "python3 -c \"import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()\"",
+      { encoding: "utf-8" }
     );
     return parseInt(result.trim());
   } catch {
@@ -68,44 +68,47 @@ const port = resolvePort();
 // on arm64, whose denser code fits). V8 handles it, so on CI these specs run
 // on bundled Chromium (the 'chromium-ci' project) and firefox skips them.
 const PCBNEW_FAMILY_SPECS = [
-  '**/pcbnew.spec.ts',
-  '**/pcbnew-collab.spec.ts',
-  '**/load-pcb.spec.ts',
-  '**/load-pcb-probe.spec.ts',
+  "**/pcbnew.spec.ts",
+  "**/pcbnew-collab.spec.ts",
+  "**/load-pcb.spec.ts",
+  "**/load-pcb-probe.spec.ts",
   // Specs added 2026-06-11..06-13 that boot pcbnew (pcbnew.html /
   // pcbnew-collab.html). Without routing here they ran on Firefox in CI and
   // timed out at instantiation (the SpiderMonkey/x86 code-budget OOM above).
   // The last three are parametrized across pl_editor/eeschema/pcbnew; routing
   // the whole file moves those variants to chromium-ci too (they boot fine on
   // V8) — only the browser exercising them changes, not whether they run.
-  '**/appearance.spec.ts',
-  '**/contextmenu-scrollbar-pcbnew.spec.ts',
-  '**/dark-mode.spec.ts',
-  '**/items-bridge.spec.ts',
-  '**/roundtrip.spec.ts',
-  '**/save-hook.spec.ts',
+  "**/appearance.spec.ts",
+  "**/contextmenu-scrollbar-pcbnew.spec.ts",
+  "**/dark-mode.spec.ts",
+  "**/items-bridge.spec.ts",
+  "**/roundtrip.spec.ts",
+  "**/save-hook.spec.ts",
   // boots pcbnew.html — must run on V8 (chromium-ci); on Firefox/x86 CI the
   // ~190M module OOMs at instantiation and #canvas never appears (run 27626037849).
-  '**/pcbnew-move.spec.ts',
+  "**/pcbnew-move.spec.ts",
   // 3D viewer specs boot pcbnew.html (3D-enabled build) — same V8 routing.
-  '**/3d-viewer.spec.ts',
-  '**/3d-viewer-models.spec.ts',
-  '**/footprint-3d-preview.spec.ts',
+  "**/3d-viewer.spec.ts",
+  // Isolated (own file → own worker) so its heavy single load isn't degraded by the
+  // Worker accumulation of the other 3D-viewer tests sharing a process (see the file header).
+  "**/3d-viewer-deadlock.spec.ts",
+  "**/3d-viewer-models.spec.ts",
+  "**/footprint-3d-preview.spec.ts",
 ];
 
 // Runtime-perf specs run ONLY on the Chromium 'perf' project below: they need
 // CDP CPU throttling (Chromium-only) and pcbnew needs V8. Excluded from the
 // firefox/chromium projects so they don't double-run there.
-const PERF_SPECS = ['**/*-perf.spec.ts'];
+const PERF_SPECS = ["**/*-perf.spec.ts"];
 
-const appsDir = 'apps';
+const appsDir = "apps";
 
 export default defineConfig({
-  globalSetup: './global-setup.ts',
-  testDir: './kicad',
+  globalSetup: "./global-setup.ts",
+  testDir: "./kicad",
   // See playwright.config.ts: keep CI's outputDir cleanup off test-results/ so the kicad +
   // perf runs don't wipe the accumulated screenshots.
-  outputDir: process.env.CI ? 'pw-artifacts/kicad' : 'test-results',
+  outputDir: process.env.CI ? "pw-artifacts/kicad" : "test-results",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   // 1 local retry absorbs the known under-parallel-load flakes (same rationale
@@ -116,47 +119,52 @@ export default defineConfig({
   // local — the serial CI run was the dominant wall-clock cost. Cap (e.g. '50%'
   // or a fixed count) if contention OOMs/flakes; retries:2 covers transient.
   workers: undefined,
-  reporter: 'html',
-  timeout: 180000,  // KiCad WASM needs more time to load (3 minutes)
+  reporter: "html",
+  timeout: 180000, // KiCad WASM needs more time to load (3 minutes)
 
   use: {
     baseURL: `http://localhost:${port}`,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
   },
 
   projects: [
     {
       // Firefox is the default for headless testing (works on ARM Mac)
-      name: 'firefox',
+      name: "firefox",
       // Perf specs always run on the dedicated 'perf' project, never here. On CI
       // the pcbnew-family specs also move to chromium-ci (see PCBNEW_FAMILY_SPECS).
-      testIgnore: [...PERF_SPECS, ...(process.env.CI ? PCBNEW_FAMILY_SPECS : [])],
+      testIgnore: [
+        ...PERF_SPECS,
+        ...(process.env.CI ? PCBNEW_FAMILY_SPECS : []),
+      ],
       use: {
-        ...devices['Desktop Firefox'],
+        ...devices["Desktop Firefox"],
         viewport: { width: 1280, height: 720 },
         // CI-only prefs: GPU-less CI VMs hit two Firefox blockers (identical on
         // Hetzner ccx53 and ubicloud-standard-30, runs 27329612719/27330989479).
         // Gated on CI so local runs keep stock Firefox behavior.
-        ...(process.env.CI ? {
-          // Headless Firefox cannot create any GL context on the GPU-less CI
-          // VMs (blocklist bypass still ends in FEATURE_FAILURE_WEBGL_EXHAUSTED_
-          // DRIVERS) — run headed under Xvfb instead, where GLX + Mesa llvmpipe
-          // provides software WebGL. CI invokes the suite via `xvfb-run`.
-          headless: false,
-          launchOptions: {
-            firefoxUserPrefs: {
-              // Skip the no-GPU blocklist ("AllowWebgl2:false restricts
-              // context creation") so the GAL canvas gets a WebGL context.
-              'webgl.force-enabled': true,
-              // pcbnew.wasm (~190M) OOMs the optimizing wasm JIT at compile
-              // time ("InternalError: out of memory") and the app never boots.
-              // Baseline-only compilation trades runtime speed for a compile
-              // that fits in memory.
-              'javascript.options.wasm_optimizingjit': false,
-            },
-          },
-        } : {}),
+        ...(process.env.CI
+          ? {
+              // Headless Firefox cannot create any GL context on the GPU-less CI
+              // VMs (blocklist bypass still ends in FEATURE_FAILURE_WEBGL_EXHAUSTED_
+              // DRIVERS) — run headed under Xvfb instead, where GLX + Mesa llvmpipe
+              // provides software WebGL. CI invokes the suite via `xvfb-run`.
+              headless: false,
+              launchOptions: {
+                firefoxUserPrefs: {
+                  // Skip the no-GPU blocklist ("AllowWebgl2:false restricts
+                  // context creation") so the GAL canvas gets a WebGL context.
+                  "webgl.force-enabled": true,
+                  // pcbnew.wasm (~190M) OOMs the optimizing wasm JIT at compile
+                  // time ("InternalError: out of memory") and the app never boots.
+                  // Baseline-only compilation trades runtime speed for a compile
+                  // that fits in memory.
+                  "javascript.options.wasm_optimizingjit": false,
+                },
+              },
+            }
+          : {}),
       },
     },
     {
@@ -165,10 +173,10 @@ export default defineConfig({
       // The bundled Chromium fails with canvas hidden on ARM Mac because of
       // Chromium issues #1416283, #338414704 (SwiftShader WebGL bug).
       // Run via: npm run test:kicad:headed
-      name: 'chromium',
+      name: "chromium",
       testIgnore: PERF_SPECS,
       use: {
-        channel: 'chrome',
+        channel: "chrome",
         viewport: { width: 1280, height: 720 },
       },
     },
@@ -178,13 +186,13 @@ export default defineConfig({
       // (fine on x86 Linux; the SwiftShader bug above is ARM-Mac-specific).
       // --enable-unsafe-swiftshader: newer Chromium refuses software WebGL in
       // headless without it.
-      name: 'chromium-ci',
+      name: "chromium-ci",
       testMatch: PCBNEW_FAMILY_SPECS,
       use: {
-        ...devices['Desktop Chrome'],
+        ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 720 },
         launchOptions: {
-          args: ['--enable-unsafe-swiftshader'],
+          args: ["--enable-unsafe-swiftshader"],
         },
       },
     },
@@ -194,12 +202,12 @@ export default defineConfig({
       // throttle (FPS rose with throttle). --enable-unsafe-swiftshader lets it use
       // software WebGL headless on CI; harmless with a real GPU locally. Add --headed
       // locally for real-GPU FPS numbers.
-      name: 'perf',
+      name: "perf",
       testMatch: PERF_SPECS,
       use: {
-        ...devices['Desktop Chrome'],
+        ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 720 },
-        launchOptions: { args: ['--enable-unsafe-swiftshader'] },
+        launchOptions: { args: ["--enable-unsafe-swiftshader"] },
       },
     },
   ],

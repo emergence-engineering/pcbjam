@@ -441,6 +441,22 @@ NANOSLEEP_YIELD_LINK="${STUBS_BUILD}/nanosleep_yield.o"
 emcc -c "${PROJECT_ROOT}/wasm/shims/mallinfo_stub.c" -o "${STUBS_BUILD}/mallinfo_stub.o"
 MALLINFO_STUB_LINK="${STUBS_BUILD}/mallinfo_stub.o"
 
+# Pre-warmed Web Worker pool size (emscripten pthreads). The 3D-viewer CPU raytracer runs
+# KiCad's shared thread pool (hardware_concurrency long-lived threads, created at startup)
+# AND, for camera-move preview + post-process passes, spawns its OWN set of raw std::thread
+# workers — so a 3D-viewer session needs ~2x hardware_concurrency Workers *simultaneously*.
+# With only one set pre-warmed, the raytracer's threads fall back to on-demand `new Worker()`,
+# whose loaded→run handshake needs the main thread back in the JS event loop — which it can't
+# reach while blocked in the render's busy-wait join (no PROXY_TO_PTHREAD; the join runs on the
+# browser main thread). That circular wait is the 3D-viewer deadlock: moving the model, dragging
+# or resizing the viewer all freeze the tab. Pre-warm enough Workers that on-demand creation
+# never happens. Only 3D-viewer builds pay the extra startup Workers; other apps keep one set.
+if [ "${BUILD_3D_VIEWER:-OFF}" = "ON" ]; then
+    PTHREAD_POOL_EXPR='navigator.hardwareConcurrency*2+8'
+else
+    PTHREAD_POOL_EXPR='navigator.hardwareConcurrency'
+fi
+
 emcmake cmake "${KICAD_DIR}" \
     ${CCACHE_OPTS} \
     ${SYM_CONVERTER_CMAKE_FLAG} \
@@ -451,7 +467,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -Xclang -fno-pch-timestamp -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1${DIAG_DEFINES} -I${SYSROOT}/include -I${STUBS_DIR} -include ${STUBS_DIR}/char_traits_uint16_workaround.h" \
     -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
-    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sMALLOC=mimalloc -sPTHREAD_POOL_SIZE='navigator.hardwareConcurrency' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 ${GL3D_LINK_FLAGS} ${NANOSLEEP_YIELD_LINK} ${MALLINFO_STUB_LINK} -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a${APP_STUB_LINK} ${STUBS_BUILD}/libnng_stub.a ${EMBIND_OBJ}" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sMALLOC=mimalloc -sPTHREAD_POOL_SIZE='${PTHREAD_POOL_EXPR}' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 ${GL3D_LINK_FLAGS} ${NANOSLEEP_YIELD_LINK} ${MALLINFO_STUB_LINK} -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a${APP_STUB_LINK} ${STUBS_BUILD}/libnng_stub.a ${EMBIND_OBJ}" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \
