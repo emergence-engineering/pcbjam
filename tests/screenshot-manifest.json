@@ -1,5 +1,5 @@
 {
-  "_note": "engine tags are best-effort (gen-manifest.ts); the name list is authoritative. Refine engines after calibration.",
+  "_note": "engine tags are best-effort (spec-map.ts); the name list is authoritative. Refine engines after calibration.",
   "screenshots": [
     {
       "name": "01-loading.png",

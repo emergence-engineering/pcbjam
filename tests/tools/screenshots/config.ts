@@ -60,16 +60,17 @@ export const TRIPTYCH = {
  * for the drift-vs-regression heuristic (broad + low-intensity ⇒ environment
  * drift, not a localized regression), not for the primary verdict.
  *
- * NOTE: these are PLACEHOLDERS. `npm run screenshots:noise` renders the suite
- * twice on the CI host and prints the real intra-CI floor per engine; set
- * `changedRatio ≈ measured × 3` from that and commit the numbers here.
+ * Set to 0.5% — the re-baseline run showed 355/356 images intra-CI-stable well
+ * under this, but a couple of runs since had sub-1% inter-run flakiness, so 0.5%
+ * gives headroom while still catching real localized changes. (`npm run
+ * screenshots:noise` on two CI renders can refine per-engine numbers later.)
  */
 export type EngineFloor = { changedRatio: number; meanChannelGuard: number };
 
 export const FLOORS: Record<string, EngineFloor> = {
-    'firefox-llvmpipe': { changedRatio: 0.002, meanChannelGuard: 2.0 },
-    'chromium-swiftshader': { changedRatio: 0.002, meanChannelGuard: 2.0 },
-    default: { changedRatio: 0.002, meanChannelGuard: 2.0 },
+    'firefox-llvmpipe': { changedRatio: 0.005, meanChannelGuard: 2.0 },
+    'chromium-swiftshader': { changedRatio: 0.005, meanChannelGuard: 2.0 },
+    default: { changedRatio: 0.005, meanChannelGuard: 2.0 },
 };
 
 /**
@@ -90,6 +91,27 @@ export const IGNORE_SCREENSHOTS = new Set<string>(['retinascale-01-loaded.png'])
 /** True if a screenshot is excluded from comparison. */
 export function isIgnored(name: string): boolean {
     return IGNORE_SCREENSHOTS.has(name);
+}
+
+/** Bottom caption strip baked onto each posted composite (status + name + spec). */
+export const LABEL = {
+    maxScale: 3, // bitmap-font scale; auto-fit picks the largest that fits the width
+    vpad: 5,
+    hpad: 8,
+    text: [255, 255, 255] as [number, number, number], // white
+    colors: {
+        added: [46, 125, 50] as [number, number, number], // green
+        removed: [198, 40, 40] as [number, number, number], // red
+        changed: [239, 108, 0] as [number, number, number], // orange
+    },
+};
+
+export type LabelStatus = 'added' | 'removed' | 'changed';
+
+/** Caption text: `CHANGED  name.png · kicad/pcbnew.spec.ts` (spec omitted if unknown). */
+export function labelText(status: LabelStatus, name: string, spec: string | null): string {
+    const s = status.toUpperCase();
+    return spec ? `${s}  ${name} · ${spec}` : `${s}  ${name}`;
 }
 
 export type ManifestEntry = { name: string; engine: string };

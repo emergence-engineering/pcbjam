@@ -9,7 +9,8 @@
 import * as fs from 'fs';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
-import { PIXELMATCH, DIFF_COLOR, CLUSTER, TRIPTYCH } from './config';
+import { PIXELMATCH, DIFF_COLOR, CLUSTER, TRIPTYCH, LABEL } from './config';
+import { glyphFor } from './font8x8';
 
 export type Box = { x: number; y: number; width: number; height: number; area: number };
 
@@ -252,5 +253,64 @@ export function composite(panels: PNG[]): PNG {
         }
         xOffset += panel.width + gap;
     }
+    return out;
+}
+
+/** Draw `text` at (x0,y0) with the 8x8 bitmap font, each pixel scaled `scale`×. Clips at edges. */
+export function drawText(png: PNG, x0: number, y0: number, text: string, color: [number, number, number], scale: number): void {
+    let x = x0;
+    for (const ch of text) {
+        const glyph = glyphFor(ch);
+        for (let row = 0; row < 8; row++) {
+            const bits = glyph[row];
+            if (!bits) continue;
+            for (let col = 0; col < 8; col++) {
+                if (!((bits >> col) & 1)) continue;
+                for (let dy = 0; dy < scale; dy++) {
+                    const py = y0 + row * scale + dy;
+                    if (py < 0 || py >= png.height) continue;
+                    for (let dx = 0; dx < scale; dx++) {
+                        const px = x + col * scale + dx;
+                        if (px < 0 || px >= png.width) continue;
+                        const o = (py * png.width + px) * 4;
+                        png.data[o] = color[0];
+                        png.data[o + 1] = color[1];
+                        png.data[o + 2] = color[2];
+                        png.data[o + 3] = 255;
+                    }
+                }
+            }
+        }
+        x += 9 * scale; // 8px glyph + 1px spacing
+    }
+}
+
+/**
+ * Return a copy of `png` with a `bg`-coloured caption strip appended at the bottom,
+ * showing `text` in white. Auto-fits the font scale to the width; if even scale 1
+ * overflows, truncates the tail (keeps the name, trims the spec) with `..`.
+ */
+export function withBottomLabel(png: PNG, text: string, bg: [number, number, number]): PNG {
+    const advance = 9; // per-char glyph cells at scale 1
+    const maxW = Math.max(1, png.width - 2 * LABEL.hpad);
+    let scale = LABEL.maxScale;
+    while (scale > 1 && text.length * advance * scale > maxW) scale--;
+    let label = text;
+    const maxChars = Math.max(1, Math.floor(maxW / (advance * scale)));
+    if (label.length > maxChars) label = label.slice(0, Math.max(1, maxChars - 2)) + '..';
+
+    const stripH = 8 * scale + 2 * LABEL.vpad;
+    const out = new PNG({ width: png.width, height: png.height + stripH });
+    png.data.copy(out.data, 0, 0, png.data.length); // original image on top (same width)
+    for (let y = png.height; y < out.height; y++) {
+        for (let x = 0; x < out.width; x++) {
+            const o = (y * out.width + x) * 4;
+            out.data[o] = bg[0];
+            out.data[o + 1] = bg[1];
+            out.data[o + 2] = bg[2];
+            out.data[o + 3] = 255;
+        }
+    }
+    drawText(out, LABEL.hpad, png.height + LABEL.vpad, label, LABEL.text, scale);
     return out;
 }

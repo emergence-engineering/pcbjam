@@ -24,8 +24,11 @@ import {
     type Manifest,
     floorFor,
     isIgnored,
+    labelText,
+    LABEL,
 } from './config';
-import { diffImages, cluster, drawBoxes, composite, loadPng, savePng, type Box } from './image-ops';
+import { diffImages, cluster, drawBoxes, composite, loadPng, savePng, withBottomLabel, type Box } from './image-ops';
+import { buildSpecResolver } from './spec-map';
 
 export type PairVerdict = 'unchanged' | 'changed';
 
@@ -79,7 +82,7 @@ export type Report = {
     generatedFor: string | null;
     changed: ChangedEntry[];
     added: Array<{ name: string; image: string }>;
-    removed: Array<{ name: string }>;
+    removed: Array<{ name: string; image: string }>;
     unchangedCount: number;
     /** many changes, mostly drift-like ⇒ probably a host Mesa/font refresh; re-promote rather than debug */
     driftLikely: boolean;
@@ -130,6 +133,7 @@ export function classify(root: string, sha: string | null): Report {
     const manifest = loadManifest(root);
     const outDir = path.join(root, DIFF_OUT_DIR);
     fs.mkdirSync(outDir, { recursive: true });
+    const { specFor } = buildSpecResolver(root); // name → spec, for the caption strip
 
     const report: Report = {
         generatedFor: sha,
@@ -148,7 +152,11 @@ export function classify(root: string, sha: string | null): Report {
             // an intentional removal. (The stronger "did the spec actually run" cross-check
             // against the Playwright JSON report lands with the manifest work.)
             if (manifest?.screenshots.some((e) => e.name === name)) {
-                report.removed.push({ name });
+                // Removed now gets a captioned image (the old baseline) so it's visible in Discord.
+                const imageRel = path.join(DIFF_OUT_DIR, `${name}.removed.png`);
+                const labeled = withBottomLabel(loadPng(baselinePath), labelText('removed', name, specFor(name)), LABEL.colors.removed);
+                savePng(path.join(root, imageRel), labeled);
+                report.removed.push({ name, image: imageRel });
             }
             continue;
         }
@@ -164,7 +172,7 @@ export function classify(root: string, sha: string | null): Report {
         }
         const triptychRel = path.join(DIFF_OUT_DIR, `${name}.triptych.png`);
         const heatmapRel = path.join(DIFF_OUT_DIR, `${name}.heatmap.png`);
-        savePng(path.join(root, triptychRel), triptych);
+        savePng(path.join(root, triptychRel), withBottomLabel(triptych, labelText('changed', name, specFor(name)), LABEL.colors.changed));
         savePng(path.join(root, heatmapRel), heatmap);
         report.changed.push({ ...result, triptych: triptychRel, heatmap: heatmapRel });
     }
@@ -173,7 +181,8 @@ export function classify(root: string, sha: string | null): Report {
     for (const name of actuals) {
         if (baselines.has(name)) continue;
         const imageRel = path.join(DIFF_OUT_DIR, `${name}.added.png`);
-        fs.copyFileSync(path.join(resultsDir, name), path.join(root, imageRel));
+        const labeled = withBottomLabel(loadPng(path.join(resultsDir, name)), labelText('added', name, specFor(name)), LABEL.colors.added);
+        savePng(path.join(root, imageRel), labeled);
         report.added.push({ name, image: imageRel });
     }
 

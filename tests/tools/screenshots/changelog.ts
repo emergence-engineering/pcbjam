@@ -14,9 +14,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { BASELINE_DIRS, DIFF_OUT_DIR, floorFor } from './config';
+import { PNG } from 'pngjs';
+import { BASELINE_DIRS, DIFF_OUT_DIR, floorFor, labelText, LABEL } from './config';
 import { comparePair, type Report } from './compare';
-import { loadPng, savePng } from './image-ops';
+import { loadPng, savePng, withBottomLabel } from './image-ops';
+import { buildSpecResolver } from './spec-map';
 import { buildAttachments, paginate, postMessage } from './post-discord';
 
 function git(root: string, args: string[]): string {
@@ -77,6 +79,23 @@ async function main(): Promise<void> {
         unchangedCount: 0,
         driftLikely: false,
     };
+    const { specFor } = buildSpecResolver(cwd);
+
+    // Load a git blob (a committed PNG at `rev`) as a decoded PNG, or null if absent.
+    const blobPng = (rev: string, p: string): PNG | null => {
+        const b = gitBlob(repoRoot, rev, p);
+        if (!b) return null;
+        const f = path.join(tmp, `${rev.slice(0, 7)}-${path.basename(p)}`);
+        fs.writeFileSync(f, b);
+        return loadPng(f);
+    };
+    // Save a single captioned image (added/removed) and record it in the report.
+    const saveSingle = (img: PNG, name: string, status: 'added' | 'removed'): void => {
+        const suffix = status === 'added' ? 'added' : 'removed';
+        const rel = path.join(DIFF_OUT_DIR, `${name}.${suffix}.png`);
+        savePng(path.join(cwd, rel), withBottomLabel(img, labelText(status, name, specFor(name)), LABEL.colors[status]));
+        report[status].push({ name, image: rel });
+    };
 
     for (const line of diff.split('\n')) {
         const parts = line.split('\t');
@@ -86,28 +105,25 @@ async function main(): Promise<void> {
         const name = path.basename(repoPath);
 
         if (status === 'A' || status === 'R') {
-            const buf = gitBlob(repoRoot, head, repoPath);
-            if (buf) {
-                const rel = path.join(DIFF_OUT_DIR, `${name}.added.png`);
-                fs.writeFileSync(path.join(cwd, rel), buf);
-                report.added.push({ name, image: rel });
+            const img = blobPng(head, repoPath);
+            if (img) saveSingle(img, name, 'added');
+            if (status === 'R') {
+                const oldName = path.basename(oldPath);
+                const oldImg = blobPng(base, oldPath);
+                if (oldImg) saveSingle(oldImg, oldName, 'removed');
             }
-            if (status === 'R') report.removed.push({ name: path.basename(oldPath) });
         } else if (status === 'D') {
-            report.removed.push({ name });
+            const img = blobPng(base, repoPath);
+            if (img) saveSingle(img, name, 'removed');
         } else {
-            // Modified: triptych old vs new.
-            const oldBuf = gitBlob(repoRoot, base, repoPath);
-            const newBuf = gitBlob(repoRoot, head, repoPath);
-            if (!oldBuf || !newBuf) continue;
-            const oldFile = path.join(tmp, `old-${name}`);
-            const newFile = path.join(tmp, `new-${name}`);
-            fs.writeFileSync(oldFile, oldBuf);
-            fs.writeFileSync(newFile, newBuf);
-            const { result, heatmap, triptych } = comparePair(loadPng(oldFile), loadPng(newFile), name, floorFor(name));
+            // Modified: captioned triptych old vs new.
+            const oldImg = blobPng(base, repoPath);
+            const newImg = blobPng(head, repoPath);
+            if (!oldImg || !newImg) continue;
+            const { result, heatmap, triptych } = comparePair(oldImg, newImg, name, floorFor(name));
             const triptychRel = path.join(DIFF_OUT_DIR, `${name}.triptych.png`);
             const heatmapRel = path.join(DIFF_OUT_DIR, `${name}.heatmap.png`);
-            savePng(path.join(cwd, triptychRel), triptych);
+            savePng(path.join(cwd, triptychRel), withBottomLabel(triptych, labelText('changed', name, specFor(name)), LABEL.colors.changed));
             savePng(path.join(cwd, heatmapRel), heatmap);
             report.changed.push({ ...result, triptych: triptychRel, heatmap: heatmapRel });
         }

@@ -120,8 +120,17 @@ export function buildAttachments(root: string, report: Report | null): { files: 
         const a = attach(root, ad.image, `ADDED_${ad.name}`);
         if (a) files.push(a);
     }
+    const removedToShow = report.removed.length > FLOOD_N ? report.removed.slice(0, 3) : report.removed;
+    if (report.removed.length > FLOOD_N) {
+        notes.push(`➖ ${report.removed.length} removed (showing ${removedToShow.length})`);
+    }
+    for (const rm of removedToShow) {
+        if (files.length >= MAX_TOTAL_FILES) break;
+        const a = attach(root, rm.image, `REMOVED_${rm.name}`);
+        if (a) files.push(a);
+    }
     const shown = files.length;
-    const wanted = report.changed.length + addedToShow.length;
+    const wanted = report.changed.length + addedToShow.length + removedToShow.length;
     if (wanted > shown) notes.push(`(${wanted - shown} more images omitted — see the CI artifact)`);
     return { files, notes };
 }
