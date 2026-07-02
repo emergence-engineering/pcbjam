@@ -22,6 +22,17 @@ if [ ! -f "${SRC}/src/passes/HoistCppCatches.cpp" ]; then
     exit 1
 fi
 
+# CI fast-path: the workflow cache-restores bin/ keyed on the exact submodule SHA and
+# sets this var on a hit, so the restored binaries are authoritative — skip cmake+ninja.
+# Never set it locally when iterating on the pass: uncommitted source edits would be
+# silently ignored (the SHA key can't see them).
+if [ "${BINARYEN_TRUST_PREBUILT:-0}" = "1" ] \
+   && [ -x "${BUILD}/bin/wasm-opt" ] && [ -x "${BUILD}/bin/wasm-emscripten-finalize" ]; then
+    echo "Using prebuilt Binaryen tools (BINARYEN_TRUST_PREBUILT=1): ${BUILD}/bin" >&2
+    echo "${BUILD}/bin/wasm-opt"
+    exit 0
+fi
+
 # Configure once (mirrors scripts/common/get-wasm-opt.sh's from-source flags).
 if [ ! -f "${BUILD}/build.ninja" ]; then
     echo "Configuring Binaryen submodule build (one-time, ~5 min to build)..." >&2

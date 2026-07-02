@@ -95,11 +95,13 @@ jobs:
           BIN=$(git -C binaryen rev-parse --short HEAD)
           SC=$(node scripts/deploy/wasm-cache-hash.mjs)
           EPOCH=$(cat .ci-cache-epoch 2>/dev/null || echo 0)
+          EMV=$(. scripts/common/versions.sh && echo "$EMSCRIPTEN_VERSION")
           THREED='${{ inputs.build_3d_viewer }}'
           BASE="kbase-${{ runner.os }}-k${KICAD}-wx${WX}-sc${SC}-3d${THREED}-e${EPOCH}"
           FINAL="kwasm-${{ runner.os }}-bin${BIN}${{ inputs.opt_level }}-k${KICAD}-wx${WX}-sc${SC}-3d${THREED}-e${EPOCH}"
           {
             echo "kicad=$KICAD"; echo "wx=$WX"; echo "sc=$SC"; echo "epoch=$EPOCH"
+            echo "bin=$BIN"; echo "emv=$EMV"
             echo "base_key=$BASE"; echo "final_key=$FINAL"
           } >> "$GITHUB_OUTPUT"
 
@@ -115,6 +117,23 @@ jobs:
           [ "$DISPATCH_NOCACHE" = "true" ] && SKIP=true
           echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
           echo "WASM output-cache restore skip=$SKIP"
+
+      # Binaryen post-process tools (submodule fork): otherwise built from source on
+      # every fresh VM (~46s on 30 cores, measured run 28577824366). Cache just bin/
+      # keyed on the exact submodule SHA; on a hit BINARYEN_TRUST_PREBUILT tells
+      # build-wasm-opt.sh to skip cmake+ninja and trust the restored binaries.
+      # Needed by BOTH the host post-process (final-miss path) and the test-app
+      # build, hence not gated on run_tests.
+      - name: Cache Binaryen post-process tools
+        id: binopt-cache
+        uses: actions/cache@v4
+        with:
+          path: build-wasm/tools/binaryen-hoist-build/bin
+          key: binopt-${{ runner.os }}-${{ steps.keys.outputs.bin }}
+
+      - name: Trust prebuilt Binaryen tools (cache hit)
+        if: steps.binopt-cache.outputs.cache-hit == 'true'
+        run: echo "BINARYEN_TRUST_PREBUILT=1" >> "$GITHUB_ENV"
 
       # The cached paths the e2e tests need: final wasms (or base, mid-build) +
       # the sysroot headers the host GAL build compiles against. Same glob set for
@@ -255,6 +274,20 @@ jobs:
             !output/*.wasm.debug.wasm
 
       # --- e2e tests (gated on run_tests) ------------------------------------
+      # Host emsdk toolchain (tools/emsdk): env.sh auto-installs it on first use
+      # (~23s: emsdk repo clone + ~340 MB from storage.googleapis.com, measured run
+      # 28577824366). Caching it is speed-neutral-to-slightly-positive; the real
+      # value is availability — without it a github.com/storage.googleapis.com
+      # hiccup fails every run. Keyed on the pinned EMSCRIPTEN_VERSION (versions.sh);
+      # the emscripten ports cache (zlib) rides along. The spent downloads/ tarballs
+      # are pruned below before the post-job save.
+      - name: Cache emsdk toolchain
+        if: inputs.run_tests
+        uses: actions/cache@v4
+        with:
+          path: tools/emsdk
+          key: emsdk-${{ runner.os }}-${{ steps.keys.outputs.emv }}
+
       - name: Restore wx build cache
         id: wx-cache
         if: inputs.run_tests
@@ -276,13 +309,49 @@ jobs:
         if: inputs.run_tests
         run: ./scripts/build-wx-wasm.sh
 
+      # Built wx test apps (tests/apps): without this every run recompiles, relinks
+      # and — the expensive part — re-runs the hoist+asyncify post-link on all ~74
+      # apps (~2m20s even 30-wide). Key = every build input: the wx lib identity
+      # (submodule SHA + the same script hashes as the wx cache key; the wx SHA also
+      # covers the Makefile's JS_FILES from wxwidgets/build/wasm), the KICAD
+      # submodule SHA (some apps compile real KiCad sources — thread_pool.cpp,
+      # libcontext, headers), the binaryen SHA (post-link wasm-opt), the app
+      # sources (tracked cpp/h/html + Makefile), and the build/post-link scripts +
+      # JS shims (wasm/** = shims + the wasm-opt stub). hashFiles runs at restore
+      # time, on a fresh checkout, so it sees only tracked sources — never build
+      # outputs. On a hit the build step is skipped entirely. Excluded:
+      # tests/apps/kicad (setup:kicad staging from output/) and gal-webgl (its own
+      # step below rebuilds it every run anyway).
+      # Gated on a wx cache HIT: the test-app build is what creates the
+      # libwx_*.a -> libwx_*-emscripten.a symlinks the GAL link (wx-config --libs)
+      # needs. A restored wx cache contains them (saved at job end, after they
+      # exist), but a freshly rebuilt wx tree does not — so on a wx miss the apps
+      # must rebuild too, or the GAL step breaks.
+      - name: Cache built wx test apps
+        id: testapps-cache
+        if: inputs.run_tests && steps.wx-cache.outputs.cache-hit == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            tests/apps
+            !tests/apps/kicad
+            !tests/apps/gal-webgl
+          key: testapps-${{ runner.os }}-wx${{ steps.keys.outputs.wx }}-k${{ steps.keys.outputs.kicad }}-bin${{ steps.keys.outputs.bin }}-${{ hashFiles('tests/apps/**/*.cpp', 'tests/apps/**/*.h', 'tests/apps/**/*.html', 'tests/apps/Makefile.wasm', 'scripts/build-wx-wasm.sh', 'scripts/build-wasm-test.sh', 'scripts/common/versions.sh', 'scripts/common/env.sh', 'scripts/common/functions.sh', 'scripts/common/apply-asyncify.sh', 'scripts/common/asyncify-imports.txt', 'scripts/common/inject-dyncall-shims.sh', 'scripts/common/shims/**', 'wasm/**') }}
+
       - name: Build wxWidgets test apps
-        if: inputs.run_tests
+        if: inputs.run_tests && steps.testapps-cache.outputs.cache-hit != 'true'
         run: ./scripts/build-wasm-test.sh
 
       - name: Build GAL WebGL test app
         if: inputs.run_tests
         run: ./scripts/build-gal-webgl-test.sh
+
+      # The emsdk cache saves in the post-job phase; the downloads/ tarballs
+      # (~340 MB) are spent after install — drop them so they never ride in the
+      # cache. No-op on cache-hit runs (already pruned before the save).
+      - name: Prune emsdk download tarballs (cache hygiene)
+        if: inputs.run_tests
+        run: rm -rf tools/emsdk/downloads
 
       - name: Install test deps
         if: inputs.run_tests
@@ -295,6 +364,16 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
+
+      # Browser binaries keyed on the lockfile (which pins the playwright version).
+      # On a hit `playwright install` skips the downloads; --with-deps still
+      # apt-installs its small OS dep set either way.
+      - name: Cache Playwright browsers
+        if: inputs.run_tests
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('tests/package-lock.json') }}
 
       - name: Install Playwright browsers
         if: inputs.run_tests
