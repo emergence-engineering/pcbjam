@@ -389,15 +389,28 @@ jobs:
         working-directory: tests
         run: npm run setup:kicad
 
-      - name: wxWidgets e2e (npm run test)
+      # The e2e suites run as separate steps so one suite's failure never skips
+      # the others — every suite still renders its screenshots, so the screenshot
+      # report below can show exactly what broke/went missing. A failing step
+      # still fails the JOB (no continue-on-error); the later steps run anyway
+      # via `!cancelled()` + "previous stage wasn't skipped" guards
+      # (steps.wx_e2e.outcome != 'skipped' ⇔ the build reached the tests — on a
+      # build failure everything below stays skipped, as before).
+      - name: wxWidgets e2e (npm run test:wx)
         id: wx_e2e
         if: inputs.run_tests
         working-directory: tests
-        run: npm run test
+        run: npm run test:wx
+
+      - name: Asyncify e2e (npm run test:asyncify:firefox)
+        id: asyncify_e2e
+        if: inputs.run_tests && !cancelled() && steps.wx_e2e.outcome != 'skipped'
+        working-directory: tests
+        run: npm run test:asyncify:firefox
 
       - name: KiCad e2e (npm run test:kicad:ci)
         id: kicad_e2e
-        if: inputs.run_tests
+        if: inputs.run_tests && !cancelled() && steps.wx_e2e.outcome != 'skipped'
         working-directory: tests
         run: xvfb-run -a npm run test:kicad:ci
 
@@ -406,21 +419,25 @@ jobs:
       # Track-only — never gates the build (continue-on-error). CI is
       # headless/SwiftShader so FPS is CPU-bound + noisy; openMs is the stable number.
       - name: KiCad runtime perf (track-only, non-gating)
-        if: inputs.run_tests
+        if: inputs.run_tests && !cancelled() && steps.kicad_e2e.outcome != 'skipped'
         continue-on-error: true
         working-directory: tests
         run: xvfb-run -a npm run test:perf
 
-      # ON SUCCESS ONLY: screenshot drift gate + Discord report (perf + triptychs).
-      # Runs only when the build + e2e passed (so renders and test deps exist).
-      # Report-only during rollout: compare.ts exits 0 without --fail-on-change and
-      # the step is continue-on-error, so it never blocks the build — flip to gating
-      # once the per-engine floors are calibrated (tests/tools/screenshots/config.ts,
-      # seeded by `npm run screenshots:noise`). Posts ONLY on push to main and no-ops
-      # without DISCORD_WEBHOOK_URL (inert on PRs/forks). No extra build — reads the
-      # already-produced test-results (screenshots + perf-*.json).
-      - name: Screenshot report + perf (on success)
-        if: success() && inputs.run_tests
+      # Screenshot drift gate + Discord report (perf + triptychs). Runs whenever
+      # the e2e suites ran — INCLUDING on e2e failure — so a wrong or missing
+      # screenshot is visible on Discord even on a red build (a spec that died
+      # before its page.screenshot() shows up as "removed"). The --e2e badge is
+      # computed from the suite outcomes. Report-only during rollout: compare.ts
+      # exits 0 without --fail-on-change and the step is continue-on-error, so it
+      # never blocks the build — flip to gating once the per-engine floors are
+      # calibrated (tests/tools/screenshots/config.ts, seeded by
+      # `npm run screenshots:noise`). Posts ONLY on push to main and no-ops
+      # without DISCORD_WEBHOOK_URL (inert on PRs/forks). No extra build — reads
+      # the already-produced test-results (screenshots + perf-*.json).
+      - name: Screenshot report + perf
+        id: report
+        if: inputs.run_tests && !cancelled() && steps.kicad_e2e.outcome != 'skipped'
         continue-on-error: true
         working-directory: tests
         env:
@@ -430,16 +447,21 @@ jobs:
         # build on a screenshot difference — the Discord post is the signal. compare.ts exits 0
         # without --fail-on-change; continue-on-error also shields transient Discord hiccups.
         run: |
+          E2E=pass
+          { [ "${{ steps.wx_e2e.outcome }}" = "success" ] \
+            && [ "${{ steps.asyncify_e2e.outcome }}" = "success" ] \
+            && [ "${{ steps.kicad_e2e.outcome }}" = "success" ]; } || E2E=fail
           npm run screenshots:check
-          npm run screenshots:report -- --e2e pass
+          npm run screenshots:report -- --e2e "$E2E"
 
-      # ON FAILURE (build or e2e): a minimal text-only "CI failed" notice, nothing
-      # else (no images / no comparison). Uses curl, NOT the TS reporter, because on a
-      # build failure the test deps (npm ci) never installed. Main-push only.
+      # FALLBACK on failure: a minimal text-only "CI failed" notice, only when the
+      # rich screenshot report above did NOT post (build broke before the tests →
+      # report skipped, or the report itself errored). An e2e-only failure already
+      # posts the full report with the ❌ e2e badge + run URL — no duplicate ping.
+      # Uses curl, NOT the TS reporter, because on a build failure the test deps
+      # (npm ci) never installed. Main-push only.
       - name: Discord CI-failure notice
-        # Build/e2e failure only (the screenshot step is report-only / continue-on-error, so it
-        # never trips failure()). Main-push only.
-        if: failure() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        if: failure() && github.ref == 'refs/heads/main' && github.event_name == 'push' && steps.report.outcome != 'success'
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
