@@ -263,9 +263,14 @@ jobs:
           path: build-wasm/wxwidgets
           key: wx-${{ runner.os }}-${{ steps.keys.outputs.wx }}-${{ hashFiles('scripts/build-wx-wasm.sh','scripts/common/versions.sh') }}
 
+      # One shared timestamp, not per-file "now": plain `touch {} +` stamps each file
+      # a few ns apart in readdir order, and GNU make 4.x compares ns mtimes — so any
+      # object touched before a generated header it depends on (wx/setup.h, pcre2.h
+      # via .deps/*.d) looks stale and a random subset recompiles every cache-hit run.
+      # Equal mtimes read as up to date.
       - name: Mark restored wx objects current
         if: inputs.run_tests && steps.wx-cache.outputs.cache-hit == 'true'
-        run: find build-wasm/wxwidgets -exec touch {} +
+        run: find build-wasm/wxwidgets -exec touch -d "@$(date +%s)" {} +
 
       - name: Build wxWidgets (wxUniversal WASM)
         if: inputs.run_tests

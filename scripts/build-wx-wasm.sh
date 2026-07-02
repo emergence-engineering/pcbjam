@@ -190,6 +190,22 @@ if [ $NEEDS_CONFIGURE -eq 1 ]; then
     emmake make -C 3rdparty/pcre
 fi
 
+# Ensure the Emscripten zlib port exists before compiling. We configure with
+# --with-zlib=sys, which resolves zlib.h/libz.a to the emsdk cache sysroot —
+# populated only by `embuilder build zlib` in the configure branch above. When
+# the build dir arrives pre-configured (e.g. CI restores build-wasm/wxwidgets
+# from cache onto a runner with a freshly installed emsdk), configure is
+# skipped and any recompile of a zlib-using TU (zipstrm.cpp, zstream.cpp, ...)
+# fails with "'zlib.h' file not found" — deterministically, so the serial
+# retry below can't clear it.
+EM_CACHE_SYSROOT="$(em-config CACHE)/sysroot"
+if [ ! -f "$EM_CACHE_SYSROOT/include/zlib.h" ]; then
+    echo "Emscripten zlib port missing from $EM_CACHE_SYSROOT; building it..."
+    # --force: embuilder stamps the port as built on libz.a alone, so a
+    # half-populated cache (lib present, headers gone) would no-op without it.
+    embuilder build zlib --force
+fi
+
 # Build wxWidgets
 kw_stage wxwidgets-compile
 echo ""
