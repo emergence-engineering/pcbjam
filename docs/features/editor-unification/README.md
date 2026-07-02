@@ -1,14 +1,16 @@
 # Editor build unification — one WASM build per kiface + a runtime frame flag
 
-> **Status: Part 1 IMPLEMENTED & validated (2026-07-02) — see
-> [`05-part1-implementation.md`](05-part1-implementation.md). Part 2 deferred.** Originally
+> **Status: Part 1 AND Part 2 IMPLEMENTED (2026-07-02) — see
+> [`05-part1-implementation.md`](05-part1-implementation.md) and
+> [`06-part2-implementation.md`](06-part2-implementation.md). All four editors are now
+> runtime `--frame` choices of the ONE merged `kicad_editor` bundle.** Originally
 > authored 2026-06-30 as a research / decision record from a 5-agent read of the KiCad
 > source (`kicad/` submodule) and our WASM build. The question:
 > several of our 7 WASM "apps" are the *same compiled code* differing only by a build-time
 > constant — can we collapse them to one build that picks the editor at runtime?
 > Companion to [`../symbol-editor/`](../symbol-editor/) (which established the
 > second-launcher pattern this doc proposes to retire) and
-> [`../perf/bundle-size.md`](../perf/bundle-size.md) (the size context).
+> [`../perf/README.md`](../perf/README.md) (the size context).
 
 ## Why this exists
 
@@ -74,6 +76,7 @@ This dossier evaluates two changes the user proposed:
 | [`03-part1-library-editor-unification.md`](03-part1-library-editor-unification.md) | **Part 1.** Pair each editor with its own library editor. Why it's trivial, the exact minimal change, why it costs nothing to download, the cost/benefit, and the caveats. |
 | [`04-part2-single-app-merge.md`](04-part2-single-app-merge.md) | **Part 2.** Fuse the engines into one app. The full symbol-collision surface (`Kiface()` is the real work; the getter is trivial), the size tradeoff, when it's worth it, and extending to all 7 tools. |
 | [`05-part1-implementation.md`](05-part1-implementation.md) | **Part 1 — as-built (implemented).** The implementation record: exactly what changed (C++ / build / frontend / tests), how the runtime `--frame` mechanism works, corrections to the research (argv *is* delivered; `PGM_DATA_FILE_EXT` on all four), validation (harness + regression + real web app + demo), and the current git/build state. |
+| [`06-part2-implementation.md`](06-part2-implementation.md) | **Part 2 — as-built (implemented).** The merged `kicad_editor` image: the per-engine `Kiface`/getter binding, the 21-symbol ODR audit the research missed (+ the repeatable audit script), the embind split/dispatcher, build/frontend/test wiring, validation results, and the one known pre-existing 3d-viewer failure (fixed on main). |
 
 ## Relationship to other feature docs
 
@@ -81,8 +84,7 @@ This dossier evaluates two changes the user proposed:
   — established the "second `single_top` launcher, same kiface, different `TOP_FRAME`" pattern
   for `symbol_editor`. Part 1 generalizes that to a *runtime* `TOP_FRAME` and retires the
   separate launcher entirely.
-- [`../perf/bundle-size.md`](../perf/bundle-size.md) /
-  [`../perf/README.md`](../perf/README.md) — the size context. Part 1's dedup is orthogonal to
+- [`../perf/README.md`](../perf/README.md) — the size context. Part 1's dedup is orthogonal to
   the size levers there (it removes *duplicate artifacts*, not per-binary bloat); Part 2's
   size *cost* must be weighed against them (`wasm-split`/dlopen are already a dead end there,
   which is why a merged binary can't be lazily sub-loaded).

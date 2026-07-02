@@ -104,7 +104,7 @@ This is the strategic consideration, and it cuts against our current delivery mo
 - **The catch:** that ~190 MB is downloaded by **every** user — even one who only wants the
   calculator. It works *against* the per-tool lazy loading we do now, and a merged binary can't
   be lazily sub-loaded: `wasm-split` / `dlopen` are already assessed as a dead end for us (see
-  [`../perf/bundle-size.md`](../perf/bundle-size.md) and the bundle-composition research). So the
+  [`../perf/README.md`](../perf/README.md) and the bundle-composition research). So the
   tradeoff is "one shared binary, zero duplication, cross-probing possible" vs. "larger first
   load for single-tool users."
 

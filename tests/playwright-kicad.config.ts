@@ -109,6 +109,8 @@ const BIG_MODULE_SPECS = [
   "**/eeschema-ui.spec.ts",
   "**/eeschema-url-regex.spec.ts",
   "**/symbol_editor.spec.ts",
+  // Cross-face probe: schematic session lazily starts the PCB kiface (Preferences).
+  "**/xface-probe.spec.ts",
 ];
 
 // Runtime-perf specs run ONLY on the Chromium 'perf' project below: they need
