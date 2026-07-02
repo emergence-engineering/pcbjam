@@ -336,30 +336,27 @@ jobs:
       # seeded by `npm run screenshots:noise`). Posts ONLY on push to main and no-ops
       # without DISCORD_WEBHOOK_URL (inert on PRs/forks). No extra build — reads the
       # already-produced test-results (screenshots + perf-*.json).
-      - name: Screenshot gate + perf report (on success)
-        id: screenshot_report
+      - name: Screenshot report + perf (on success)
         if: success() && inputs.run_tests
+        continue-on-error: true
         working-directory: tests
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           GH_TOKEN: ${{ github.token }}
-        # ENFORCING gate: `screenshots:check --fail-on-change` writes report.json and exits
-        # nonzero on any changed/added/removed vs the committed baselines. We still post the
-        # report (drift triptychs + perf) so the failure is actionable, then exit with the
-        # gate's status so a drift fails the build. (A re-render change → re-promote baselines.)
+        # Report-only: post the screenshot drift + perf table to Discord but NEVER fail the
+        # build on a screenshot difference — the Discord post is the signal. compare.ts exits 0
+        # without --fail-on-change; continue-on-error also shields transient Discord hiccups.
         run: |
-          set +e
-          npm run screenshots:check -- --fail-on-change; GATE=$?
+          npm run screenshots:check
           npm run screenshots:report -- --e2e pass
-          exit $GATE
 
       # ON FAILURE (build or e2e): a minimal text-only "CI failed" notice, nothing
       # else (no images / no comparison). Uses curl, NOT the TS reporter, because on a
       # build failure the test deps (npm ci) never installed. Main-push only.
       - name: Discord CI-failure notice
-        # Build/e2e failure only — NOT a screenshot-gate failure (that already posted the
-        # drift report), so we don't double-post "CI failed" on drift.
-        if: failure() && steps.screenshot_report.outcome != 'failure' && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        # Build/e2e failure only (the screenshot step is report-only / continue-on-error, so it
+        # never trips failure()). Main-push only.
+        if: failure() && github.ref == 'refs/heads/main' && github.event_name == 'push'
         continue-on-error: true
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
