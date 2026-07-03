@@ -29,6 +29,13 @@ export SWIG_MIN="4.0"
 
 # Recommended versions for WASM build
 export OCC_VERSION="7.8.0"
+# Header-only; OCC's glTF (GLB) writer requires it (HAVE_RAPIDJSON). RapidJSON
+# has tagged no release since 1.1.0 (2016) — whose headers are ill-formed under
+# modern clang — so, like official KiCad (whose vcpkg.json pulls opencascade's
+# rapidjson feature), we pin the dated master snapshot vcpkg ships. The
+# "version" is vcpkg's port date for that commit.
+export RAPIDJSON_VERSION="2025-02-26"
+export RAPIDJSON_COMMIT="24b5e7a8b27f42fa16b96fc70aade9106cf7102f"
 export ZSTD_VERSION="1.5.5"
 export FREETYPE_VERSION="2.13.2"
 export HARFBUZZ_VERSION="8.3.0"
@@ -43,6 +50,7 @@ export HARFBUZZ_URL="https://github.com/harfbuzz/harfbuzz/releases/download/${HA
 export CAIRO_URL="https://cairographics.org/releases/cairo-${CAIRO_VERSION}.tar.xz"
 export PIXMAN_URL="https://cairographics.org/releases/pixman-${PIXMAN_VERSION}.tar.gz"
 export OCC_URL="https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/V${OCC_VERSION//./_}.tar.gz"
+export RAPIDJSON_URL="https://github.com/Tencent/rapidjson/archive/${RAPIDJSON_COMMIT}.tar.gz"
 export NGSPICE_URL="https://sourceforge.net/projects/ngspice/files/ng-spice-rework/${NGSPICE_VERSION}/ngspice-${NGSPICE_VERSION}.tar.gz/download"
 
 # SHA256 checksums (to be filled in after first successful download)

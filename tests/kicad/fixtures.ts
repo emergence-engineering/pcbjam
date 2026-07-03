@@ -1,11 +1,22 @@
 import { test as base } from '@playwright/test';
 import * as path from 'path';
 import { setupTestLogger, writeTestLogs, TestLogger, MAIN_CANVAS, waitForApp, tryLoadApp, getCanvasBox, KICAD_LOGS_DIR, getTestFileName } from '../e2e/utils/test-utils';
+import { installOccServiceStub } from './utils/occ-service';
 
 // Extend base test with automatic logging
 export const test = base.extend<{
   testLogger: TestLogger;
 }>({
+  // Every harness page gets the occ_service provider ambiently (standalone
+  // parity: boot.ts installs it whenever the editor bundle boots). Init-script
+  // based, so it exists from document start on every navigation; the worker
+  // itself is only fetched on the first occ request, so specs can still assert
+  // the lazy-load boundary.
+  page: async ({ page }, use) => {
+    await installOccServiceStub(page);
+    await use(page);
+  },
+
   testLogger: async ({ page }, use, testInfo) => {
     // Build test name from describe block + test title
     const testName = testInfo.titlePath.join(' - ');

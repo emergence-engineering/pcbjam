@@ -12,6 +12,7 @@ import {
 } from "./constants";
 import { installModel3dHandler } from "./libs/models-bridge";
 import type { Model3dSource } from "./libs/models-source";
+import { installOccService } from "./occ-service";
 import {
   buildFpLibTable,
   buildSymLibTable,
@@ -240,6 +241,15 @@ async function doBoot(opts: BootOptions): Promise<void> {
   // Which lib table this tool consumes: symbol → sym-lib-table, footprint →
   // fp-lib-table. The same lib source feeds whichever table the tool reads.
   const libKind = TOOL_LIB_KIND[tool];
+
+  // OCC service (STEP export + STEP/IGES model parsing): install whenever the
+  // merged editor bundle boots — a PCB frame can open from ANY session (e.g.
+  // eeschema → cross-face into pcbnew), and the install is a synchronous global
+  // set; the worker itself is only fetched lazily on first use.
+  if (bundle === "kicad_editor") {
+    installOccService(log);
+  }
+
   if (libsSource && libKind) {
     installLibsProvider(libsSource, log);
     // 3D models ride the same provider (kind "model3d"): the C++ ensure fallback

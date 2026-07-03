@@ -34,16 +34,23 @@ import {
 // bundle, booted with a runtime --frame flag (editor-unification Part 2) — none of
 // them publishes anything of its own. The frontend maps tools onto bundles via
 // TOOL_BUNDLE. sym_convert is a node CLI, not served.
+// occ_service is the lazy OCC worker module (STEP export + STEP/IGES model
+// parsing for the PCB frames, docs/features/occ-split/) — served, but headless:
+// no wx glue, no image archive.
 const TOOLS = [
   "kicad_editor",
   "pl_editor",
   "gerbview",
   "calculator",
+  "occ_service",
 ];
 
 // Files that make up a self-contained tool bundle. `<tool>` is substituted.
 const SHARED_FILES = ["wx.js", "wx-dom.js", "images.tar.gz"];
-const toolFiles = (tool) => [`${tool}.wasm`, `${tool}.js`, ...SHARED_FILES];
+const toolFiles = (tool) =>
+  tool === "occ_service"
+    ? [`${tool}.wasm`, `${tool}.js`]
+    : [`${tool}.wasm`, `${tool}.js`, ...SHARED_FILES];
 
 // Per-file HTTP rules (see the 0001 header matrix). `compress` is whether the
 // publisher compresses + sets Content-Encoding; images.tar.gz must stay RAW

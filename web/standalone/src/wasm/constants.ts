@@ -46,7 +46,11 @@ export type Bundle =
   | "kicad_editor"
   | "calculator"
   | "pl_editor"
-  | "gerbview";
+  | "gerbview"
+  // Headless lazy OCC worker module (docs/features/occ-split/) — fetched by the
+  // occService provider on first STEP export / STEP-IGES model parse; backs no
+  // tool/route of its own.
+  | "occ_service";
 
 /**
  * Which deployed WASM bundle actually backs each tool. The four editors share the

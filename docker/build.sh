@@ -67,7 +67,7 @@ trap 'kw_fail 130; exit 130' INT TERM
 
 cd "$(dirname "$0")/.."
 
-VALID_APPS="kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert | all"
+VALID_APPS="kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert | occ_service | all"
 
 usage() {
     echo "Usage: ./docker/build.sh <app>[,<app>...] [args...]" >&2
@@ -95,12 +95,12 @@ shift
 # possible (especially with KICAD_PIPELINE=1). pcbnew/eeschema stay buildable as
 # standalone debug aids but are not part of "all" (not deployed).
 if [[ "$APP_NAME" == "all" ]]; then
-    APPS=(kicad_editor calculator pl_editor gerbview)
+    APPS=(kicad_editor occ_service calculator pl_editor gerbview)
 else
     IFS=',' read -r -a APPS <<< "$APP_NAME"
     for app in "${APPS[@]}"; do
         case "$app" in
-            kicad_editor|pcbnew|eeschema|calculator|pl_editor|gerbview|sym_convert) ;;
+            kicad_editor|pcbnew|eeschema|calculator|pl_editor|gerbview|sym_convert|occ_service) ;;
             *)
                 echo "Error: unknown app '$app' (expected: ${VALID_APPS})" >&2
                 usage
@@ -256,9 +256,10 @@ postprocess_app() {
     local app="$1"
     local out_dir="output"
 
-    # The converter is finalized in-container (real tools, small -g0 wasm) and is
-    # a synchronous node CLI, so it needs no host post-processing.
-    if [ "$app" = "sym_convert" ]; then
+    # The converter and the OCC service are finalized in-container (real tools,
+    # small -g0 wasm) and build with ASYNCIFY=0, so they need no host
+    # post-processing (no dyncall shims, no finalize, no asyncify).
+    if [ "$app" = "sym_convert" ] || [ "$app" = "occ_service" ]; then
         echo "Skipping host post-processing for ${app} (finalized in-container)"
         return 0
     fi

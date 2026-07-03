@@ -50,6 +50,22 @@ if [ ! -d "${OCC_DIR}" ]; then
     rm "opencascade-${OCC_VERSION}.tar.gz"
 fi
 
+# RapidJSON (header-only): required by OCC's glTF/GLB writer — without it the
+# writer compiles out (HAVE_RAPIDJSON undefined) and GLB export fails at
+# runtime with "glTF writer is unavailable". Pinned to the vcpkg master
+# snapshot (see versions.sh) — a commit archive extracts as rapidjson-<sha>,
+# so rename to the dated version dir.
+RAPIDJSON_DIR="${DEPS_ROOT}/rapidjson-${RAPIDJSON_VERSION}"
+if [ ! -d "${RAPIDJSON_DIR}" ]; then
+    log_info "Downloading RapidJSON ${RAPIDJSON_VERSION} (master snapshot ${RAPIDJSON_COMMIT:0:12})..."
+    mkdir -p "${DEPS_ROOT}"
+    cd "${DEPS_ROOT}"
+    download_file "${RAPIDJSON_URL}" "rapidjson-${RAPIDJSON_VERSION}.tar.gz"
+    tar -xzf "rapidjson-${RAPIDJSON_VERSION}.tar.gz"
+    mv "rapidjson-${RAPIDJSON_COMMIT}" "rapidjson-${RAPIDJSON_VERSION}"
+    rm "rapidjson-${RAPIDJSON_VERSION}.tar.gz"
+fi
+
 log_info "Building OpenCASCADE ${OCC_VERSION} for WASM..."
 log_warn "This is a large library and may take a while..."
 
@@ -100,7 +116,8 @@ emcmake cmake "${OCC_DIR}" \
     -DUSE_GLES2=OFF \
     -DUSE_OPENGL=OFF \
     -DUSE_D3D=OFF \
-    -DUSE_RAPIDJSON=OFF \
+    -DUSE_RAPIDJSON=ON \
+    -D3RDPARTY_RAPIDJSON_DIR="${RAPIDJSON_DIR}" \
     -DUSE_DRACO=OFF \
     -DBUILD_DOC_Overview=OFF \
     -DINSTALL_SAMPLES=OFF \

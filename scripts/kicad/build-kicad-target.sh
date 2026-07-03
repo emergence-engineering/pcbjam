@@ -73,8 +73,16 @@ case "$APP_NAME" in
         KICAD_TARGET="sym_convert"
         KICAD_SUBDIR="eeschema"
         ;;
+    occ_service)
+        # Standalone OpenCASCADE 3D service (worker embind module). Target lives
+        # in wasm/occ-service/ (added by the fork's top-level CMakeLists under
+        # -DKICAD_OCC_SERVICE_WASM=ON); like kicad_editor, its binary dir
+        # doubles as the artifact subdir of its own kicad-occ_service tree.
+        KICAD_TARGET="occ_service"
+        KICAD_SUBDIR="occ_service"
+        ;;
     *)
-        echo "Error: unknown app '$APP_NAME' (expected: kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert)" >&2
+        echo "Error: unknown app '$APP_NAME' (expected: kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert | occ_service)" >&2
         exit 1
         ;;
 esac
@@ -84,6 +92,10 @@ esac
 # embind symbols (kicadCollabOnSave et al.) — reuse eeschema's embind object.
 case "$APP_NAME" in
     sym_convert)      EMBIND_APP="eeschema" ;;
+    # occ_service links the pcbnew kiface objects → pcbnew's embind object, same
+    # reason (its own embind entry points live in occ_service_main.cpp, compiled
+    # inside the CMake target).
+    occ_service)      EMBIND_APP="pcbnew" ;;
     *)                EMBIND_APP="$APP_NAME" ;;
 esac
 
@@ -95,6 +107,9 @@ esac
 case "$APP_NAME" in
     sym_convert)      STUB_APP="eeschema" ;;
     kicad_editor)     STUB_APP="pcbnew" ;;
+    # occ_service links the pcbnew kiface objects → pcbnew's stubs (frame +
+    # action-plugin scripting placeholders), like the editors.
+    occ_service)      STUB_APP="pcbnew" ;;
     *)                STUB_APP="$APP_NAME" ;;
 esac
 
@@ -337,11 +352,12 @@ fi
 EMSDK_WASM_OPT="${EMSDK}/upstream/bin/wasm-opt"
 EMSDK_FINALIZE="${EMSDK}/upstream/bin/wasm-emscripten-finalize"
 
-if [ "${APP_NAME}" = "sym_convert" ]; then
-    # Use the real tools so the converter is fully finalized inside the container.
+if [ "${APP_NAME}" = "sym_convert" ] || [ "${APP_NAME}" = "occ_service" ]; then
+    # Use the real tools so the small -g0 module is fully finalized inside the
+    # container (no host post-processing / asyncify for these targets).
     [ -f "${EMSDK_WASM_OPT}.real" ] && cp "${EMSDK_WASM_OPT}.real" "${EMSDK_WASM_OPT}"
     [ -f "${EMSDK_FINALIZE}.real" ] && cp "${EMSDK_FINALIZE}.real" "${EMSDK_FINALIZE}"
-    log_info "Using real wasm-opt/finalize for sym_convert (finalize in-container)"
+    log_info "Using real wasm-opt/finalize for ${APP_NAME} (finalize in-container)"
 else
     if [ -f "${EMSDK_WASM_OPT}" ] && [ ! -f "${EMSDK_WASM_OPT}.real" ]; then
         log_info "Backing up real wasm-opt..."
@@ -421,6 +437,13 @@ if [ "${APP_NAME}" = "kicad_editor" ]; then
     MERGED_EDITOR_CMAKE_FLAG="-DKICAD_WASM_MERGED_EDITOR=ON"
 fi
 
+# The standalone OCC 3D service (worker embind module) — gates the
+# wasm/occ-service/ subdir in the fork's top-level CMakeLists.
+OCC_SERVICE_CMAKE_FLAG=""
+if [ "${APP_NAME}" = "occ_service" ]; then
+    OCC_SERVICE_CMAKE_FLAG="-DKICAD_OCC_SERVICE_WASM=ON"
+fi
+
 # 3D viewer: built by DEFAULT (BUILD_3D_VIEWER=ON). Opt out with BUILD_3D_VIEWER=OFF, which links the
 # 3D stubs instead. The 3D viewer renders with the GL-free CPU raytracer (RENDER_3D_RAYTRACE_RAM)
 # blitted to the canvas through a plain WebGL2 textured quad — no -sLEGACY_GL_EMULATION. KiCad's
@@ -472,6 +495,7 @@ emcmake cmake "${KICAD_DIR}" \
     ${CCACHE_OPTS} \
     ${SYM_CONVERTER_CMAKE_FLAG} \
     ${MERGED_EDITOR_CMAKE_FLAG} \
+    ${OCC_SERVICE_CMAKE_FLAG} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
     -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \
@@ -582,7 +606,16 @@ elif [ -f "${EMBIND_SRC}" ]; then
         emmake make -j${JOBS} pcbcommon
     fi
     log_info "Compiling Embind bindings (${APP_NAME})..."
-    compile_embind_tu "${EMBIND_SRC}" "${EMBIND_OBJ}" "${KICAD_SUBDIR}"
+    # The include home is the app the BINDINGS belong to, not the artifact
+    # subdir — for occ_service the two differ (bindings = pcbnew's; artifacts
+    # land in the wasm/occ-service target's own occ_service/ binary dir, which
+    # has no KiCad sources).
+    case "${EMBIND_APP}" in
+        pcbnew)   EMBIND_INC_SUBDIR="pcbnew" ;;
+        eeschema) EMBIND_INC_SUBDIR="eeschema" ;;
+        *)        EMBIND_INC_SUBDIR="${KICAD_SUBDIR}" ;;
+    esac
+    compile_embind_tu "${EMBIND_SRC}" "${EMBIND_OBJ}" "${EMBIND_INC_SUBDIR}"
 else
     log_info "No embind source for ${APP_NAME} (expected at ${EMBIND_SRC}); using empty placeholder"
     EMPTY_C="${STUBS_BUILD}/${APP_NAME}_embind_empty.c"
@@ -613,8 +646,8 @@ emmake make -j${JOBS} "${KICAD_TARGET}"
 
 # Step 8.1: Build bitmap resources (images.tar.gz)
 # This creates the icon archive that KiCad loads at runtime. The headless
-# converter has no GUI/icons, so skip it.
-if [ "${APP_NAME}" != "sym_convert" ]; then
+# converter/service targets have no GUI/icons, so skip it.
+if [ "${APP_NAME}" != "sym_convert" ] && [ "${APP_NAME}" != "occ_service" ]; then
     kw_stage kicad-bitmaps
     log_info "Building bitmap resources..."
     emmake make bitmap_archive_build

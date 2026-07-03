@@ -94,3 +94,4 @@ output/
 
 # Wrangler (Cloudflare CLI) local state/cache — created when running R2 deploys.
 .wrangler/
+tests/.scratch/

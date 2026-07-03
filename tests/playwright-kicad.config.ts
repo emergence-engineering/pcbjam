@@ -111,6 +111,11 @@ const BIG_MODULE_SPECS = [
   "**/symbol_editor.spec.ts",
   // Cross-face probe: schematic session lazily starts the PCB kiface (Preferences).
   "**/xface-probe.spec.ts",
+  // OCC split: occ-export boots pcbnew.html (the merged module) and drives the
+  // export dialog through the occ_service worker — same V8 routing. occ-probe
+  // only boots the (small) occ_service module but shares the harness page.
+  "**/occ-export.spec.ts",
+  "**/occ-probe.spec.ts",
 ];
 
 // Runtime-perf specs run ONLY on the Chromium 'perf' project below: they need

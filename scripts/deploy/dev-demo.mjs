@@ -210,7 +210,10 @@ function main() {
   env.VITE_REPO_URL = a.repo;
 
   const viteArgs = ["--dir", "web", "--filter", "@pcbjam/standalone", "dev"];
-  if (a.port) viteArgs.push("--", "--port", String(a.port));
+  // No "--" separator: pnpm forwards script args verbatim, so a literal "--"
+  // reaches vite and makes it IGNORE the flags after it ("vite -- --port N"
+  // starts on the default port). Appending directly yields "vite --port N".
+  if (a.port) viteArgs.push("--port", String(a.port));
 
   console.log("dev-demo: standalone in demo mode (R2-only backend, no partykit)");
   console.log(`  VITE_LIBS_SOURCE=${env.VITE_LIBS_SOURCE}${env.VITE_LIBS_MANIFEST_URL ? ` (${env.VITE_LIBS_MANIFEST_URL})` : ""}`);

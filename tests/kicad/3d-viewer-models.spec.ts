@@ -183,6 +183,8 @@ test.describe('3D viewer component models', () => {
             fs.readFileSync(fixtureAbs).toString('base64'),
         );
         await installModelProviderStub(page);
+        // (.step models parse in the occ_service worker — the oce3d_Load shadow
+        // suspends on globalThis.occService, installed ambiently by fixtures.)
 
         await loadBoard(page, testLogger);
 
@@ -221,6 +223,16 @@ test.describe('3D viewer component models', () => {
             { stockDir: MODELS_ROOT_MEMFS, servedRef: SERVED_REF },
         );
         expect(servedSize, 'served STEP written into the model root').toBeGreaterThan(1000);
+
+        // OCC split: the .step parse runs in the occ_service worker (the oce3d
+        // shadow bridges to it) and must SUCCEED — a boot/bridge failure logs
+        // 'oce Load FAILED' and silently skips the model, which the render
+        // assertions below can miss (hollow green).
+        const oceLoadLines = testLogger.consoleLogs.filter((l) => l.includes('oce Load'));
+        expect(oceLoadLines.some((l) => l.includes('oce Load ok')),
+            'the served STEP must parse in the occ_service worker').toBe(true);
+        expect(oceLoadLines.some((l) => l.includes('oce Load FAILED')),
+            'no oce model parse may fail').toBe(false);
 
         // --- render assertion --------------------------------------------------
         const render = await page.evaluate(() => {

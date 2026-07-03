@@ -1,6 +1,6 @@
 import type { Tool } from "@pcbjam/shared";
 import { WASM_MANIFEST_FILE, WASM_ROOT } from "@/lib/config";
-import { TOOL_BUNDLE } from "./constants";
+import { TOOL_BUNDLE, type Bundle } from "./constants";
 
 /**
  * Resolve the per-tool WASM asset base at runtime from the CDN release manifest.
@@ -38,15 +38,17 @@ function loadManifest(): Promise<WasmManifest> {
  *   - manifest ⇒ `WASM_ROOT/<tool>/<ver>` from `manifest-<appTag>.json`.
  */
 export async function resolveWasmBase(
-  tool: Tool,
+  tool: Tool | Bundle,
   override?: string,
 ): Promise<string> {
   if (override) return override.replace(/\/+$/, "");
   if (!WASM_MANIFEST_FILE) return WASM_ROOT; // flat (dev / same-origin)
   // A tool may be served by a shared bundle (all four editors → kicad_editor);
   // resolve the folder/version of the bundle, not the logical tool (bundles are
-  // the only thing published/listed in the manifest).
-  const bundle = TOOL_BUNDLE[tool];
+  // the only thing published/listed in the manifest). A caller may also name a
+  // bundle directly (occ_service — a delivery artifact backing no tool).
+  const bundle: Bundle =
+    (TOOL_BUNDLE as Partial<Record<string, Bundle>>)[tool] ?? (tool as Bundle);
   const manifest = await loadManifest();
   const ver = manifest.tools?.[bundle];
   if (!ver) {
