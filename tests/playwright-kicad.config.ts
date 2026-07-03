@@ -267,17 +267,22 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 720 },
-        // Headed only matters on CI (real GPU locally); harmless headed locally too.
-        headless: !process.env.CI,
-        launchOptions: {
-          args: [
-            "--use-gl=angle",
-            "--use-angle=gl",
-            "--disable-gpu-watchdog",
-            "--disable-gpu-process-crash-limit",
-            "--enable-unsafe-swiftshader",
-          ],
-        },
+        // The headed + Mesa-llvmpipe stack is a CI-only need (the GPU-less VM). Locally this
+        // project should behave like any other bundled-Chromium project, so gate it on CI.
+        ...(process.env.CI
+          ? {
+              headless: false,
+              launchOptions: {
+                args: [
+                  "--use-gl=angle",
+                  "--use-angle=gl",
+                  "--disable-gpu-watchdog",
+                  "--disable-gpu-process-crash-limit",
+                  "--enable-unsafe-swiftshader",
+                ],
+              },
+            }
+          : { launchOptions: { args: ["--enable-unsafe-swiftshader"] } }),
       },
     },
     {

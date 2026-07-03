@@ -111,15 +111,18 @@ export async function openThreeDViewer(page: Page, glBefore: number): Promise<nu
         await page.keyboard.press('Alt+3');
     }
 
+    // 180s (not 60s): opening the viewer kicks the FIRST full board raytrace, which on CI's
+    // software WebGL (Mesa llvmpipe, GPU-less VM) takes ~60s — right at the old limit. Real GPU
+    // returns in ~2s, so the larger cap is only a CI headroom.
     await page.waitForFunction(() => {
         // A new top-level window div beyond the main pcbnew frame.
         return !!document.querySelector('#window-container [id^="window-"]')
             || document.querySelectorAll('canvas[id^="glcanvas-"]').length > 0;
-    }, null, { timeout: 60000 });
+    }, null, { timeout: 180000 });
 
     await page.waitForFunction((before: number) =>
         document.querySelectorAll('canvas[id^="glcanvas-"]').length > before,
-        glBefore, { timeout: 60000 });
+        glBefore, { timeout: 180000 });
 
     const glAfter = await countGlCanvases(page);
     console.log(`[TEST] glcanvas count after opening 3D viewer: ${glAfter}`);

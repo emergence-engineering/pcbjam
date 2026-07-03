@@ -151,14 +151,16 @@ async function openThreeDViewer(page: Page, glBefore: number): Promise<number> {
         await page.keyboard.press('Alt+3');
     }
 
+    // 180s (not 60s): the first board raytrace on CI's Mesa llvmpipe software WebGL takes ~60s
+    // (real GPU ~2s). See threed-viewer.ts openThreeDViewer for the rationale.
     await page.waitForFunction(() => {
         return !!document.querySelector('#window-container [id^="window-"]')
             || document.querySelectorAll('canvas[id^="glcanvas-"]').length > 0;
-    }, null, { timeout: 60000 });
+    }, null, { timeout: 180000 });
 
     await page.waitForFunction((before: number) =>
         document.querySelectorAll('canvas[id^="glcanvas-"]').length > before,
-        glBefore, { timeout: 60000 });
+        glBefore, { timeout: 180000 });
 
     const glAfter = await countGlCanvases(page);
     console.log(`[TEST] glcanvas count after opening 3D viewer: ${glAfter}`);

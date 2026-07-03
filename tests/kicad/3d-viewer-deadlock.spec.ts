@@ -35,6 +35,14 @@ import { countGlCanvases, loadBoard, logThreeDDiag, openThreeDViewer } from './u
  * (preserveDrawingBuffer=true), since a CDP screenshot of a WebGL canvas is blank on swiftshader.
  */
 test.describe('3D viewer camera-move deadlock', () => {
+    // CI-skip: this test asserts the wasm main thread stays responsive within ~15s DURING a
+    // raytrace. That premise only holds on a real GPU (fast render); on CI's software WebGL
+    // (Mesa llvmpipe, GPU-less VM) a legitimately-slow raytrace is indistinguishable from a
+    // deadlock, so the test can't run meaningfully there. The pthread-Worker-boot deadlock
+    // MECHANISM it guards is already covered on CI by the standalone wx harnesses
+    // (coroutine-pthread-ondemand, raytrace-threads). Runs locally on a real GPU.
+    test.skip(!!process.env.CI, 'raytracer liveness assertions require a real GPU; deadlock '
+        + 'mechanism is covered on CI by the standalone coroutine-pthread-ondemand/raytrace-threads harnesses');
     // One 187 MB wasm runtime is already heavy; keep this serial and generous.
     test.describe.configure({ mode: 'serial' });
     test.setTimeout(240000);
