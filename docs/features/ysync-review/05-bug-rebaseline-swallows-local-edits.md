@@ -1,7 +1,7 @@
 # Bug 05 — Global rebaseline after a remote apply can swallow concurrent local edits and receiver-side cleanup
 
 **Severity:** medium-high (silent permanent peer divergence; probability scales with edit rate × remote traffic)
-**Status:** open
+**Status:** FIXED 2026-07-03 — see [17](17-fixes-bugs-01-07.md) (batch 3: targeted rebaseline + post-apply flush)
 
 ## Where
 

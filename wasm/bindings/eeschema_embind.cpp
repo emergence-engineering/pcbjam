@@ -387,12 +387,62 @@ std::map<std::string, json> snapshotByUuid( SCH_EDIT_FRAME* aFrame )
 std::map<std::string, json> g_baseline;
 bool                        g_flushScheduled = false;
 
+// Roots the listener saw change since the last flush (uuids, captured at callback
+// time — removed items may be freed before the flush runs). The scalar snapshot
+// diff is a LOSSY projection: rotations/mirrors (anchor unchanged), field text
+// edits (the commit stages the SCH_FIELD, which is not a screen item), stroke
+// properties etc. never move it (bug 04). Dirty roots emit their v2 blob
+// unconditionally; the apply is an idempotent upsert and the TS layer drops
+// no-op bodies, so a false positive costs one local serialization.
+std::set<std::string> g_dirty;
+
+// Lift a commit-staged item to the SCREEN item the differ tracks (a field/pin/cell
+// lifts to its symbol/sheet/label/table — same promotion sch_commit's undo uses).
+void noteDirty( SCH_ITEM* aItem )
+{
+    if( !aItem )
+        return;
+
+    while( EDA_ITEM* p = aItem->GetParent() )
+    {
+        if( !p->IsType( { SCH_SYMBOL_T, SCH_TABLE_T, SCH_SHEET_T, SCH_LABEL_LOCATE_ANY_T } ) )
+            break;
+
+        aItem = static_cast<SCH_ITEM*>( p );
+    }
+
+    g_dirty.insert( toUtf8( aItem->m_Uuid.AsString() ) );
+}
+
 // Re-seed the diff baseline to the current model — after handing out a seed snapshot, or after
 // applying a remote delta (so those items aren't re-broadcast as a spurious local diff/echo).
+// Declares "current model == broadcast state", so pending dirty marks are stale too — on a
+// sheet switch they'd otherwise emit the OLD sheet's items into the new sheet's room.
 void rebaseline()
 {
     if( SCH_EDIT_FRAME* fr = schFrame() )
         g_baseline = snapshotByUuid( fr );
+
+    g_dirty.clear();
+}
+
+// TARGETED rebaseline (bug 05): refresh baseline entries ONLY for the uuids a remote
+// apply touched. A global rebaseline() would fold a concurrently-committed local edit
+// (its flush is queued BEHIND the apply on the same pending-event list) into the
+// baseline and silently swallow it; targeted, the edit still diffs and emits. The
+// connectivity cleanup the apply's Push produced likewise stays diffable — the
+// post-apply flush broadcasts it (idempotent on the original sender).
+void rebaselineTouched( SCH_EDIT_FRAME* aFrame, const std::vector<std::string>& aIds )
+{
+    for( const std::string& id : aIds )
+    {
+        g_baseline.erase( id );
+
+        KIID kid( wxString::FromUTF8( id.c_str() ) );
+
+        if( SCH_ITEM* live = aFrame->Schematic().ResolveItem( kid, nullptr, /*allowNull*/ true ) )
+            g_baseline[id] = itemToJson( live );
+    }
 }
 
 // Diff the current (settled, post-cleanup) model against the baseline and broadcast the change.
@@ -411,10 +461,14 @@ void flushDiff()
 
     // v2 items wire (per-item s-expr blobs), built from the same diff. Screen items
     // are already root-level (fields live inside their symbols), so no lifting.
-    json wAdded = json::array(), wChanged = json::array();
+    json                  wAdded = json::array(), wChanged = json::array();
+    std::set<std::string> wDone;
 
     auto blobFor = [&]( const std::string& id, json& aArr )
     {
+        if( !wDone.insert( id ).second )
+            return;
+
         KIID kid( wxString::FromUTF8( id.c_str() ) );
 
         if( SCH_ITEM* item = fr->Schematic().ResolveItem( kid, nullptr, /*allowNull*/ true ) )
@@ -443,13 +497,22 @@ void flushDiff()
             removed.push_back( id );
     }
 
+    // Dirty roots (bug 04): whatever the listener saw commit emits its blob on the
+    // v2 wire even when the scalar projection didn't move (rotation, field text,
+    // stroke edits). wDone dedups against the scalar-diff emits; deleted ids
+    // resolve null inside blobFor and skip (the removal loop covered them).
+    for( const std::string& id : g_dirty )
+        blobFor( id, wChanged );
+
+    g_dirty.clear();
+
     g_baseline = std::move( cur );
 
     if( !added.empty() || !changed.empty() || !removed.empty() )
-    {
         emit( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
+
+    if( !wAdded.empty() || !wChanged.empty() || !removed.empty() )
         emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", removed } } );
-    }
 }
 
 // Coalesce all the listener callbacks of one commit (and any other edits in the same loop
@@ -548,10 +611,10 @@ public:
                 if( item->Type() == SCH_SHEET_T )
                     scheduleSheetSave( static_cast<SCH_SHEET*>( item ) );
         }
-        trigger();
+        trigger( aItems );
     }
-    void OnSchItemsChanged( SCHEMATIC&, std::vector<SCH_ITEM*>& ) override { trigger(); }
-    void OnSchItemsRemoved( SCHEMATIC&, std::vector<SCH_ITEM*>& ) override { trigger(); }
+    void OnSchItemsChanged( SCHEMATIC&, std::vector<SCH_ITEM*>& v ) override { trigger( v ); }
+    void OnSchItemsRemoved( SCHEMATIC&, std::vector<SCH_ITEM*>& v ) override { trigger( v ); }
 
     // The editor switched to a different sheet (a different .kicad_sch == a different
     // collab room). Re-baseline so the first edit on the new sheet diffs against ITS
@@ -565,10 +628,17 @@ public:
     }
 
 private:
-    void trigger()
+    // Capture the touched roots at callback time (fields/pins lift to their
+    // symbol — noteDirty), then coalesce into one post-settle flush.
+    void trigger( const std::vector<SCH_ITEM*>& aItems )
     {
-        if( !s_applyingRemote )
-            scheduleFlush();
+        if( s_applyingRemote )
+            return;
+
+        for( SCH_ITEM* item : aItems )
+            noteDirty( item );
+
+        scheduleFlush();
     }
 };
 
@@ -744,10 +814,14 @@ void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
     SCH_COMMIT commit( aFrame );
     bool       staged = false;
 
+    std::vector<std::string> touched;   // uuids this apply acts on (targeted rebaseline)
+
     for( const json& rid : aWire.value( "removed", json::array() ) )
     {
         SCH_SHEET_PATH path;
         KIID           id( wxString::FromUTF8( rid.get<std::string>().c_str() ) );
+
+        touched.push_back( rid.get<std::string>() );
 
         if( SCH_ITEM* item = sch.ResolveItem( id, &path, /*allowNull*/ true ) )
         {
@@ -830,6 +904,7 @@ void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
             }
 
             item->SetParent( &sch );
+            touched.push_back( toUtf8( item->m_Uuid.AsString() ) );
             commit.Add( item, aFrame->GetScreen() );
             staged = true;
         }
@@ -843,10 +918,13 @@ void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
     if( staged )
         commit.Push( wxT( "Collaborative edit (items)" ) );
 
-    // Fold the applied state into the baseline so the post-apply listener flush
-    // doesn't re-broadcast it as a local diff (echo).
-    rebaseline();
+    // Fold ONLY the applied uuids into the baseline (echo suppression), then flush:
+    // anything else that now differs — a concurrent local edit, the connectivity
+    // cleanup this apply's Push produced — broadcasts as a normal local diff
+    // instead of being swallowed (bug 05).
+    rebaselineTouched( aFrame, touched );
     s_applyingRemote = false;
+    scheduleFlush();
 }
 
 // Test/PoC move (the SCH_COMMIT body for kicadCollabTestMoveFirst, deferred via CallAfter).

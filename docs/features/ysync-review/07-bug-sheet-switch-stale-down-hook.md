@@ -1,7 +1,7 @@
 # Bug 07 — Sheet switch leaves the DOWN hook pointing at the old room; cross-room contamination window
 
 **Severity:** medium (small window on warm rooms; a full network round-trip — or forever — on cold/failed switches)
-**Status:** open
+**Status:** FIXED 2026-07-03 — see [17](17-fixes-bugs-01-07.md) (batch 4: destroyed-flag hook + switch retry; fix direction 2 still open)
 
 ## Where
 

@@ -31,6 +31,14 @@ constraints. The findings below are the places where it breaks or leaks.
 
 ## Verdict / suggested order of attack
 
+**UPDATE 2026-07-03: bugs 01–07 are all FIXED** — see
+[17](17-fixes-bugs-01-07.md) for the fix record (done in the batch order below),
+two additional findings (F5: doc 16's F4 was an artifact of bug 01, file-seeded
+bodies are now editor-normalized; F6: the 0008 "asyncify-fragile envelope parse"
+was a layer-name bug, now fixed), and the remaining follow-ups. Every repro
+below now runs as a plain regression test. Misses 08–10 and opts 12–14 (beyond
+what the dirty-set emit already delivers) remain open.
+
 Every bug below has a runnable expected-fail reproduction test, and the v2 e2e port
 (miss 11) is DONE — see [16](16-repro-suite-results-and-empirical-findings.md) for
 the suite map and four empirical findings the running system added (notably: bug 03's
@@ -84,3 +92,4 @@ sending half emits NOTHING, not the bare removal the doc predicted).
 |---|------|-----------|
 | 15 | [15-plan-repro-tests-and-v2-e2e.md](15-plan-repro-tests-and-v2-e2e.md) | The approved plan: repro tests for bugs 01–07 + the v2 e2e port |
 | 16 | [16-repro-suite-results-and-empirical-findings.md](16-repro-suite-results-and-empirical-findings.md) | Plan 15 executed (2026-07-03): suite map, verified failure sites, empirical findings F1–F4 |
+| 17 | [17-fixes-bugs-01-07.md](17-fixes-bugs-01-07.md) | Bugs 01–07 fixed & verified (2026-07-03); findings F5–F6; remaining follow-ups |

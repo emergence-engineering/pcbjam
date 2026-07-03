@@ -1,7 +1,7 @@
 # Bug 03 — Child-only deletions leave a dangling `{item}` slot in the parent's Y body
 
 **Severity:** high (poisons a room's render/materialize path; three-way divergence)
-**Status:** open
+**Status:** FIXED 2026-07-03 — see [17](17-fixes-bugs-01-07.md) (batch 2; three layers + the F1 board_commit notification gap)
 
 ## Where
 

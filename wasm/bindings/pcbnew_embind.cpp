@@ -185,6 +185,12 @@ json itemToJson( BOARD_ITEM* aItem )
         { "layer", itemLayer( aItem ) },   // devirtualized — aItem->GetLayer() mis-dispatches here
     };
 
+    // Parent footprint uuid (or absent for roots). Carried in the baseline so a
+    // REMOVED child can still be attributed to its parent after the live item is
+    // gone — flushDiff lifts such removals to a parent re-blob on the v2 wire.
+    if( FOOTPRINT* fp = aItem->GetParentFootprint() )
+        j["parent"] = toUtf8( fp->m_Uuid.AsString() );
+
     if( isTrackType( aItem->Type() ) )
     {
         auto* tr   = static_cast<PCB_TRACK*>( aItem );
@@ -290,10 +296,11 @@ std::string blobForItem( BOARD* aBoard, BOARD_ITEM* aItem )
         }
 
         // The rest of SaveSelection's footprint safety steps, minus the refPoint move
-        // (the wire carries absolute positions).
-        for( PAD* pad : copy.Pads() )
-            pad->SetNetCode( 0 );
-
+        // (the wire carries absolute positions) and minus SetNetCode(0): zeroing pad
+        // nets is a paste-into-FOREIGN-board safety, but collab peers edit the SAME
+        // board — nets must survive the wire. KiCad 10 formats pad nets by NAME and
+        // the parser resolves by name against the receiver's board (creating the net
+        // if missing), so no code remapping is needed on apply.
         copy.SetLocked( false );
 
         CLIPBOARD_IO     io;
@@ -333,9 +340,26 @@ BOARD_ITEM* makeFromBlob( BOARD& aBoard, const std::string& aBlob )
 
     CLIPBOARD_IO io;
     io.SetBoard( &aBoard );
-    io.SetReader( [&aBlob]() -> wxString { return wxString::FromUTF8( aBlob.c_str() ); } );
 
-    BOARD_ITEM* parsed = io.Parse();        // FOOTPRINT* (bare) | BOARD* (envelope) | nullptr
+    // Parse directly (not io.Parse(), whose catch(...) swallows the error): a
+    // failed apply must say WHY, or wire bugs surface as silent non-convergence.
+    BOARD_ITEM* parsed = nullptr;           // FOOTPRINT* (bare) | BOARD* (envelope) | nullptr
+
+    try
+    {
+        parsed = io.PCB_IO_KICAD_SEXPR::Parse( wxString::FromUTF8( aBlob.c_str() ) );
+    }
+    catch( const IO_ERROR& e )
+    {
+        EM_ASM( { console.log( "[collab] pcbnew blob parse error: " + UTF8ToString( $0 ) ); },
+                std::string( e.What().utf8_str() ).c_str() );
+        return nullptr;
+    }
+    catch( ... )
+    {
+        EM_ASM( { console.log( "[collab] pcbnew blob parse error: unknown exception" ); } );
+        return nullptr;
+    }
 
     if( !parsed )
         return nullptr;
@@ -384,8 +408,12 @@ std::string wrapInBoardEnvelope( BOARD& aBoard, const std::string& aItemSexpr )
         const char* type = IsCopperLayer( id ) ? LAYER::ShowType( aBoard.GetLayerType( id ) )
                                                : "user";
 
+        // CANONICAL name (LSET::Name), NOT GetLayerName(): the parser validates
+        // position 2 against the fixed layer hash, and user-visible names differ
+        // from canonical ones (e.g. "B.Courtyard" vs "B.CrtYd") — the envelope
+        // parse threw "not in fixed layer hash" for any board with such layers.
         s += " (" + std::to_string( (int) id ) + " \""
-             + std::string( aBoard.GetLayerName( id ).utf8_str() ) + "\" " + type + ")";
+             + std::string( LSET::Name( id ).utf8_str() ) + "\" " + type + ")";
     }
 
     s += ") " + aItemSexpr + ")";
@@ -562,12 +590,85 @@ std::map<std::string, json> snapshotByUuid( BOARD& aBoard )
 std::map<std::string, json> g_baseline;
 bool                        g_flushScheduled = false;
 
+// Roots the listener saw change since the last flush (uuids, children lifted to
+// their footprint at capture time). The scalar snapshot diff below is a LOSSY
+// projection (id/type/x/y/layer + a few extras) — edits that don't move the
+// projection (pad/zone property edits, anchor-centred rotations, endpoint drags)
+// would otherwise never emit (bug 04). Dirty roots emit their v2 blob
+// unconditionally; the wire apply is an idempotent upsert, so a false positive
+// (a commit that changed nothing) costs one no-op echo.
+std::set<std::string> g_dirty;
+
+void noteDirty( BOARD_ITEM* aItem )
+{
+    if( !aItem )
+        return;
+
+    if( FOOTPRINT* fp = aItem->GetParentFootprint() )
+        aItem = fp;
+
+    g_dirty.insert( toUtf8( aItem->m_Uuid.AsString() ) );
+}
+
 // Re-seed the diff baseline to the current model — after handing out a seed snapshot, or after
 // applying a remote delta (so those items aren't re-broadcast as a spurious local diff/echo).
+// Declares "current model == broadcast state", so pending dirty marks are stale too.
 void rebaseline()
 {
     if( PCB_EDIT_FRAME* fr = pcbFrame() )
         g_baseline = snapshotByUuid( *fr->GetBoard() );
+
+    g_dirty.clear();
+}
+
+// TARGETED rebaseline (bug 05): refresh baseline entries ONLY for the uuids a remote
+// apply touched. A global rebaseline() here would fold a concurrently-committed local
+// edit (its flush is queued BEHIND the apply on the same pending-event list) into the
+// baseline and silently swallow it; with the targeted update the edit's uuids keep
+// their pre-edit entries and the queued flush still emits it. Receiver-side cleanup
+// the apply's Push produced likewise stays diffable — the post-apply flush broadcasts
+// it, and re-application on the original sender is idempotent.
+void rebaselineTouched( BOARD* aBoard, const std::vector<std::string>& aIds )
+{
+    for( const std::string& id : aIds )
+    {
+        // Drop the stale entry — and any child entries it owned (their parent
+        // field carries the root uuid) — then re-snapshot whatever is live now.
+        g_baseline.erase( id );
+
+        for( auto it = g_baseline.begin(); it != g_baseline.end(); )
+        {
+            if( it->second.value( "parent", std::string() ) == id )
+                it = g_baseline.erase( it );
+            else
+                ++it;
+        }
+
+        BOARD_ITEM* live = aBoard->ResolveItem( KIID( wxString::FromUTF8( id.c_str() ) ),
+                                                /*allowNull*/ true );
+
+        if( !live )
+            continue;
+
+        g_baseline[id] = itemToJson( live );
+
+        if( live->Type() == PCB_FOOTPRINT_T )
+        {
+            FOOTPRINT* f = static_cast<FOOTPRINT*>( live );
+
+            for( PCB_FIELD* fld : f->GetFields() )
+            {
+                if( fld )
+                    g_baseline[toUtf8( fld->m_Uuid.AsString() )] = itemToJson( fld );
+            }
+
+            for( BOARD_ITEM* g : f->GraphicalItems() )
+            {
+                if( g->Type() == PCB_TEXT_T )
+                    g_baseline[toUtf8( g->m_Uuid.AsString() )] = itemToJson( g );
+            }
+        }
+    }
 }
 
 // Diff the current (settled, post-cleanup) model against the baseline and broadcast the change.
@@ -654,19 +755,44 @@ void flushDiff()
         }
     }
 
+    // v2 removals diverge from the legacy wire: a removed footprint CHILD whose
+    // parent survives lifts to the parent's re-blob (wChanged) — the new body
+    // carries the post-delete child set, and the receiver's parent-replace covers
+    // the deletion. A bare child removal would strand a dangling {item} slot in
+    // the Y-side parent body (bug 03). The legacy wire keeps the raw uuid list
+    // (its receiver skips footprint children anyway).
+    json wRemoved = json::array();
+
     for( const auto& [id, j] : g_baseline )
     {
-        if( !cur.count( id ) )
-            removed.push_back( id );
+        if( cur.count( id ) )
+            continue;
+
+        removed.push_back( id );
+
+        std::string parentId = j.value( "parent", std::string() );
+
+        if( !parentId.empty() && cur.count( parentId ) )
+            liftBlob( parentId, wChanged );
+        else
+            wRemoved.push_back( id );
     }
+
+    // Dirty roots (bug 04): whatever the listener saw commit emits its blob on
+    // the v2 wire even when the scalar projection didn't move. wDone dedups
+    // against the scalar-diff emits above; deleted ids resolve null and skip.
+    for( const std::string& id : g_dirty )
+        liftBlob( id, wChanged );
+
+    g_dirty.clear();
 
     g_baseline = std::move( cur );
 
     if( !added.empty() || !changed.empty() || !removed.empty() )
-    {
         emit( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
-        emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", removed } } );
-    }
+
+    if( !wAdded.empty() || !wChanged.empty() || !wRemoved.empty() )
+        emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", wRemoved } } );
 }
 
 // Coalesce all the listener callbacks of one commit (and any other edits in the same loop
@@ -706,21 +832,33 @@ void scheduleFlush()
 class COLLAB_LISTENER : public BOARD_LISTENER
 {
 public:
-    void OnBoardItemAdded( BOARD&, BOARD_ITEM* ) override                       { trigger(); }
-    void OnBoardItemsAdded( BOARD&, std::vector<BOARD_ITEM*>& ) override        { trigger(); }
-    void OnBoardItemRemoved( BOARD&, BOARD_ITEM* ) override                     { trigger(); }
-    void OnBoardItemsRemoved( BOARD&, std::vector<BOARD_ITEM*>& ) override      { trigger(); }
-    void OnBoardItemChanged( BOARD&, BOARD_ITEM* ) override                     { trigger(); }
-    void OnBoardItemsChanged( BOARD&, std::vector<BOARD_ITEM*>& ) override      { trigger(); }
-    void OnBoardCompositeUpdate( BOARD&, std::vector<BOARD_ITEM*>&,
-                                 std::vector<BOARD_ITEM*>&,
-                                 std::vector<BOARD_ITEM*>& ) override            { trigger(); }
+    void OnBoardItemAdded( BOARD&, BOARD_ITEM* i ) override                     { trigger( { i } ); }
+    void OnBoardItemsAdded( BOARD&, std::vector<BOARD_ITEM*>& v ) override      { trigger( v ); }
+    void OnBoardItemRemoved( BOARD&, BOARD_ITEM* i ) override                   { trigger( { i } ); }
+    void OnBoardItemsRemoved( BOARD&, std::vector<BOARD_ITEM*>& v ) override    { trigger( v ); }
+    void OnBoardItemChanged( BOARD&, BOARD_ITEM* i ) override                   { trigger( { i } ); }
+    void OnBoardItemsChanged( BOARD&, std::vector<BOARD_ITEM*>& v ) override    { trigger( v ); }
+    void OnBoardCompositeUpdate( BOARD&, std::vector<BOARD_ITEM*>& a,
+                                 std::vector<BOARD_ITEM*>& r,
+                                 std::vector<BOARD_ITEM*>& c ) override
+    {
+        trigger( a );
+        trigger( r );
+        trigger( c );
+    }
 
 private:
-    void trigger()
+    // Capture the touched roots at callback time (uuid strings — removed items
+    // may be freed before the flush runs), then coalesce into one flush.
+    void trigger( const std::vector<BOARD_ITEM*>& aItems )
     {
-        if( !s_applyingRemote )
-            scheduleFlush();
+        if( s_applyingRemote )
+            return;
+
+        for( BOARD_ITEM* item : aItems )
+            noteDirty( item );
+
+        scheduleFlush();
     }
 };
 
@@ -829,15 +967,30 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
     BOARD_COMMIT commit( aFrame );
     bool         staged = false;
 
+    std::vector<std::string> touched;   // root uuids this apply acts on (targeted rebaseline)
+
+    std::set<std::string> removedIds;
+
     for( const json& rid : aWire.value( "removed", json::array() ) )
+        removedIds.insert( rid.get<std::string>() );
+
+    for( const std::string& rid : removedIds )
     {
-        KIID id( wxString::FromUTF8( rid.get<std::string>().c_str() ) );
+        KIID id( wxString::FromUTF8( rid.c_str() ) );
+
+        touched.push_back( rid );
 
         if( BOARD_ITEM* item = board->ResolveItem( id, /*allowNullptr*/ true ) )
         {
-            // A child uuid in `removed` is covered by its parent's replace/remove.
-            if( item->GetParentFootprint() )
-                continue;
+            if( FOOTPRINT* pfp = item->GetParentFootprint() )
+            {
+                // Covered by the parent's own removal when the whole footprint
+                // goes. A BARE child removal must remove the child itself
+                // (bug 03 receiving half) — the sender now lifts these to a
+                // parent re-blob, but Y-rendered wires can still carry them.
+                if( removedIds.count( toUtf8( pfp->m_Uuid.AsString() ) ) )
+                    continue;
+            }
 
             commit.Remove( item );
             staged = true;
@@ -876,6 +1029,8 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
             commit.Remove( existing );
         }
 
+        touched.push_back( toUtf8( parsed->m_Uuid.AsString() ) );
+
         commit.Add( parsed );
         staged = true;
     };
@@ -888,10 +1043,12 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
     if( staged )
         commit.Push( wxT( "Collaborative edit (items)" ) );
 
-    // Fold the applied state into the baseline so the post-apply listener flush
-    // doesn't re-broadcast it as a local diff (echo).
-    rebaseline();
+    // Fold ONLY the applied uuids into the baseline (echo suppression), then flush:
+    // anything else that now differs — a concurrent local edit, cleanup this apply's
+    // Push produced — broadcasts as a normal local diff instead of being swallowed.
+    rebaselineTouched( board, touched );
     s_applyingRemote = false;
+    scheduleFlush();
 }
 
 // Test/PoC move (the BOARD_COMMIT body for kicadCollabTestMoveFirst). Run inside a COROUTINE by

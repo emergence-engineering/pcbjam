@@ -1,7 +1,7 @@
 # Bug 02 — Footprint blobs zero pad net codes; net data loss propagates to peers, the Y.Doc, and materialized files
 
 **Severity:** high (silent, converging data corruption on boards with nets)
-**Status:** open — runtime-CONFIRMED 2026-07-03: the snapshot blob carries the pads
+**Status:** FIXED 2026-07-03 — see [17](17-fixes-bugs-01-07.md) (batch 2)
 with `(net 1 "SIG")` stripped (repro below)
 
 ## Where

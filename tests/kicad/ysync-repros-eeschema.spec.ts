@@ -196,8 +196,6 @@ test.describe("eeschema ysync repros (v2 items wire, single tab)", () => {
   }
 
   test("an in-place symbol rotation reaches the wire", async ({ page, testLogger }) => {
-    test.fail(); // bug 04 — GetPosition() unchanged; no orientation in the json
-
     const ok = await armed(page, "kicadCollabTestRotateItem");
     test.skip(!ok, "wasm build predates the ysync repro hooks");
 
@@ -226,8 +224,6 @@ test.describe("eeschema ysync repros (v2 items wire, single tab)", () => {
   });
 
   test("a symbol Value field edit reaches the wire", async ({ page, testLogger }) => {
-    test.fail(); // bug 04 — fields are invisible to the snapshot entirely
-
     const ok = await armed(page, "kicadCollabTestSetFieldText");
     test.skip(!ok, "wasm build predates the ysync repro hooks");
 

@@ -101,6 +101,11 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
   // switches run one-at-a-time so concurrent `onSheetChanged` events can't interleave.
   let requestedPath: string | null = null;
   let queue: Promise<void> = Promise.resolve();
+  // Failed-switch retry backoff (bug 07): a failed ensureRoom used to leave the
+  // editor unbound forever — every subsequent edit unsynced until the next manual
+  // navigation. Event-driven retry, doubling 2s→30s, reset on any success.
+  let retryDelayMs = 2000;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
   if (opts.initial) {
     const { sheetPath, session, editorMatchesDoc } = opts.initial;
@@ -204,16 +209,34 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
 
   function switchTo(sheetPath: string): Promise<void> {
     requestedPath = sheetPath;
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
     queue = queue
       .then(() => {
         // Superseded by a newer navigation — skip this stale switch. The editor's active
         // screen always reflects `requestedPath`, so we only bind when they agree (the
         // seed/snapshot then reads the right screen).
         if (requestedPath !== sheetPath) return;
-        return doSwitch(sheetPath);
+        return doSwitch(sheetPath).then(() => {
+          retryDelayMs = 2000; // bound succeeded — reset the backoff
+        });
       })
       .catch((err) => {
         cwarn(`[sheet] switchTo(${sheetPath}) failed`, err);
+        // Still the sheet the editor shows and not yet bound → retry with backoff,
+        // else the editor stays unbound and every edit silently never syncs.
+        if (requestedPath === sheetPath && activePath !== sheetPath) {
+          retryTimer = setTimeout(() => {
+            retryTimer = undefined;
+            if (requestedPath === sheetPath && activePath !== sheetPath) {
+              log(`[sheet] retrying switch to ${sheetPath}`);
+              void switchTo(sheetPath);
+            }
+          }, retryDelayMs);
+          retryDelayMs = Math.min(retryDelayMs * 2, 30000);
+        }
       });
     return queue;
   }
@@ -246,6 +269,10 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
   }
 
   function destroy(): void {
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
     for (const [path, room] of rooms) {
       try {
         room.detachWatch?.();

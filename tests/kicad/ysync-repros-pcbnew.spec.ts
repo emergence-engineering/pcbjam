@@ -192,15 +192,13 @@ test.describe("pcbnew ysync repros (v2 items wire, single tab)", () => {
   });
 
   test("footprint blob preserves pad nets", async ({ page, testLogger }) => {
-    test.fail(); // bug 02 — blobForItem's pad->SetNetCode(0) loop strips them
-
     await bootOpen(page);
     const blob = await fp1Blob(page);
-    // CORRECT: peers share the same board/net lineage — identity-by-uuid, not
-    // a foreign-board paste — so `(net 1 "SIG")` must survive the wire
-    // (02-bug-footprint-blob-zeroes-pad-nets.md). TODAY: pads go out net-0 and
-    // the loss propagates to the Y.Doc, peers, and materialized files.
-    expect(blob).toContain(`(net 1 "SIG")`);
+    // Peers share the same board/net lineage — identity-by-uuid, not a
+    // foreign-board paste — so the SIG net must survive the wire
+    // (02-bug-footprint-blob-zeroes-pad-nets.md). KiCad 10 formats pad nets by
+    // NAME only, `(net "SIG")`; accept the legacy code+name form too.
+    expect(blob).toMatch(/\(net (1 )?"SIG"\)/);
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
 
@@ -226,8 +224,6 @@ test.describe("pcbnew ysync repros (v2 items wire, single tab)", () => {
   });
 
   test("applyItems removes a footprint CHILD by uuid", async ({ page, testLogger }) => {
-    test.fail(); // bug 03 (receiving half) — the parent-footprint guard skips it
-
     await bootOpen(page);
     expect(await saveRead(page)).toContain(FP1_TXT);
     // The wire a peer sends after deleting the fp_text: a bare child removal
@@ -278,8 +274,6 @@ test.describe("pcbnew ysync repros (v2 items wire, single tab)", () => {
     page,
     testLogger,
   }) => {
-    test.fail(); // bug 05 — the post-apply GLOBAL rebaseline swallows it
-
     await bootOpen(page);
     await page.evaluate(() => window.Module.kicadCollabSnapshotItems());
     await captureEmits(page);
@@ -349,8 +343,6 @@ test.describe("pcbnew ysync repros (v2 items wire, single tab)", () => {
   }
 
   test("an anchor-centred footprint rotation reaches the wire", async ({ page, testLogger }) => {
-    test.fail(); // bug 04 — no orientation in the footprint's scalar json
-
     const ok = await armed(page, "kicadCollabTestRotateItem");
     test.skip(!ok, "wasm build predates the ysync repro hooks");
 
@@ -381,8 +373,6 @@ test.describe("pcbnew ysync repros (v2 items wire, single tab)", () => {
   });
 
   test("a pad size edit reaches the wire", async ({ page, testLogger }) => {
-    test.fail(); // bug 04 — pads are not visited by forEachTopItem at all
-
     const ok = await armed(page, "kicadCollabTestSetPadSize");
     test.skip(!ok, "wasm build predates the ysync repro hooks");
 
@@ -412,8 +402,6 @@ test.describe("pcbnew ysync repros (v2 items wire, single tab)", () => {
   });
 
   test("a graphic-shape endpoint drag reaches the wire", async ({ page, testLogger }) => {
-    test.fail(); // bug 04 — Drawings' json is position-only; GetPosition() is the start
-
     const ok = await armed(page, "kicadCollabTestMoveEndpoint");
     test.skip(!ok, "wasm build predates the ysync repro hooks");
 
@@ -471,8 +459,6 @@ test.describe("pcbnew ysync repros (v2 items wire, single tab)", () => {
   });
 
   test("a child deletion goes out as the parent's re-blob", async ({ page, testLogger }) => {
-    test.fail(); // bug 03 (sending half) — flushDiff has no liftBlob for removals
-
     const ok = await armed(page, "kicadCollabTestRemoveItem");
     test.skip(!ok, "wasm build predates the ysync repro hooks");
 

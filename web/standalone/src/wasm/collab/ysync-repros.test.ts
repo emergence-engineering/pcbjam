@@ -128,19 +128,19 @@ describe("bug 01 — first-ever tab (file-seed branch) never registers the C++ l
     return { edA, edB };
   }
 
-  it.fails("the file-seed branch calls snapshotItems (the listener-registration contract)", () => {
+  it("the file-seed branch calls snapshotItems (the listener-registration contract)", () => {
     const { edA } = freshRoomFileSeed();
     // The one-line fix's contract: like the editorMatchesDoc branch, the
     // file-seed branch must call snapshotItems() for its SIDE EFFECTS
-    // (ensureBridge listener registration + differ baseline). TODAY: 0 calls.
+    // (ensureBridge listener registration + differ baseline).
     expect(edA.snapshotCalls).toBeGreaterThan(0);
   });
 
-  it.fails("a local edit on the seeding tab reaches the joining peer", () => {
+  it("a local edit on the seeding tab reaches the joining peer", () => {
     const { edA, edB } = freshRoomFileSeed();
     edA.localUpsert(`(segment (start 0 0) (end 1 1) (uuid "seg-new"))`, null, "added");
-    // TODAY: A's listener was never registered → the edit is never emitted →
-    // the peer never receives it (the first-session "seeder can't send" hole).
+    // Regression cover for bug 01: without the listener registration the edit
+    // was never emitted (the first-session "seeder can't send" hole).
     expect(edB.store["seg-new"]).toBeDefined();
   });
 
@@ -159,7 +159,7 @@ describe("bug 01 — first-ever tab (file-seed branch) never registers the C++ l
 // writes into the (now supposedly detached) doc.
 
 describe("bug 07a — destroy() leaves the DOWN hook (onItems) attached", () => {
-  it.fails("an emit after destroy() must not write into the doc", () => {
+  it("an emit after destroy() must not write into the doc", () => {
     const doc = new Y.Doc();
     const ed = new CppFaithfulEditor();
     const binding = bindKicadCollab(doc, ed);
@@ -190,7 +190,7 @@ describe("bug 07a — destroy() leaves the DOWN hook (onItems) attached", () => 
 // to the new sheet, so a local edit emits a new-sheet diff into the OLD room.
 
 describe("bug 07b — sheet-switch gap: stale onItems writes into the old sheet's room", () => {
-  it.fails("an emit during a cold-room switch gap must not land in the old doc", async () => {
+  it("an emit during a cold-room switch gap must not land in the old doc", async () => {
     const docs: Y.Doc[] = [];
     let releaseB!: () => void;
     const gateB = new Promise<void>((resolve) => (releaseB = resolve));

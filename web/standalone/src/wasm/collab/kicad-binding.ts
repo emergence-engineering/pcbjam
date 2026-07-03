@@ -3,13 +3,15 @@ import {
   applyDeltaToY,
   deltaFromYEvents,
   deltaToItemsWire,
-  docToY,
   isEmptyItemsWireDelta,
   isEmptyKicadDelta,
   itemsWireToDelta,
   kicadItemsMap,
   parseItemsWireDelta,
   renderItem,
+  seedDocToY,
+  Y_KDOC_META,
+  Y_KDOC_SEED_NONCE,
   ydocHasState,
   yToItem,
   type ItemsWireDelta,
@@ -77,6 +79,13 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
   // to trap eeschema's paste path in the real app). seed()'s adopt branch covers
   // everything those early events contained.
   let seeded = false;
+  // Flipped by destroy(): the DOWN hook (window.kicadCollab.onItems) can't be
+  // unregistered from the C++ side, so a stale emit after destroy — e.g. in the
+  // sheet-switch gap, when C++ has already rebaselined to the NEW sheet — must
+  // be dropped here or it writes the new sheet's items into the OLD room (bug 07).
+  let destroyed = false;
+  // Concurrent double-seed arbitration cleanup (bug 06); set by the file-seed branch.
+  let detachSeedArbitration: (() => void) | undefined;
 
   /** Plain snapshot of the Y items (the `current`/`view` the conversions need). */
   const itemsView = (): Record<string, KicadItem> => {
@@ -89,6 +98,7 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
 
   // DOWN: local editor change → Y.Doc
   bridge.onItems((json: string) => {
+    if (destroyed) return; // stale hook (bug 07) — a destroyed binding is inert
     let wire: ItemsWireDelta;
     try {
       wire = parseItemsWireDelta(json);
@@ -149,7 +159,40 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
       clog(
         `seed: doc empty → SEEDING from file (${Object.keys(seedDoc.items).length} item(s), root ${seedDoc.root})`,
       );
-      docToY(seedDoc, doc, ORIGIN);
+      // Arbitrated seed (bug 06): the empty-room check above is check-then-act,
+      // so a peer may be seeding concurrently. seedDocToY stamps our nonce; if a
+      // FOREIGN nonce wins the meta LWW merge, our layout inserts are retracted
+      // (kdoc_items converges per key on its own) leaving the winner's single
+      // clean sequence.
+      const nonce = `${doc.clientID}:${Math.random().toString(36).slice(2)}`;
+      const retract = seedDocToY(seedDoc, doc, ORIGIN, nonce);
+      const meta = doc.getMap(Y_KDOC_META);
+      const onMeta = () => {
+        const winner = meta.get(Y_KDOC_SEED_NONCE);
+        if (winner !== undefined && winner !== nonce) {
+          detachSeedArbitration?.();
+          detachSeedArbitration = undefined;
+          retract();
+          clog("seed: concurrent double-seed lost LWW — retracted our layout inserts");
+        }
+      };
+      meta.observe(onMeta);
+      detachSeedArbitration = () => meta.unobserve(onMeta);
+      // snapshotItems() does double duty here. Its side effects register the
+      // C++ change listener (bug 01 — without it this tab would receive but
+      // never SEND) and rebaseline the wasm differ. Its RESULT re-upserts the
+      // item bodies in the EDITOR's serialization: the file's formatting and
+      // the writer's normalized output can differ textually, and every future
+      // emit/drift-compare uses the writer's form — keeping file-formatted
+      // bodies would false-positive drift-detect on every file-seeded room
+      // and defeat upsertYItem's no-op skip. Meta + layout stay file-derived.
+      try {
+        const wire = parseItemsWireDelta(bridge.snapshotItems());
+        const local = itemsWireToDelta(wire, itemsView());
+        if (!isEmptyKicadDelta(local)) applyDeltaToY(doc, local, ORIGIN);
+      } catch (err) {
+        cwarn("seed: post-file-seed baseline failed", err);
+      }
       return;
     }
 
@@ -190,7 +233,12 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
 
   return {
     seed,
-    destroy: () => items.unobserveDeep(observer),
+    destroy: () => {
+      destroyed = true; // gates the DOWN hook — see bug 07 note above
+      detachSeedArbitration?.();
+      detachSeedArbitration = undefined;
+      items.unobserveDeep(observer);
+    },
     items,
   };
 }

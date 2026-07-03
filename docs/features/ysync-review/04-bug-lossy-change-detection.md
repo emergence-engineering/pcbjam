@@ -1,7 +1,7 @@
 # Bug 04 — Change detection is a lossy scalar projection; a whole class of edits silently never syncs
 
 **Severity:** high (broad, silent non-replication of everyday edits)
-**Status:** open
+**Status:** FIXED 2026-07-03 — see [17](17-fixes-bugs-01-07.md) (batch 3: listener dirty-set → unconditional v2 blob emit)
 
 ## Where
 

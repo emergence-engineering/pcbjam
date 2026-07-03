@@ -348,7 +348,6 @@ for (const [cfg, label] of [
       context,
       testLogger,
     }) => {
-      test.fail(); // bug 01 — first tab never registers the C++ change listener
       // TWO kicad_editor instances exceed Firefox's per-content-process wasm
       // budget (the 2nd tab's #canvas never appears, even serial/isolated —
       // same SpiderMonkey wall playwright-kicad.config.ts documents for x86
@@ -403,20 +402,18 @@ for (const [cfg, label] of [
 // ── Bug 06 — concurrent first-seed duplicates kdoc_layout ────────────────────
 // 06-bug-concurrent-seed-duplicates-layout.md: seed-vs-adopt is client-side
 // check-then-act; two tabs opening the same fresh room inside the settle
-// window both file-seed, and the two kdoc_layout inserts BOTH survive the
-// Y.Array merge. The deterministic repro is the unit test
-// (web/pcbjam-shared/test/ysync-repros.test.ts); this is the real-window
-// trigger, skipped on runs where the race happens not to fire.
+// window can both file-seed. FIXED by the arbitrated seed (seedDocToY nonce +
+// LWW-loser layout retraction — deterministic unit coverage in
+// web/pcbjam-shared/test/ysync-repros.test.ts); this drives the real window
+// and asserts the room ends on one clean sequence either way.
 
 test.describe("v2 items wire — concurrent seed (bug 06 repro)", () => {
   test.describe.configure({ timeout: 420000 });
 
-  test("both tabs seed a fresh room at once: the room must materialize the single-seed output", async ({
+  test("both tabs seed a fresh room at once: the room converges on one clean sequence", async ({
     context,
     testLogger,
   }) => {
-    test.fail(); // bug 06 — concurrent first-seed duplicates kdoc_layout
-
     const room = `ysync-v2-pl-race-${test.info().workerIndex}`;
     const tabA = await context.newPage();
     const tabB = await context.newPage();
@@ -441,21 +438,17 @@ test.describe("v2 items wire — concurrent seed (bug 06 repro)", () => {
       .toBe(true);
 
     const merged = (await renderDoc(tabA)).ok!;
-    const single = (await tabA.evaluate(
-      (txt) =>
-        (window as unknown as { KicadCollabV2: { singleSeedRender(t: string): string } })
-          .KicadCollabV2.singleSeedRender(txt),
-      PL.fixture,
-    )) as string;
 
-    // If one tab happened to see the other's seed first (race not triggered),
-    // the run is inconclusive — skip rather than "pass unexpectedly" and turn
-    // CI red while the bug is still open. The unit repro is the deterministic one.
-    test.skip(merged === single, "seed race did not trigger this run — inconclusive");
-
-    // CORRECT: same file, same room → the single-seed materialization.
-    // TODAY: every root slot + preamble form is doubled, permanently.
-    expect(merged).toBe(single);
+    // Whether or not both tabs raced into the seed branch this run, the
+    // arbitrated seed (seedDocToY + LWW-loser layout retraction) must leave a
+    // SINGLE clean sequence: each root exactly once, the preamble not doubled.
+    // (Byte-comparing against singleSeedRender(fixture) is no longer valid: the
+    // file-seed path deliberately re-upserts item BODIES in the editor's
+    // serialization, so the room's render is editor-normalized, not file-verbatim.)
+    expect(merged.match(new RegExp(U_RECT, "g")), "border rect appears once").toHaveLength(1);
+    expect(merged.match(new RegExp(U_TITLE, "g")), "title text appears once").toHaveLength(1);
+    expect(merged.match(/\(version 20220228\)/g), "preamble not doubled").toHaveLength(1);
+    expect(merged.match(/\(setup /g), "setup block not doubled").toHaveLength(1);
 
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
     await tabA.close();
@@ -476,8 +469,6 @@ test.describe("v2 items wire — pcbnew bare child removal (bug 03 Y-half repro)
     context,
     testLogger,
   }) => {
-    test.fail(); // bug 03 — dangling {item} slot in the parent's Y body
-
     const room = `ysync-v2-pcb-bug03-${test.info().workerIndex}`;
     const tabA = await context.newPage();
     await bootOpen(tabA, PCB, "tabA");

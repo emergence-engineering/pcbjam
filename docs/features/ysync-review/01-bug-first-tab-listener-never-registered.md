@@ -1,7 +1,7 @@
 # Bug 01 — First-ever tab never registers the C++ change listener; the seeding session can't send
 
 **Severity:** critical (breaks the primary first-session flow for all three tools)
-**Status:** open
+**Status:** FIXED 2026-07-03 — see [17](17-fixes-bugs-01-07.md) (batch 1)
 **Fix size:** one line
 
 ## Where

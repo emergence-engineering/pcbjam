@@ -1,7 +1,7 @@
 # Bug 06 — Concurrent first-seed duplicates `kdoc_layout`; corrupt materialization with no self-heal
 
 **Severity:** medium (race window is small but the damage is durable file corruption)
-**Status:** open
+**Status:** FIXED 2026-07-03 — see [17](17-fixes-bugs-01-07.md) (batch 4: arbitrated seedDocToY, fix direction 2)
 
 ## Where
 
