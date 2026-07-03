@@ -243,22 +243,40 @@ export default defineConfig({
       },
     },
     {
-      // CI-only serial carrier for the heavy 3D-viewer specs (see THREE_D_HEAVY_SPECS).
-      // Same runtime as chromium-ci; test:kicad:ci invokes this project in a SEPARATE
-      // `playwright test` pass with --workers=1, so at most one raytrace tab is alive at a
-      // time (the environment in which a single 3D load is reliably green — see
-      // docs/features/3d-raytracer/README.md §6-§7). Own outputDir so its start-of-run
-      // cleanup doesn't wipe chromium-ci's retained traces, and so its own failure traces
-      // survive the later `test:perf` run's pw-artifacts/kicad wipe; the CI upload glob
-      // tests/pw-artifacts/** already captures it, so no workflow change is needed.
+      // CI-only carrier for the heavy 3D-viewer specs (see THREE_D_HEAVY_SPECS). Two reasons
+      // it is split out of chromium-ci:
+      //  1. HEADED + Mesa llvmpipe GL, not headless SwiftShader. The heavy 3D interactions
+      //     (camera move / model scene-build / edge-resize) run the CPU raytracer whose WebGL
+      //     blit + the tests' drawImage(glCanvas) pixel reads trigger heavy ReadPixels. Under
+      //     HEADLESS SwiftShader on the GPU-less CI VM those stall the GPU thread and Chromium's
+      //     GPU watchdog resets the context (CONTEXT_LOST_WEBGL) or crashes the renderer ("Target
+      //     crashed") — even with a SINGLE tab (run 28649537489, confirmed via the [DIAG] logs +
+      //     trace console). Fix: run HEADED under the CI's Xvfb with Mesa llvmpipe
+      //     (--use-gl=angle --use-angle=gl) — the SAME software-WebGL stack the Firefox CI
+      //     project already relies on (see the firefox project's headless:false note) — and
+      //     disable the GPU watchdog / crash-limit so a slow ReadPixels completes instead of
+      //     being killed. --enable-unsafe-swiftshader stays only as a last-ditch fallback.
+      //  2. Runs in a SEPARATE `playwright test` pass with --workers=1 (test:kicad:ci), so at
+      //     most one raytrace tab is alive at a time.
+      // Own outputDir so its start-of-run cleanup doesn't wipe chromium-ci's retained traces,
+      // and its own failure traces survive the later `test:perf` run's pw-artifacts/kicad wipe;
+      // the CI upload glob tests/pw-artifacts/** already captures it (no workflow change needed).
       name: "chromium-ci-3d",
       testMatch: THREE_D_HEAVY_SPECS,
       outputDir: process.env.CI ? "pw-artifacts/kicad-3d" : "test-results",
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 720 },
+        // Headed only matters on CI (real GPU locally); harmless headed locally too.
+        headless: !process.env.CI,
         launchOptions: {
-          args: ["--enable-unsafe-swiftshader"],
+          args: [
+            "--use-gl=angle",
+            "--use-angle=gl",
+            "--disable-gpu-watchdog",
+            "--disable-gpu-process-crash-limit",
+            "--enable-unsafe-swiftshader",
+          ],
         },
       },
     },
