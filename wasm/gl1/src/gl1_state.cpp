@@ -101,6 +101,10 @@ void stateBlendFunc( GLenum sfactor, GLenum dfactor )
 
 void stateLineWidth( GLfloat width )
 {
+    if( width > 1.0f )
+        GL1_WARN_ONCE( "glLineWidth(%g): browsers clamp line width to 1 — lines render thinner "
+                       "than native (known WebGL2 limitation)", (double) width );
+
     S().lineWidth = width;
     __real_glLineWidth( width );
 }

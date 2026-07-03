@@ -13,9 +13,10 @@ compiled two ways:
   the vendored glad loader). Renders each scenario into a fixed 800×600
   offscreen FBO (`GL_RGBA8` + `GL_DEPTH24_STENCIL8`, the
   `EDA_3D_CANVAS::RenderToFrameBuffer` recipe) → **golden baselines**.
-- **wasm/** — the same scenario TUs compiled with em++ (planned; red state
-  first: linked against `wasm/stubs/gl_ffp_stub.c` no-ops, every render blank
-  until the port makes them green).
+- **wasm/** — the same scenario TUs compiled with em++, linked against the
+  **`wasm/gl1`** GL1→WebGL2 emulation layer (the port itself — see
+  `wasm/gl1/README.md`). Since the port landed, all 47 scenarios render under
+  the parity floor with zero per-scenario overrides.
 
 ## Directory layout
 
@@ -74,13 +75,22 @@ every run, so a scenario registry change can't silently drift past the
 baselines. Scenario names are append-only — never rename or renumber (they are
 the PNG names and the WebGL test IDs).
 
-## TDD red state
+## Port status (was: TDD red state)
 
-Once `wasm/` exists, the Playwright spec (`tests/e2e/3d-webgl.spec.ts`) is
-capture-only and stays green; the red signal is `npm run 3d:check:parity`
-reporting ~100% changed for every scenario. Port progress = scenarios dropping
-out of that report. `glLineWidth > 1` (model bbox scenario) has no WebGL
-equivalent — expect that one to need quad emulation to go green.
+The suite drove the port TDD-style: the harness started against no-op FFP
+stubs (~100% changed everywhere), and the `wasm/gl1` emulation layer ground
+the parity report down milestone by milestone (substrate → lighting →
+display lists/arrays → GLU quadrics). **Current state: 47/47 under the 0.02
+parity floor, no floors.json overrides needed.**
+
+Two caveats the parity floor cannot see (verified by eyeballing renders):
+
+- Small-geometry scenarios (the GLU arrows, the spheres gizmo, sparse grids)
+  fit under the floor even when absent — a regression there needs the
+  triptych/eyeball check, not just the report.
+- `glLineWidth > 1` is clamped to 1 by browsers (gizmo axes, native width
+  2–4 lines render thinner); the affected coverage is small enough to stay
+  under the floor.
 
 ## Scenario tiers (47 scenarios)
 

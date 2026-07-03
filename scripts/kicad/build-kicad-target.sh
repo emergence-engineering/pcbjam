@@ -445,24 +445,36 @@ if [ "${APP_NAME}" = "occ_service" ]; then
 fi
 
 # 3D viewer: built by DEFAULT (BUILD_3D_VIEWER=ON). Opt out with BUILD_3D_VIEWER=OFF, which links the
-# 3D stubs instead. The 3D viewer renders with the GL-free CPU raytracer (RENDER_3D_RAYTRACE_RAM)
-# blitted to the canvas through a plain WebGL2 textured quad — no -sLEGACY_GL_EMULATION. KiCad's
-# fixed-function OpenGL renderer is still compiled (shared files reference it) but never executed on
-# WASM, so its FFP/GLU entry points are satisfied at link time by no-op stubs (gl_ffp_stub.c). The
-# KiCad CMake option KICAD_BUILD_3D_VIEWER_WASM stays OFF upstream; our build passes it explicitly.
-# See docs/features/fork-cleanup/10-3d-viewer.md.
+# 3D stubs instead. The default renderer is still the GL-free CPU raytracer
+# (RENDER_3D_RAYTRACE_RAM) blitted through a WebGL2 textured quad, but KiCad's fixed-function
+# OpenGL renderer (RENDER_3D_OPENGL) now links against the REAL GL1->WebGL2 emulation layer
+# (wasm/gl1, no -sLEGACY_GL_EMULATION): the shim implements the FFP-only entry points and
+# --wrap-intercepts the Emscripten-owned names it must observe (wasm/gl1/wrapped_symbols.txt).
+# Regression gate: tests/3d-regression (47 golden scenarios). The KiCad CMake option
+# KICAD_BUILD_3D_VIEWER_WASM stays OFF upstream; our build passes it explicitly.
+# See wasm/gl1/README.md and docs/features/fork-cleanup/10-3d-viewer.md.
 BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-ON}"
 GL3D_LINK_FLAGS=""
 if [ "${BUILD_3D_VIEWER}" = "ON" ]; then
-    log_info "3D viewer ENABLED for WASM (BUILD_3D_VIEWER=ON)"
-    emcc -c -I"${STUBS_DIR}" "${STUBS_DIR}/gl_ffp_stub.c" -o "${STUBS_BUILD}/gl_ffp_stub.o"
-    GL3D_LINK_FLAGS="${STUBS_BUILD}/gl_ffp_stub.o"
+    log_info "3D viewer ENABLED for WASM (BUILD_3D_VIEWER=ON) — compiling wasm/gl1 FFP shim"
+    GL1_DIR="${PROJECT_ROOT}/wasm/gl1"
+    while IFS= read -r gl1_src; do
+        [ -n "${gl1_src}" ] || continue
+        em++ -c ${EXTRA_FLAGS} -pthread -std=c++20 \
+             -I"${GL1_DIR}/include" -I"${STUBS_DIR}" -I"${SYSROOT}/include" \
+             "${GL1_DIR}/src/${gl1_src}" -o "${STUBS_BUILD}/${gl1_src%.cpp}.o"
+        GL3D_LINK_FLAGS="${GL3D_LINK_FLAGS} ${STUBS_BUILD}/${gl1_src%.cpp}.o"
+    done < "${GL1_DIR}/sources.txt"
+    while IFS= read -r gl1_sym; do
+        [ -n "${gl1_sym}" ] || continue
+        GL3D_LINK_FLAGS="${GL3D_LINK_FLAGS} -Wl,--wrap=${gl1_sym}"
+    done < "${GL1_DIR}/wrapped_symbols.txt"
 fi
 
 # Multi-threaded CPU raytracer (mainline threading restored): link the main-thread
 # nanosleep->Asyncify-yield shim so the raw-thread raytracer joins (sleep_for busy-wait)
 # yield to the JS event loop instead of deadlocking on-demand pthread-Worker creation.
-# Mirrors the gl_ffp_stub pattern (compile to .o, add to the link). Shim:
+# Mirrors the wasm/gl1 pattern (compile to .o, add to the link). Shim:
 # wasm/shims/nanosleep_yield.c; its EM_ASYNC_JS yield is covered by env.__asyncjs__* in
 # scripts/common/asyncify-imports.txt.
 emcc -c -pthread "${PROJECT_ROOT}/wasm/shims/nanosleep_yield.c" -o "${STUBS_BUILD}/nanosleep_yield.o"

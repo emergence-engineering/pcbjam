@@ -1,11 +1,11 @@
-# Makefile for the 3D-renderer WebGL test harness (WASM) — TDD RED STATE.
+# Makefile for the 3D-renderer WebGL test harness (WASM).
 #
 # Compiles the SAME shared scenarios + real KiCad 3D-viewer TUs as the native
-# golden generator (tests/3d-regression/native/CMakeLists.txt), but links the
-# fixed-function GL surface against wasm/stubs/gl_ffp_stub.c no-ops — exactly
-# how the production kicad build satisfies RENDER_3D_OPENGL's link today.
-# Every scenario therefore renders BLANK until the WebGL port replaces those
-# stubs; `npm run 3d:check:parity` is the port-progress meter.
+# golden generator (tests/3d-regression/native/CMakeLists.txt), linking the
+# fixed-function GL surface against the wasm/gl1 GL1->WebGL2 emulation layer —
+# exactly how the production kicad build satisfies RENDER_3D_OPENGL's link.
+# `npm run 3d:check:parity` compares the browser renders against the native
+# goldens (47/47 under floor since the port).
 #
 # Usage:
 #   make                    # Build
@@ -96,7 +96,7 @@ TESTIMPL_SRCS = ../native/board_adapter_test_impl.cpp \
                 ../native/render3d_test_accessor.cpp
 
 # Same real-KiCad TU list as the native CMakeLists (minus glad — Emscripten
-# provides the modern GL surface, gl_ffp_stub.c the legacy one).
+# provides the modern GL surface, wasm/gl1 the legacy one).
 KICAD_3D_SRCS = \
     $(KICAD_ROOT)/3d-viewer/common_ogl/ogl_utils.cpp \
     $(KICAD_ROOT)/3d-viewer/3d_rendering/image.cpp \

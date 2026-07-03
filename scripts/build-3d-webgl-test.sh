@@ -3,8 +3,8 @@
 # Build script for the 3D-renderer WebGL test harness (WASM).
 #
 # Builds the shared 3D scenarios (tests/3d-regression/scenarios) + real KiCad
-# 3D-viewer TUs against the FFP no-op stubs (wasm/stubs/gl_ffp_stub.c) — the
-# TDD red state for the OpenGL->WebGL port. Output: tests/apps/3d-webgl/.
+# 3D-viewer TUs against the wasm/gl1 GL1->WebGL2 emulation layer (the
+# OpenGL->WebGL port). Output: tests/apps/3d-webgl/.
 #
 # Requires the wxWidgets WASM build (scripts/build-wx-wasm.sh) and the sysroot
 # headers (boost/glm) in build-wasm/sysroot.
@@ -15,7 +15,7 @@
 #   ./scripts/build-3d-webgl-test.sh --debug      # Debug build with source maps
 #
 # Modeled on scripts/build-gal-webgl-test.sh (no shader-generation step — the
-# FFP renderer has no GLSL yet; the port will add one here).
+# gl1 shim's FFP uber-shader lives inline in wasm/gl1/src/gl1_shaders.cpp).
 #
 
 source "$(dirname "$0")/common/logging.sh"

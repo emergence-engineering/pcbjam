@@ -1,8 +1,8 @@
 /**
  * 3D-renderer WebGL test harness (WASM) — runs the shared scenarios
- * (tests/3d-regression/scenarios/) in the browser. Today the legacy GL
- * surface is wasm/stubs/gl_ffp_stub.c no-ops, so every scenario renders a
- * black canvas: the TDD red state the WebGL port turns green.
+ * (tests/3d-regression/scenarios/) in the browser. The legacy GL surface is
+ * implemented by the wasm/gl1 GL1->WebGL2 emulation layer; the parity level
+ * (npm run 3d:check:parity) compares these renders against the native goldens.
  *
  * Unlike the GAL harness this needs no wx window: the renderer draws into
  * whatever context is current, so a direct emscripten WebGL2 context on
