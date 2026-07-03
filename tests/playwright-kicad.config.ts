@@ -90,6 +90,8 @@ const BIG_MODULE_SPECS = [
   // boots pcbnew.html — must run on V8 (chromium-ci); on Firefox/x86 CI the
   // ~190M module OOMs at instantiation and #canvas never appears (run 27626037849).
   "**/pcbnew-move.spec.ts",
+  // boots pcbnew.html and opens the Page Settings dialog (H-1 modal input-lock repro).
+  "**/modal-input-lock.spec.ts",
   // 3D viewer specs boot pcbnew.html (3D-enabled build) — same V8 routing.
   "**/3d-viewer.spec.ts",
   // Isolated (own file → own worker) so its heavy single load isn't degraded by the
