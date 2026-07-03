@@ -340,6 +340,7 @@ jobs:
             tests/apps
             !tests/apps/kicad
             !tests/apps/gal-webgl
+            !tests/apps/3d-webgl
           key: testapps-${{ runner.os }}-wx${{ steps.keys.outputs.wx }}-k${{ steps.keys.outputs.kicad }}-bin${{ steps.keys.outputs.bin }}-${{ hashFiles('tests/apps/**/*.cpp', 'tests/apps/**/*.h', 'tests/apps/**/*.html', 'tests/apps/Makefile.wasm', 'scripts/build-wx-wasm.sh', 'scripts/build-wasm-test.sh', 'scripts/common/versions.sh', 'scripts/common/env.sh', 'scripts/common/functions.sh', 'scripts/common/apply-asyncify.sh', 'scripts/common/asyncify-imports.txt', 'scripts/common/inject-dyncall-shims.sh', 'scripts/common/shims/**', 'wasm/**') }}
 
       - name: Build wxWidgets test apps
@@ -349,6 +350,15 @@ jobs:
       - name: Build GAL WebGL test app
         if: inputs.run_tests
         run: ./scripts/build-gal-webgl-test.sh
+
+      # 3D renderer regression harness (tests/3d-regression): same recipe as GAL —
+      # compiles real KiCad 3D-viewer TUs + the wasm/gl1 GL1->WebGL2 layer against
+      # the wx build and the docker-exposed sysroot headers. The capture spec
+      # (e2e/3d-webgl.spec.ts) runs inside the wx e2e step below; it self-skips
+      # when this app is missing.
+      - name: Build 3D WebGL test app
+        if: inputs.run_tests
+        run: ./scripts/build-3d-webgl-test.sh
 
       # The emsdk cache saves in the post-job phase; the downloads/ tarballs
       # (~340 MB) are spent after install — drop them so they never ride in the
@@ -424,6 +434,24 @@ jobs:
         working-directory: tests
         run: xvfb-run -a npm run test:perf
 
+      # 3D renderer parity + browser-self regression (report-only). The wx e2e
+      # step above captured the 47 scenario renders into
+      # tests/3d-regression/output/webgl; compare them against the committed
+      # native goldens (parity — the port-correctness meter) and the committed
+      # browser goldens (webgl-self). continue-on-error while the committed
+      # baseline-webgl/ set is Mac-Chromium-sourced: if CI's SwiftShader
+      # rasterizes past the 0.005 floor, promote CI's renders into
+      # baseline-webgl/ and flip this step gating. 3d:review writes the full
+      # 47-pair triptych gallery for the artifact upload below.
+      - name: 3D renderer parity (report-only)
+        if: inputs.run_tests && !cancelled() && steps.wx_e2e.outcome != 'skipped'
+        continue-on-error: true
+        working-directory: tests
+        run: |
+          npm run 3d:check:parity
+          npm run 3d:check:webgl
+          npm run 3d:review
+
       # Screenshot drift gate + Discord report (perf + triptychs). Runs whenever
       # the e2e suites ran — INCLUDING on e2e failure — so a wrong or missing
       # screenshot is visible on Discord even on a red build (a spec that died
@@ -485,4 +513,5 @@ jobs:
             tests/test-results/**
             tests/pw-artifacts/**
             tests/playwright-report/**
+            tests/3d-regression/output/**
           if-no-files-found: ignore
