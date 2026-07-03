@@ -76,6 +76,42 @@ function attach(root: string, rel: string, name: string): Attachment | null {
     }
 }
 
+/** One status line for the 3D-renderer regression suite (tests/3d-regression),
+ *  from the compare-dirs report.json of each level that ran. Empty when the
+ *  suite didn't run (reports absent) so the message stays inert for builds
+ *  without the 3D harness. Triptychs live in the run artifact, not Discord. */
+function threeDStatusLine(): string[] {
+    const levels: Array<{ tag: string; dir: string }> = [
+        { tag: 'parity', dir: '3d-regression/output/diff/parity' },
+        { tag: 'webgl-self', dir: '3d-regression/output/diff/webgl-self' },
+    ];
+    const parts: string[] = [];
+    let drift = false;
+
+    for (const { tag, dir } of levels) {
+        const file = path.join(dir, 'report.json');
+        if (!fs.existsSync(file)) continue;
+        try {
+            const r = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const changed = (r.changed?.length ?? 0) + (r.added?.length ?? 0) + (r.removed?.length ?? 0);
+            const total = (r.unchangedCount ?? 0) + (r.changed?.length ?? 0);
+            if (changed === 0) {
+                parts.push(`${tag} ${total}/${total}`);
+            } else {
+                drift = true;
+                const worst = r.changed?.[0];
+                const worstNote = worst ? ` (worst \`${worst.name}\` ${(worst.changedRatio * 100).toFixed(1)}%)` : '';
+                parts.push(`**${tag} ${changed} changed**${worstNote}`);
+            }
+        } catch {
+            /* unreadable report — skip the level */
+        }
+    }
+
+    if (!parts.length) return [];
+    return [`${drift ? '⚠️' : '✅'} 3D renderer: ${parts.join(' · ')}${drift ? ' — triptychs in the run artifact' : ''}`];
+}
+
 /** Build the header text: SHA, subject, e2e, perf table, screenshot summary, removed list. */
 function buildHeader(report: Report | null, perfBlock: string, meta: { sha?: string; subject: string; e2e?: string }): string {
     const shortSha = meta.sha ? meta.sha.slice(0, 7) : 'local';
@@ -97,6 +133,7 @@ function buildHeader(report: Report | null, perfBlock: string, meta: { sha?: str
         const extra = report.removed.length > REMOVED_CAP ? ` (+${report.removed.length - REMOVED_CAP} more)` : '';
         lines.push('➖ REMOVED: ' + shown + extra);
     }
+    lines.push(...threeDStatusLine());
     return lines.join('\n');
 }
 
