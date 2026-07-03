@@ -57,9 +57,23 @@ export EMSCRIPTEN_VERSION
 
 set -e
 
+# Stop the builder container when the build ends (any exit path). A lingering
+# idle builder keeps the Docker Desktop VM ballooned — each project's builder
+# is capped at ${KICAD_DOCKER_MEM:-32G}, and with per-worktree compose projects
+# two forgotten containers once read as ~56 GB of host RAM (page cache +
+# high-water ballooning). The container is pure scaffolding: all caches live in
+# the named volumes and `up -d` restarts it in seconds. Set
+# KICAD_KEEP_CONTAINER=1 to keep it running for interactive exec/debugging.
+_COMPOSE_FILE="$(cd "$(dirname "$0")" && pwd)/docker-compose.yml"
+stop_builder() {
+    if [[ "${KICAD_KEEP_CONTAINER:-0}" != "1" ]]; then
+        docker compose -f "${_COMPOSE_FILE}" stop >/dev/null 2>&1 || true
+    fi
+}
+
 # Emit a completion/failure marker no matter how the build ends, so the monitor
 # can stop on a clean "done" or show an aborted state instead of hanging.
-trap '_rc=$?; if [ $_rc -eq 0 ]; then kw_done; else kw_fail $_rc; fi' EXIT
+trap '_rc=$?; if [ $_rc -eq 0 ]; then kw_done; else kw_fail $_rc; fi; stop_builder' EXIT
 # On Ctrl-C, mark the build aborted so the final dashboard frame shows failed
 # (not a stale "running" state). The EXIT trap above also fires; the monitor reads
 # the last marker, so the duplicate is harmless.
@@ -351,7 +365,7 @@ TOTAL_APPS="${#APPS[@]}"
 # Shared pipeline trap: on a failure, kill orphaned background wasm-opt jobs
 # (each ~30 GB) and keep the monitor's done/fail marker from the EXIT trap.
 _install_pipeline_trap() {
-    trap '_rc=$?; for p in "${PIPELINE_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; if [ $_rc -eq 0 ]; then kw_done; else kw_fail $_rc; fi' EXIT
+    trap '_rc=$?; for p in "${PIPELINE_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done; if [ $_rc -eq 0 ]; then kw_done; else kw_fail $_rc; fi; stop_builder' EXIT
 }
 
 if [[ "$PHASE" == "compile" ]]; then

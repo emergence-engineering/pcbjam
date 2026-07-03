@@ -31,7 +31,10 @@ services:
       # Output directory for easy access to final WASM files
       - ../output:/workspace/output
 
-    # Keep container running for interactive use
+    # Keep the container alive so build.sh can `exec` its stages into it.
+    # build.sh STOPS it when the build exits (idle builders keep the Docker
+    # Desktop VM ballooned — 32G cap per per-worktree compose project); set
+    # KICAD_KEEP_CONTAINER=1 to keep it running afterwards for interactive use.
     stdin_open: true
     tty: true
 
