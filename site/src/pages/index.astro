@@ -5,7 +5,6 @@ import TrustBar from '../sections/TrustBar.astro';
 import Pillars from '../sections/Pillars.astro';
 import HowItWorks from '../sections/HowItWorks.astro';
 import CapabilityProof from '../sections/CapabilityProof.astro';
-import GerberDemoSection from '../sections/GerberDemoSection.astro';
 import OpenYours from '../sections/OpenYours.astro';
 import MigrationStrip from '../sections/MigrationStrip.astro';
 import PositioningMap from '../sections/PositioningMap.astro';
@@ -14,11 +13,8 @@ import MakeMoney from '../sections/MakeMoney.astro';
 import AiNote from '../sections/AiNote.astro';
 import FinalCta from '../sections/FinalCta.astro';
 
-// Toggle the optional positioning-map section (§15).
-const SHOW_MAP = true;
-
 const description =
-  'Open-source PCB design in your browser with real-time collaboration. Built on KiCad. No install, open format, free to start. Join the waitlist.';
+  'Real KiCad in your browser — schematic capture, PCB layout, DRC, 3D, Gerber export. No install, open format, free. Multiplayer collaboration coming. Try the live demo.';
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -37,7 +33,7 @@ const jsonLd = {
 ---
 
 <BaseLayout
-  title="PCBJam — KiCad in your browser, now multiplayer"
+  title="PCBJam — real KiCad in your browser, no install"
   description={description}
   wide
 >
@@ -50,13 +46,12 @@ const jsonLd = {
 
   <Hero />
   <TrustBar />
-  <GerberDemoSection />
   <Pillars />
   <HowItWorks />
   <CapabilityProof />
   <OpenYours />
   <MigrationStrip />
-  {SHOW_MAP && <PositioningMap />}
+  <PositioningMap />
   <BuiltByEmergence />
   <MakeMoney />
   <AiNote />

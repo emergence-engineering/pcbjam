@@ -18,9 +18,11 @@ interface Props {
   poster?: string;
   caption?: string;
   ratio?: string; // default 16/9
-  /** When true and no video yet, show a big "Demo coming soon" panel instead of
+  /** When true and no video yet, show a big "coming soon" panel instead of
    *  the internal PRODUCE placeholder. */
   comingSoon?: boolean;
+  /** Panel text for the comingSoon state. */
+  soonLabel?: string;
   class?: string;
 }
 
@@ -31,6 +33,7 @@ const {
   caption,
   ratio = '16 / 9',
   comingSoon = false,
+  soonLabel = 'Demo coming soon',
   class: cls = '',
 } = Astro.props;
 const hasVideo = Boolean(mp4 || webm);
@@ -58,7 +61,7 @@ const hasVideo = Boolean(mp4 || webm);
       </div>
     ) : comingSoon ? (
       <div class="demo-soon bp-grid" style={`aspect-ratio:${ratio};`}>
-        <span class="demo-soon-text">Demo coming soon</span>
+        <span class="demo-soon-text">{soonLabel}</span>
       </div>
     ) : (
       <Placeholder
@@ -95,7 +98,9 @@ const hasVideo = Boolean(mp4 || webm);
     display: grid;
     place-items: center;
     border: 0;
-    background: color-mix(in srgb, var(--bg) 35%, transparent);
+    /* Fixed dark scrim (not --bg-derived): white glyph over video needs a dark
+       veil in both themes. */
+    background: rgba(11, 16, 32, 0.35);
     color: #fff;
     cursor: pointer;
   }
@@ -113,8 +118,8 @@ const hasVideo = Boolean(mp4 || webm);
     background-color: var(--bg-soft);
   }
   .demo-soon-text {
-    font-size: clamp(1.6rem, 5.5vw, 3rem);
-    font-weight: 800;
+    font-size: clamp(1.1rem, 3vw, 1.75rem);
+    font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--fg);
   }

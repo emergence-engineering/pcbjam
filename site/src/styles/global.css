@@ -5,20 +5,23 @@
 @import "tailwindcss/utilities.css" layer(utilities);
 
 :root {
-  /* ── Ink neutrals (authoritative; existing names kept) ───────────────── */
-  --bg: #0b1020; /* ink-950 */
-  --bg-soft: #11182e; /* ink-900 / surface */
-  --fg: #e7ecf5; /* ink-100 */
-  --fg-muted: #9aa6c0; /* ink-400 */
-  --border: #233052; /* ink-800 */
+  color-scheme: light;
+
+  /* ── Ink neutrals (authoritative; existing names kept — the *roles* stayed,
+     the values flipped to the light theme) ────────────────────────────── */
+  --bg: #ffffff; /* page */
+  --bg-soft: #f4f7fc; /* surface / soft band */
+  --fg: #101729; /* ink-950 text */
+  --fg-muted: #5b6784; /* muted text */
+  --border: #d9e1f0; /* hairlines / bp-grid dots */
 
   /* ── Primary (Circuit Blue) ─────────────────────────────────────────── */
-  --accent: #4f7cff; /* brand-500 (links/accents) */
+  --accent: #2f57f5; /* links/accents (darker than the dark-theme 4f7cff for contrast on white) */
   --brand-600: #2f57f5; /* primary button */
   --brand-700: #1d4ed8; /* favicon / deep */
 
   /* ── Signal (green / "live" presence) ───────────────────────────────── */
-  --signal-400: #32d583; /* online text */
+  --signal-400: #0a9b62; /* online text/icons (dark-theme value 32d583 is illegible on white) */
   --signal-600: #039855; /* online fill / success */
 
   /* ── Presence palette (peer cursors) ────────────────────────────────── */

@@ -118,6 +118,12 @@ const isActive = (href: string, external?: boolean) =>
     padding-block: 0.5rem;
     font-size: 0.95rem;
   }
+  /* `.nav > a` (higher specificity than .btn-primary) sets the muted link color;
+     re-assert the button's white text — dark-on-blue otherwise. */
+  .nav > a.cta-join,
+  .nav > a.cta-join:hover {
+    color: #fff;
+  }
 
   /* Mobile menu (CSS-only via checkbox toggle). */
   .hamburger {

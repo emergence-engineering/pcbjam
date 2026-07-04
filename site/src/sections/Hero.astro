@@ -1,36 +1,40 @@
 ---
 import WaitlistForm from '../components/WaitlistForm.astro';
-import DemoVideo from '../components/DemoVideo.astro';
-import Icon from '../components/Icon.astro';
+import DemoLaunchCard from '../components/DemoLaunchCard.astro';
+import pcbnew from '../assets/screens/pcbnew.png';
 ---
 
 <section class="hero bp-grid">
   <div class="container hero-grid">
     <div class="hero-copy">
       <span class="eyebrow">PCBJam · built on KiCad</span>
-      <h1>KiCad, in your browser — now multiplayer.</h1>
+      <h1>Real KiCad. In your browser. No install.</h1>
       <p class="lead">
-        The PCB design tool millions trust — now zero-install and collaborative. Open a
-        board in a tab, invite your team, and edit the same schematic and layout together
-        in real time. Open format. No install. Free to start.
+        The full KiCad suite, compiled to WebAssembly and running in a tab. Open your own
+        board, route, run DRC, spin it in 3D, export Gerbers — the real engine, not a
+        re-implementation. Multiplayer co-editing is coming: join the waitlist for early
+        access.
       </p>
 
-      <WaitlistForm source="hero" id="waitlist" class="hero-form" />
-
-      <p class="hero-secondary">
+      <p class="hero-cta">
         <a
+          class="btn btn-primary btn-demo"
           href="https://demo.pcbjam.com"
-          class="try"
           target="_blank"
           rel="noopener"
         >
-          Open the live editor →
+          ▶&nbsp; Open the live demo
         </a>
-        <span class="dot" aria-hidden="true">·</span>
-        <a href="#multiplayer" class="watch">
-          <Icon name="icons/play.svg" size="1.1rem" alt="" /> Watch the 90-second demo →
-        </a>
+        <span class="hero-cta-sub">Free · no install, no account</span>
       </p>
+
+      <p class="hero-wl-lead">Want early access to multiplayer?</p>
+      <WaitlistForm
+        source="hero"
+        id="waitlist"
+        class="hero-form"
+        microcopy="Collab rolls out in waves — get your invite."
+      />
 
       <ul class="hero-trust">
         <li>Open source</li>
@@ -40,11 +44,13 @@ import Icon from '../components/Icon.astro';
     </div>
 
     <div class="hero-visual">
-      {/* TODO(assets): swap for hero board still w/ presence cursors (§4b.3) or the
-          multiplayer demo loop (§4b.2) once produced. */}
-      <DemoVideo
-        comingSoon
-        caption="2 editors · live cursors · one board.kicad_pcb · no merge step"
+      {/* TODO(assets): swap the poster for a hero board still w/ presence cursors
+          (§4b.3) or the multiplayer demo loop (§4b.2) once produced. */}
+      <DemoLaunchCard
+        href="https://demo.pcbjam.com"
+        image={pcbnew}
+        alt="KiCad Pcbnew editing the pic_programmer demo board in a browser tab — open the live demo"
+        sub="Real KiCad in your browser · opens in a new tab"
       />
     </div>
   </div>
@@ -64,31 +70,42 @@ import Icon from '../components/Icon.astro';
     font-size: clamp(2rem, 5vw, 3.25rem);
     margin-bottom: 0.75rem;
   }
-  .hero-form {
-    margin-top: 1.5rem;
-    max-width: 30rem;
-  }
-  .hero-secondary {
-    margin: 1rem 0 0;
+  .hero-cta {
+    margin: 1.5rem 0 0;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.4rem 0.75rem;
+    gap: 0.5rem 1rem;
   }
-  .try {
-    display: inline-flex;
-    align-items: center;
-    font-weight: 600;
-    color: var(--accent);
+  .btn-demo {
+    padding: 0.85rem 1.6rem;
+    font-size: 1.05rem;
   }
-  .dot {
+  .hero-cta-sub {
+    font-size: 0.85rem;
     color: var(--fg-muted);
   }
-  .watch {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
+  .hero-wl-lead {
+    margin: 1.75rem 0 0.5rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+  }
+  .hero-form {
+    max-width: 30rem;
+  }
+  /* One primary action per hero: the demo button. Demote the waitlist submit
+     to ghost weight (it stays full-primary in the final CTA and footer).
+     .hero-copy anchors the scope — .hero-form itself sits on the WaitlistForm
+     root, which doesn't carry this component's scope attribute. */
+  .hero-copy :global(.hero-form .btn-primary) {
+    background: transparent;
+    border-color: var(--border);
     color: var(--fg);
+  }
+  .hero-copy :global(.hero-form .btn-primary:hover) {
+    border-color: var(--accent);
+    color: var(--accent);
+    filter: none;
   }
   .hero-trust {
     list-style: none;
