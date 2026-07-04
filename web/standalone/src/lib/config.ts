@@ -54,9 +54,11 @@ export const LANDING_URL = (
  * Where the in-editor waitlist form POSTs. The demo is a fully static deploy with
  * no backend, so it cross-posts to the landing site's serverless endpoint (which
  * sends CORS for this origin). Same JSON contract as site/src/pages/api/waitlist.ts.
+ * Targets the canonical www host: the apex 308-redirects to www on Vercel, and a
+ * CORS preflight can't follow a redirect (so the apex would break the POST).
  */
 export const WAITLIST_URL =
-  import.meta.env.VITE_WAITLIST_URL || "https://pcbjam.com/api/waitlist";
+  import.meta.env.VITE_WAITLIST_URL || "https://www.pcbjam.com/api/waitlist";
 
 /**
  * Plausible analytics (privacy-friendly, cookieless). Off unless a domain is set
