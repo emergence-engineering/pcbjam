@@ -47,8 +47,7 @@ export function WaitlistForm({ source = "standalone" }: { source?: string }) {
       ) : (
         <>
           <p className="mb-4 text-sm text-muted-foreground">
-            Join the waitlist for product updates and your invite — no spam,
-            unsubscribe anytime.
+            Join the waitlist for product updates and your invite.
           </p>
           <form onSubmit={submit} className="flex flex-col gap-2 sm:flex-row">
             <Input
