@@ -169,6 +169,7 @@ all: minimal_test.html \
      $(S)/propgrid/propgrid_test.html \
      $(S)/pickers/pickers_test.html \
      $(S)/collapsible/collapsible_test.html \
+     $(S)/collapse-relayout/collapse-relayout_test.html \
      $(S)/listctrl/listctrl_test.html \
      $(S)/infobar/infobar_test.html \
      $(S)/dataviewvirtual/dataviewvirtual_test.html \
@@ -420,6 +421,13 @@ $(S)/collapsible/collapsible_test.o: $(S)/collapsible/collapsible_test.cpp
 	$(CXX) -c $(CXXFLAGS) $< -o $@
 
 $(S)/collapsible/collapsible_test.html: $(S)/collapsible/collapsible_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+# collapse-relayout: notebook page + proportion-1 scrolled list + collapsible pane (no GL)
+$(S)/collapse-relayout/collapse-relayout_test.o: $(S)/collapse-relayout/collapse-relayout_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/collapse-relayout/collapse-relayout_test.html: $(S)/collapse-relayout/collapse-relayout_test.o $(WX_CORE_LIB) $(JS_FILES)
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
 # ListCtrl virtual mode test (no GL)
@@ -767,6 +775,7 @@ dnd: $(S)/dnd/dnd_test.html
 propgrid: $(S)/propgrid/propgrid_test.html
 pickers: $(S)/pickers/pickers_test.html
 collapsible: $(S)/collapsible/collapsible_test.html
+collapse-relayout: $(S)/collapse-relayout/collapse-relayout_test.html
 listctrl: $(S)/listctrl/listctrl_test.html
 infobar: $(S)/infobar/infobar_test.html
 dataviewvirtual: $(S)/dataviewvirtual/dataviewvirtual_test.html
@@ -813,7 +822,7 @@ clean:
 	rm -f $(S)/*/*_test*.html $(S)/*/*_test*.js $(S)/*/*_test*.wasm
 	rm -f $(S)/*/*_repro*.html $(S)/*/*_repro*.js $(S)/*/*_repro*.wasm
 
-.PHONY: all clean menu contextmenu scrollbar clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize selectheight threadpool logerror retinascale coroutine coroutine-nested asyncify-races notebook radiogroups
+.PHONY: all clean menu contextmenu scrollbar clipboard filedialog layout aui toolbar grid dialog timer tree dataview htmlwin stc print dnd propgrid pickers collapsible listctrl infobar dataviewvirtual auinotebook wizard gridedit calendar gridrenderers printpreview bitmapbuttons specialized validators ownerdrawn popup xml wasmedge fontenum textdecor bitmask regions maximize earlysize selectheight threadpool logerror retinascale coroutine coroutine-nested asyncify-races notebook radiogroups collapse-relayout
 
 # === Coroutine pthread variant — reproduces the KiCad Asyncify-fiber x pthreads crash ===
 # Same modal-free harness as `coroutine`, but compiled/linked with pthreads to match
