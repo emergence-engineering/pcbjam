@@ -57,7 +57,14 @@ import {
   hasPresenceBridge,
   type PresenceKicadWindow,
 } from "@/wasm/collab/presence-kicad";
+import {
+  createComments,
+  hasCommentsBridge,
+  type CommentsController,
+  type ViewportState,
+} from "@/wasm/collab/comments";
 import { PresenceRoster } from "@/components/PresenceRoster";
+import { CommentLayer } from "@/components/CommentLayer";
 import {
   createSheetCollabManager,
   registerSheetChangedHook,
@@ -633,6 +640,12 @@ export function WasmTool({
   // eeschema: the sheet THIS client is bound to — the roster dims peers whose
   // skeleton state says they're on a different sheet (collab-presence 0003).
   const [activeSheetPath, setActiveSheetPath] = React.useState<string | undefined>();
+  // Comments (0005): the bound doc's controller + the live viewport transform
+  // the DOM layer maps world→CSS with. Both rebind with the collab session
+  // (per sheet in eeschema).
+  const [commentsCtl, setCommentsCtl] = React.useState<CommentsController | null>(null);
+  const [viewportState, setViewportState] = React.useState<ViewportState | null>(null);
+  const commentsRef = React.useRef<CommentsController | null>(null);
 
   const append = React.useCallback(
     (msg: string) => setLogs((prev) => [...prev.slice(-800), msg]),
@@ -787,7 +800,34 @@ export function WasmTool({
           mod: win.Module,
           win: win as unknown as PresenceKicadWindow,
           presence,
+          // Live world↔screen transform for the DOM comment layer (0005).
+          onViewport: setViewportState,
         });
+      }
+    };
+
+    // (Re)bind the comments controller to the collab doc (collab-presence 0005):
+    // GAL pin dots + the DOM layer's thread data. Follows the same lifecycle as
+    // presence — eeschema rebinds per active sheet.
+    const startComments = (doc: import("yjs").Doc | undefined) => {
+      commentsRef.current?.destroy();
+      commentsRef.current = null;
+      setCommentsCtl(null);
+      if (!doc || (tool !== "pcbnew" && tool !== "eeschema") || !hasCommentsBridge(win.Module)) {
+        return;
+      }
+      const ctl = createComments({ doc, mod: win.Module, user: presenceUser().id, tool });
+      commentsRef.current = ctl;
+      setCommentsCtl(ctl);
+      // Test/debug handle (mirrors window.kicadCollab): lets the e2e reset
+      // persisted threads deterministically without driving the whole UI.
+      (win as { __pcbjamComments?: CommentsController }).__pcbjamComments = ctl;
+      // Seed the transform (pushes only happen on input events after this).
+      try {
+        const vp = JSON.parse(win.Module.kicadCollabGetViewport() || "null");
+        if (vp && vp.w > 0) setViewportState(vp);
+      } catch {
+        /* frame not up yet — the first input push seeds it */
       }
     };
 
@@ -921,6 +961,7 @@ export function WasmTool({
                 driftRef.current?.stop();
                 driftRef.current = null;
                 startPresence(activeRoom?.provider, activeRoom?.sheetPath);
+                startComments(activeRoom?.doc);
                 if (activeRoom) {
                   driftRef.current = startDriftDetection({
                     doc: activeRoom.doc,
@@ -949,6 +990,7 @@ export function WasmTool({
           });
           collabDocRef.current = collabHandle?.doc ?? null;
           startPresence(collabHandle?.provider);
+          startComments(collabHandle?.doc);
           if (collabHandle && targetPath && COLLAB_TOOLS.has(tool)) {
             driftRef.current = startDriftDetection({
               doc: collabHandle.doc,
@@ -974,6 +1016,8 @@ export function WasmTool({
 
     return () => {
       win.removeEventListener("keydown", swallowBrowserSave, true);
+      commentsRef.current?.destroy();
+      commentsRef.current = null;
       presenceBridgeRef.current?.destroy();
       presenceBridgeRef.current = null;
       presenceRef.current?.destroy();
@@ -1111,6 +1155,16 @@ export function WasmTool({
           )}
           {sourceDescriptor && <SourceChip descriptor={sourceDescriptor} />}
         </div>
+      )}
+
+      {/* Figma-like comments (0005): GAL pin dots + this DOM layer (hit targets,
+          thread popovers, comment mode, panel). */}
+      {ready && commentsCtl && (
+        <CommentLayer
+          controller={commentsCtl}
+          viewport={viewportState}
+          currentUser={presenceUser().id}
+        />
       )}
 
       {/* Lib pre-sync still warming IDB after the editor opened (big set) — small

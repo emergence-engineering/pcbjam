@@ -701,7 +701,18 @@ struct PEER
     std::vector<KIID> selection;
 };
 
+// Comment pin dot (collab-presence 0005): the GAL half of the hybrid pin —
+// zero pan/zoom lag; the clickable hit target + thread popover are DOM.
+struct PIN
+{
+    std::string    id;
+    VECTOR2D       pos;                  // world coords (IU)
+    KIGFX::COLOR4D color;
+    bool           resolved = false;
+};
+
 std::vector<PEER>                    g_peers;
+std::vector<PIN>                     g_pins;
 std::shared_ptr<KIGFX::VIEW_OVERLAY> g_overlay;
 bool        g_started           = false;
 bool        g_redrawScheduled   = false;
@@ -833,6 +844,18 @@ void redrawOverlay()
                                        ANGLE_0 );
             }
         }
+    }
+
+    // Comment pin dots (0005): filled circle in the author's color with a white
+    // ring; resolved pins dim. Drawn last so they sit above selection outlines.
+    for( const PIN& pin : g_pins )
+    {
+        g_overlay->SetIsStroke( true );
+        g_overlay->SetIsFill( true );
+        g_overlay->SetFillColor( pin.resolved ? pin.color.WithAlpha( 0.3 ) : pin.color );
+        g_overlay->SetStrokeColor( KIGFX::COLOR4D( 1, 1, 1, pin.resolved ? 0.35 : 0.9 ) );
+        g_overlay->SetLineWidth( 1.5 * px );
+        g_overlay->Circle( pin.pos, 7 * px );
     }
 
     view->Update( g_overlay.get() );
@@ -1587,6 +1610,51 @@ void schCollabSetRemote( std::string aJson )
     presence::scheduleRedraw();
 }
 
+// JS → C++ (collab-presence 0005): comment pin dots (same wire as pcbnew).
+void schCollabSetPins( std::string aJson )
+{
+    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
+
+    if( j.is_discarded() )
+        return;
+
+    std::vector<presence::PIN> pins;
+
+    for( const json& p : j.value( "pins", json::array() ) )
+    {
+        presence::PIN pin;
+        pin.id       = p.value( "id", "" );
+        pin.pos      = VECTOR2D( p.value( "x", 0.0 ), p.value( "y", 0.0 ) );
+        pin.color    = presence::parseColor( p.value( "color", "" ) );
+        pin.resolved = p.value( "resolved", false );
+        pins.push_back( std::move( pin ) );
+    }
+
+    presence::g_pins = std::move( pins );
+    schCollabPresenceStart();
+    presence::scheduleRedraw();
+}
+
+// JS → C++ (0005): pan the view to a world position (comment panel "jump to pin").
+void schCollabSetViewport( double aCx, double aCy )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    fr->CallAfter( [fr, aCx, aCy]() {
+        COROUTINE<int, int> cor( [fr, aCx, aCy]( int ) -> int
+                                 {
+                                     fr->GetCanvas()->GetView()->SetCenter( VECTOR2D( aCx, aCy ) );
+                                     fr->GetCanvas()->ForceRefresh();
+                                     presence::emitViewportIfChanged();
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
+}
+
 // JS pull of the current viewport transform: `{cx,cy,scale,w,h}` with scale = px per
 // IU via the GAL matrix (GetScale() is the zoom, not px/IU — pcbnew 0002 lesson).
 std::string schCollabGetViewport()
@@ -1735,6 +1803,8 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     // Presence (collab-presence 0003) — shared names with pcbnew's 0002 set.
     function("kicadCollabPresenceStart", &schCollabPresenceStart);
     function("kicadCollabSetRemote", &schCollabSetRemote);
+    function("kicadCollabSetPins", &schCollabSetPins);
+    function("kicadCollabSetViewport", &schCollabSetViewport);
     function("kicadCollabGetViewport", &schCollabGetViewport);
     function("kicadCollabGetSelection", &schCollabGetSelection);
     function("kicadCollabTestSelectFirst", &schCollabTestSelectFirst);

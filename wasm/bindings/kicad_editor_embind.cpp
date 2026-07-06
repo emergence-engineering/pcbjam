@@ -45,9 +45,11 @@ std::string pcbCollabTestMoveFirst( int aDx, int aDy );
 std::string pcbCollabGetPos( std::string aId );
 bool        pcbCollabTestRemoveItem( std::string aId );
 bool        pcbCollabTestRotateItem( std::string aId, double aDeg );
-// Presence (collab-presence 0002) — pcbnew only until 0003 adds the sch side.
+// Presence (collab-presence 0002) + comment pins/panning (0005).
 void        pcbCollabPresenceStart();
 void        pcbCollabSetRemote( std::string aJson );
+void        pcbCollabSetPins( std::string aJson );
+void        pcbCollabSetViewport( double aCx, double aCy );
 std::string pcbCollabGetViewport();
 std::string pcbCollabGetSelection();
 std::string pcbCollabTestSelectFirst();
@@ -62,9 +64,11 @@ std::string schCollabTestMoveFirst( int aDx, int aDy );
 std::string schCollabGetPos( std::string aId );
 bool        schCollabTestRemoveItem( std::string aId );
 bool        schCollabTestRotateItem( std::string aId, double aDeg );
-// Presence (collab-presence 0003 — eeschema counterparts of the 0002 set).
+// Presence (collab-presence 0003 — eeschema counterparts) + pins (0005).
 void        schCollabPresenceStart();
 void        schCollabSetRemote( std::string aJson );
+void        schCollabSetPins( std::string aJson );
+void        schCollabSetViewport( double aCx, double aCy );
 std::string schCollabGetViewport();
 std::string schCollabGetSelection();
 std::string schCollabTestSelectFirst();
@@ -159,6 +163,16 @@ static void collabSetRemote( std::string aJson )
     pcbEditorActive() ? pcbCollabSetRemote( aJson ) : schCollabSetRemote( aJson );
 }
 
+static void collabSetPins( std::string aJson )
+{
+    pcbEditorActive() ? pcbCollabSetPins( aJson ) : schCollabSetPins( aJson );
+}
+
+static void collabSetViewport( double aCx, double aCy )
+{
+    pcbEditorActive() ? pcbCollabSetViewport( aCx, aCy ) : schCollabSetViewport( aCx, aCy );
+}
+
 static std::string collabGetViewport()
 {
     return pcbEditorActive() ? pcbCollabGetViewport() : schCollabGetViewport();
@@ -196,9 +210,11 @@ EMSCRIPTEN_BINDINGS(kicad_editor) {
     // endpoint, field text — flow from the per-editor blocks unchanged).
     function("kicadCollabTestRemoveItem", &collabTestRemoveItem);
     function("kicadCollabTestRotateItem", &collabTestRotateItem);
-    // Presence (collab-presence 0002).
+    // Presence (collab-presence 0002/0003) + comment pins/panning (0005).
     function("kicadCollabPresenceStart", &collabPresenceStart);
     function("kicadCollabSetRemote", &collabSetRemote);
+    function("kicadCollabSetPins", &collabSetPins);
+    function("kicadCollabSetViewport", &collabSetViewport);
     function("kicadCollabGetViewport", &collabGetViewport);
     function("kicadCollabGetSelection", &collabGetSelection);
     function("kicadCollabTestSelectFirst", &collabTestSelectFirst);
