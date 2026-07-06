@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import { colorForUser, type PresenceUser } from "@pcbjam/shared";
 import { connectAwarenessBroadcast } from "./awareness-bc";
-import { createPresence, type PresenceHandle } from "./presence";
+import { createPresence, publishSkeleton, type PresenceHandle } from "./presence";
 
 /**
  * Presence unit tests (collab-presence 0001): two Awareness instances relayed
@@ -105,6 +105,86 @@ describe("presence over the BroadcastChannel awareness relay", () => {
     b.awareness.setLocalState({ some: "legacy-shape" });
     await settle();
     expect(a.presence.peers()).toEqual([]);
+  });
+
+  it("skeleton states mark parked-room users with their real sheet (0003)", async () => {
+    // Two per-sheet rooms; alice is BOUND to root and PARKED in sub, bob is
+    // bound to sub. Bob's roster (sub room) must show alice as being on root,
+    // with no cursor/selection.
+    const rootCh = `presence-test-${channelSeq++}`;
+    const subCh = `presence-test-${channelSeq++}`;
+    const aliceRoot = client(rootCh);
+    const aliceSub = client(subCh);
+    const bobSub = client(subCh);
+
+    aliceRoot.presence = createPresence({
+      awareness: aliceRoot.awareness,
+      user: user("alice"),
+      tool: "eeschema",
+      sheetPath: "root.kicad_sch",
+    });
+    publishSkeleton(aliceSub.awareness, user("alice"), "eeschema", "root.kicad_sch");
+    bobSub.presence = createPresence({
+      awareness: bobSub.awareness,
+      user: user("bob"),
+      tool: "eeschema",
+      sheetPath: "sub/child.kicad_sch",
+    });
+    await settle();
+
+    const aliceSeenByBob = bobSub.presence.peers();
+    expect(aliceSeenByBob.map((p) => p.user.id)).toEqual(["alice"]);
+    expect(aliceSeenByBob[0]!.sheetPath).toBe("root.kicad_sch");
+    expect(aliceSeenByBob[0]!.cursor).toBeNull();
+    expect(aliceSeenByBob[0]!.selection).toEqual([]);
+
+    // Alice navigates into sub: full presence rebinds there (overwriting the
+    // skeleton) — bob now sees her on HIS sheet, cursor live again.
+    aliceSub.presence = createPresence({
+      awareness: aliceSub.awareness,
+      user: user("alice"),
+      tool: "eeschema",
+      sheetPath: "sub/child.kicad_sch",
+    });
+    aliceSub.presence.setCursor({ x: 1, y: 2 });
+    await settle();
+
+    const after = bobSub.presence.peers();
+    expect(after[0]!.sheetPath).toBe("sub/child.kicad_sch");
+    expect(after[0]!.cursor).toEqual({ x: 1, y: 2 });
+  });
+
+  it("rebind away leaves no ghost cursor in the old room", async () => {
+    // Alice bound in room1 with a live cursor; she navigates away: presence
+    // destroy + skeleton must leave sheetPath pointing elsewhere, cursor null.
+    const ch = `presence-test-${channelSeq++}`;
+    const alice = client(ch);
+    const bob = client(ch);
+    alice.presence = createPresence({
+      awareness: alice.awareness,
+      user: user("alice"),
+      tool: "eeschema",
+      sheetPath: "root.kicad_sch",
+    });
+    alice.presence.setCursor({ x: 9, y: 9 });
+    bob.presence = createPresence({
+      awareness: bob.awareness,
+      user: user("bob"),
+      tool: "eeschema",
+      sheetPath: "root.kicad_sch",
+    });
+    await settle();
+    expect(bob.presence.peers()[0]!.cursor).toEqual({ x: 9, y: 9 });
+
+    alice.presence.destroy();
+    alice.presence = undefined;
+    publishSkeleton(alice.awareness, user("alice"), "eeschema", "sub/child.kicad_sch");
+    await settle();
+
+    const ghost = bob.presence.peers();
+    expect(ghost.map((p) => p.user.id)).toEqual(["alice"]);
+    expect(ghost[0]!.cursor).toBeNull();
+    expect(ghost[0]!.sheetPath).toBe("sub/child.kicad_sch");
   });
 
   it("subscribe fires on change and setters keep sibling fields intact", async () => {

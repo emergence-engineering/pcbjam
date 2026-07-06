@@ -444,6 +444,9 @@ async function startSheetCollab(
     provider: yjsProviderConfig(),
     seedDocForPath: (sheet) => seedDocFromMemfs(win, opts.slug, sheet),
     onActiveChange: opts.onActiveChange,
+    // Parked rooms carry a skeleton presence ("this user is on sheet X") so
+    // any sheet's roster shows the whole schematic's crew (0003).
+    presenceUser: presenceUser(),
     log: opts.log,
     initial:
       opts.session && opts.targetPath
@@ -627,6 +630,9 @@ export function WasmTool({
   // the PresenceRoster chip next to SourceChip. Empty when collab is off, the
   // provider has no awareness (kind "none"), or nobody else is here.
   const [peers, setPeers] = React.useState<PresencePeer[]>([]);
+  // eeschema: the sheet THIS client is bound to — the roster dims peers whose
+  // skeleton state says they're on a different sheet (collab-presence 0003).
+  const [activeSheetPath, setActiveSheetPath] = React.useState<string | undefined>();
 
   const append = React.useCallback(
     (msg: string) => setLogs((prev) => [...prev.slice(-800), msg]),
@@ -772,10 +778,11 @@ export function WasmTool({
       presenceRef.current = presence;
       presence.subscribe(setPeers);
       setPeers(presence.peers());
-      // Canvas presence (0002): cursor + selection emit and the remote
-      // VIEW_OVERLAY render. pcbnew only until the eeschema port (0003); the
-      // bridge gate also skips wasm builds predating the presence exports.
-      if (tool === "pcbnew" && hasPresenceBridge(win.Module)) {
+      setActiveSheetPath(sheetPath);
+      // Canvas presence (0002 pcbnew / 0003 eeschema): cursor + selection emit
+      // and the remote VIEW_OVERLAY render. The bridge gate skips tools without
+      // the exports and wasm builds predating them.
+      if ((tool === "pcbnew" || tool === "eeschema") && hasPresenceBridge(win.Module)) {
         presenceBridgeRef.current = bindKicadPresence({
           mod: win.Module,
           win: win as unknown as PresenceKicadWindow,
@@ -1099,7 +1106,9 @@ export function WasmTool({
           where this project lives / whether Save persists. */}
       {ready && (peers.length > 0 || sourceDescriptor) && (
         <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
-          {peers.length > 0 && <PresenceRoster peers={peers} />}
+          {peers.length > 0 && (
+            <PresenceRoster peers={peers} activeSheetPath={activeSheetPath} />
+          )}
           {sourceDescriptor && <SourceChip descriptor={sourceDescriptor} />}
         </div>
       )}

@@ -40,6 +40,30 @@ export interface PresenceHandle {
   destroy(): void;
 }
 
+/**
+ * Publish a SKELETON presence state into a room the user is connected to but
+ * not looking at (eeschema warm pool, collab-presence 0003): identity + which
+ * sheet they are actually on, no cursor/selection. Any sheet's roster can then
+ * answer "who is in this schematic, and where". The bound room's full state is
+ * owned by `createPresence` (which overwrites the skeleton on rebind).
+ */
+export function publishSkeleton(
+  awareness: Awareness,
+  user: PresenceUser,
+  tool: string,
+  sheetPath: string,
+): void {
+  const state: PresenceState = {
+    user,
+    tool,
+    sheetPath,
+    cursor: null,
+    selection: [],
+    updatedAt: Date.now(),
+  };
+  awareness.setLocalState(state);
+}
+
 export function createPresence(opts: {
   awareness: Awareness;
   user: PresenceUser;

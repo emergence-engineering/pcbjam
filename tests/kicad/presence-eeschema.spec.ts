@@ -1,0 +1,320 @@
+import type { Page } from "@playwright/test";
+import { test, expect } from "./fixtures";
+
+/**
+ * eeschema collab presence — C++ bridge e2e (collab-presence 0003).
+ *
+ * The eeschema port of presence-pcbnew.spec.ts: selection emit (programmatic +
+ * real box-select), throttled cursor emit, remote VIEW_OVERLAY render with no
+ * local-selection leak, and the viewport unit band (px-per-IU through the GAL
+ * matrix — eeschema IU is 1e4/mm, not pcbnew's 1e6, so only the band differs).
+ * The sheet-scoped awareness layer (skeleton states, rebind on navigation) is
+ * unit-tested in the standalone (presence.test.ts) — this spec covers the wasm
+ * side on the current sheet.
+ */
+
+const WIRE1 = "22222222-0000-0000-0000-000000000001";
+const SAMPLE_SCH = `(kicad_sch
+\t(version 20250114)
+\t(generator "eeschema")
+\t(generator_version "9.0")
+\t(uuid "11111111-1111-1111-1111-111111111111")
+\t(paper "A4")
+\t(lib_symbols)
+\t(wire (pts (xy 50.8 50.8) (xy 101.6 50.8)) (stroke (width 0) (type default)) (uuid "${WIRE1}"))
+\t(wire (pts (xy 50.8 76.2) (xy 101.6 76.2)) (stroke (width 0) (type default)) (uuid "22222222-0000-0000-0000-000000000002"))
+\t(sheet_instances (path "/" (page "1")))
+)
+`;
+
+type FS = { mkdirTree(p: string): void; writeFile(p: string, d: string): void };
+type Mod = {
+  kicadOpenFile(p: string): unknown;
+  kicadCollabPresenceStart(): void;
+  kicadCollabSetRemote(j: string): void;
+  kicadCollabGetViewport(): string;
+  kicadCollabGetSelection(): string;
+  kicadCollabTestSelectFirst(): string;
+  kicadCollabTestClearSelection(): boolean;
+};
+type PresenceWindow = {
+  FS: FS;
+  Module: Mod;
+  kicadCollab?: Record<string, unknown>;
+  __selEmits?: string[][];
+  __cursorEmits?: Array<{ x: number; y: number; active: number }>;
+};
+
+function hasAbort(l: { consoleLogs: string[]; errors: string[] }): boolean {
+  return [...l.consoleLogs, ...l.errors].some((s) => s.includes("Aborted("));
+}
+
+async function bootAndOpen(page: Page): Promise<void> {
+  await page.goto("/kicad/eeschema.html");
+  await expect(page.locator("#canvas")).toBeVisible({ timeout: 90000 });
+  await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
+  await page.waitForFunction(
+    () => {
+      const m = (window as unknown as { Module?: Partial<Mod> }).Module;
+      return (
+        typeof m?.kicadOpenFile === "function" &&
+        typeof m?.kicadCollabSetRemote === "function" &&
+        typeof m?.kicadCollabTestSelectFirst === "function"
+      );
+    },
+    null,
+    { timeout: 90000 },
+  );
+  await page.waitForFunction(
+    () =>
+      !!window.wxElementRegistry &&
+      window.wxElementRegistry
+        .findAll({ visible: true })
+        .some((e) => /Frame$/.test(e.typeName) || (e.name || "").endsWith("Frame")),
+    null,
+    { timeout: 90000 },
+  );
+
+  await page.evaluate(
+    ({ content }) => {
+      const w = window as unknown as PresenceWindow;
+      const dir = "/home/kicad/documents";
+      try {
+        w.FS.mkdirTree(dir);
+      } catch {
+        /* exists */
+      }
+      const p = `${dir}/presence.kicad_sch`;
+      w.FS.writeFile(p, content);
+      w.Module.kicadOpenFile(p);
+    },
+    { content: SAMPLE_SCH },
+  );
+
+  await expect
+    .poll(() => page.title(), { timeout: 60000, intervals: [500] })
+    .toMatch(/presence/i);
+
+  await page.evaluate(() => {
+    const w = window as unknown as PresenceWindow;
+    w.__selEmits = [];
+    w.__cursorEmits = [];
+    w.kicadCollab = {
+      ...w.kicadCollab,
+      onSelection: (json: string) => w.__selEmits!.push(JSON.parse(json)),
+      onCursor: (x: number, y: number, active: number) =>
+        w.__cursorEmits!.push({ x, y, active }),
+    };
+    w.Module.kicadCollabPresenceStart();
+  });
+}
+
+test("selection emit: programmatic select/clear reaches onSelection with uuids", async ({
+  page,
+  testLogger,
+}) => {
+  await bootAndOpen(page);
+
+  const selectedId = await page.evaluate(() =>
+    (window as unknown as PresenceWindow).Module.kicadCollabTestSelectFirst(),
+  );
+  expect(selectedId).toBeTruthy();
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const w = window as unknown as PresenceWindow;
+          return w.__selEmits!.at(-1) ?? null;
+        }),
+      { timeout: 10000 },
+    )
+    .toEqual([selectedId]);
+
+  await page.evaluate(() =>
+    (window as unknown as PresenceWindow).Module.kicadCollabTestClearSelection(),
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const w = window as unknown as PresenceWindow;
+          return w.__selEmits!.at(-1) ?? null;
+        }),
+      { timeout: 10000 },
+    )
+    .toEqual([]);
+
+  expect(hasAbort(testLogger)).toBe(false);
+});
+
+test("selection emit: a real canvas box-select drives the wx-layer trigger", async ({
+  page,
+  testLogger,
+}) => {
+  await bootAndOpen(page);
+
+  const glId = await page.evaluate(() => {
+    const visible = Array.from(document.querySelectorAll('[id^="glcanvas-"]'))
+      .map((c) => c as HTMLCanvasElement)
+      .find((c) => {
+        const rect = c.getBoundingClientRect();
+        return window.getComputedStyle(c).display !== "none" && rect.width > 0;
+      });
+    return visible?.id ?? null;
+  });
+  expect(glId).toBeTruthy();
+  const box = await page.locator(`#${glId}`).boundingBox();
+  expect(box).toBeTruthy();
+
+  await page.mouse.move(box!.x + box!.width * 0.1, box!.y + box!.height * 0.1);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width * 0.9, box!.y + box!.height * 0.9, { steps: 8 });
+  await page.mouse.up();
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          JSON.parse(
+            (window as unknown as PresenceWindow).Module.kicadCollabGetSelection(),
+          ).length,
+        ),
+      { timeout: 10000, message: "box-select never selected anything" },
+    )
+    .toBeGreaterThan(0);
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const w = window as unknown as PresenceWindow;
+          return w.__selEmits!.some((s) => s.length > 0);
+        }),
+      { timeout: 10000, message: "selection happened but onSelection never emitted" },
+    )
+    .toBe(true);
+
+  expect(hasAbort(testLogger)).toBe(false);
+});
+
+test("cursor emit: mouse motion over the canvas produces throttled world coords", async ({
+  page,
+  testLogger,
+}) => {
+  await bootAndOpen(page);
+
+  const canvas = page.locator("#canvas");
+  const box = await canvas.boundingBox();
+  expect(box).toBeTruthy();
+
+  const cx = box!.x + box!.width / 2;
+  const cy = box!.y + box!.height / 2;
+  for (let i = 0; i < 30; i++) {
+    await page.mouse.move(cx - 150 + i * 10, cy, { steps: 1 });
+  }
+
+  const emits = await page.evaluate(
+    () => (window as unknown as PresenceWindow).__cursorEmits!,
+  );
+  expect(emits.length).toBeGreaterThan(0);
+  expect(emits.length).toBeLessThan(25);
+
+  const active = emits.filter((e) => e.active === 1);
+  expect(active.length).toBeGreaterThan(0);
+  for (const e of active) {
+    expect(Math.abs(e.x)).toBeLessThan(1e8);
+    expect(Math.abs(e.y)).toBeLessThan(1e8);
+  }
+
+  expect(hasAbort(testLogger)).toBe(false);
+});
+
+test("remote render paints the overlay without touching local selection", async ({
+  page,
+  testLogger,
+}) => {
+  await bootAndOpen(page);
+
+  const canvas = page.locator("#canvas");
+  const before = await canvas.screenshot();
+
+  await page.evaluate(
+    ({ wire }) => {
+      const w = window as unknown as PresenceWindow;
+      w.Module.kicadCollabSetRemote(
+        JSON.stringify({
+          peers: [
+            {
+              id: "bob",
+              name: "bob",
+              color: "#ef4444",
+              // eeschema IU = 1e4/mm; park the cursor around (90,90) mm.
+              cursor: { x: 90e4, y: 90e4 },
+              selection: [wire],
+            },
+          ],
+        }),
+      );
+    },
+    { wire: WIRE1 },
+  );
+
+  await expect
+    .poll(
+      async () => {
+        const after = await canvas.screenshot();
+        return !after.equals(before);
+      },
+      { timeout: 15000, intervals: [500] },
+    )
+    .toBe(true);
+
+  const localSel = await page.evaluate(() =>
+    JSON.parse(
+      (window as unknown as PresenceWindow).Module.kicadCollabGetSelection(),
+    ),
+  );
+  expect(localSel).toEqual([]);
+
+  await page.evaluate(() =>
+    (window as unknown as PresenceWindow).Module.kicadCollabSetRemote(
+      JSON.stringify({ peers: [] }),
+    ),
+  );
+  await expect
+    .poll(
+      async () => {
+        const after = await canvas.screenshot();
+        return after.equals(before);
+      },
+      { timeout: 15000, intervals: [500] },
+    )
+    .toBe(true);
+
+  expect(hasAbort(testLogger)).toBe(false);
+});
+
+test("viewport export returns a sane world↔screen transform", async ({ page, testLogger }) => {
+  await bootAndOpen(page);
+
+  const vp = await page.evaluate(() =>
+    JSON.parse((window as unknown as PresenceWindow).Module.kicadCollabGetViewport()),
+  );
+  expect(vp.w).toBeGreaterThan(0);
+  expect(vp.h).toBeGreaterThan(0);
+  // px per IU through the GAL matrix. eeschema IU = 1e4/mm (100× coarser than
+  // pcbnew), so a framed A4 sheet is O(1e-3) px/IU — assert the band + a sane
+  // world width, same guard as pcbnew for the GetScale()-is-zoom bug.
+  expect(vp.scale).toBeGreaterThan(0);
+  expect(vp.scale).toBeLessThan(1);
+  const worldWidthMm = vp.w / vp.scale / 1e4;
+  expect(worldWidthMm).toBeGreaterThan(50);
+  expect(worldWidthMm).toBeLessThan(3000);
+  expect(vp.cx).toBeGreaterThan(0);
+  expect(vp.cx).toBeLessThan(400e4);
+  expect(vp.cy).toBeGreaterThan(0);
+  expect(vp.cy).toBeLessThan(400e4);
+
+  expect(hasAbort(testLogger)).toBe(false);
+});

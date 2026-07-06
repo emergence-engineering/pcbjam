@@ -1,6 +1,13 @@
 import type * as Y from "yjs";
-import { collabRoomId, fileToDoc, syncLayoutToY, type KicadDoc } from "@pcbjam/shared";
+import {
+  collabRoomId,
+  fileToDoc,
+  syncLayoutToY,
+  type KicadDoc,
+  type PresenceUser,
+} from "@pcbjam/shared";
 import { connectKicadDoc, type KicadDocSession } from "./index";
+import { publishSkeleton } from "./presence";
 import {
   bindKicadCollab,
   moduleItemsBridge,
@@ -79,6 +86,15 @@ export interface SheetManagerOptions {
    * (re)start drift detection on the now-active doc.
    */
   onActiveChange?: (active: ActiveSheet | null) => void;
+  /**
+   * Presence identity (collab-presence 0003). When set, every PARKED room in the
+   * warm pool carries a skeleton awareness state ({user, tool, sheetPath: the
+   * sheet the user is ACTUALLY on}) so any sheet's roster can answer "who is in
+   * this schematic, and where". The BOUND room's full presence (cursor/selection)
+   * is owned by the host via onActiveChange → createPresence, which overwrites
+   * the skeleton on rebind.
+   */
+  presenceUser?: PresenceUser;
   log: (m: string) => void;
   /**
    * `docSource: "ydoc"` only: the entry sheet's room is already connected (and possibly
@@ -132,6 +148,19 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
     });
   }
 
+  // Skeleton presence for every PARKED room (0003): mark this user as "in this
+  // schematic, on `activePath`". The bound room is skipped — its full state is
+  // published by the host's presence handle (rebound via onActiveChange).
+  function publishSkeletons(): void {
+    const user = opts.presenceUser;
+    if (!user || !activePath) return;
+    for (const [path, room] of rooms) {
+      if (path === activePath) continue;
+      const awareness = room.session.provider.awareness;
+      if (awareness) publishSkeleton(awareness, user, "eeschema", activePath);
+    }
+  }
+
   async function ensureRoom(sheetPath: string): Promise<Room> {
     const existing = rooms.get(sheetPath);
     if (existing) return existing;
@@ -152,6 +181,14 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
       };
       rooms.set(sheetPath, room);
       log(`[sheet] warm room connected: ${sheetPath}`);
+      // A room warmed after the first bind starts parked — give it a skeleton
+      // right away so its roster shows this user without waiting for a switch.
+      if (activePath && sheetPath !== activePath && opts.presenceUser) {
+        const awareness = session.provider.awareness;
+        if (awareness) {
+          publishSkeleton(awareness, opts.presenceUser, "eeschema", activePath);
+        }
+      }
       return room;
     })();
 
@@ -219,6 +256,10 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
     room.editorMatchesDoc = false; // only meaningful for the first ydoc-entry seed
     activePath = sheetPath;
     opts.onActiveChange?.({ sheetPath, doc: room.doc, provider: room.session.provider });
+    // AFTER the host rebound its full presence to the new room: refresh every
+    // parked room's skeleton to point at the new sheet (incl. the old active
+    // room, whose full state the host just cleared).
+    publishSkeletons();
   }
 
   function switchTo(sheetPath: string): Promise<void> {

@@ -29,7 +29,16 @@
 #include <richio.h>
 #include <lib_symbol.h>
 #include <tools/sch_selection.h>
+#include <tools/sch_selection_tool.h>
 #include <sch_commit.h>
+#include <sch_draw_panel.h>
+#include <geometry/eda_angle.h>
+#include <math/util.h>
+#include <tool/tool_manager.h>
+#include <view/view.h>
+#include <view/view_overlay.h>
+#include <chrono>
+#include <wx/event.h>
 #include <sch_item.h>
 #include <sch_line.h>
 #include <sch_junction.h>
@@ -599,6 +608,12 @@ void scheduleSheetSave( SCH_SHEET* aSheet )
 // ChangeSource: the native SCHEMATIC_LISTENER is just a trigger — the actual change set comes
 // from the post-settle snapshot diff above. Skipped while applying a remote delta (no echo);
 // doApply rebaselines instead.
+//
+// Presence (collab-presence 0003): schematic changes often change the selection
+// too (delete, paste) with no closing canvas event — the trigger below also
+// piggybacks a selection re-check. Defined in the presence section further down.
+void schedulePresenceSelCheck();
+
 class COLLAB_LISTENER : public SCHEMATIC_LISTENER
 {
 public:
@@ -639,6 +654,7 @@ private:
             noteDirty( item );
 
         scheduleFlush();
+        schedulePresenceSelCheck();
     }
 };
 
@@ -661,6 +677,272 @@ SCHEMATIC* ensureBridge()
     }
 
     return &sch;
+}
+
+// ───────────────────────── collab presence (collab-presence 0003) ─────────────────────────
+//
+// eeschema port of pcbnew's presence layer (0002 — see pcbnew_embind.cpp for the full
+// design rationale): emit THIS tab's selection + cursor to JS, render REMOTE peers'
+// cursors + selection outlines into a per-user-colored VIEW_OVERLAY. Zero kicad-fork
+// changes: wx-layer Bind() triggers on the GAL canvas + the COLLAB_LISTENER piggyback,
+// selection read post-settle from SCH_SELECTION_TOOL, KIIDs resolved via
+// SCHEMATIC::ResolveItem. Rooms are per-sheet (warm pool), so peers publishing
+// cursor/selection in the bound room are BY CONSTRUCTION on this same sheet file —
+// no sheet filtering is needed here; the JS side rebinds the whole presence layer on
+// sheet navigation (onSheetChanged) and clears the overlay in between.
+namespace presence {
+
+struct PEER
+{
+    std::string       name;
+    KIGFX::COLOR4D    color;
+    bool              hasCursor = false;
+    VECTOR2D          cursor;            // world coords (IU)
+    std::vector<KIID> selection;
+};
+
+std::vector<PEER>                    g_peers;
+std::shared_ptr<KIGFX::VIEW_OVERLAY> g_overlay;
+bool        g_started           = false;
+bool        g_redrawScheduled   = false;
+bool        g_selCheckScheduled = false;
+std::string g_lastSelectionJson;   // dedupe: emit only when the uuid set changed
+long long   g_lastCursorEmitMs = 0;
+double      g_lastVpScale  = 0.0;
+VECTOR2D    g_lastVpCenter;
+
+long long nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch() )
+            .count();
+}
+
+KIGFX::COLOR4D parseColor( const std::string& aHex )
+{
+    if( aHex.size() == 7 && aHex[0] == '#' )
+    {
+        long v = strtol( aHex.c_str() + 1, nullptr, 16 );
+        return KIGFX::COLOR4D( ( ( v >> 16 ) & 0xff ) / 255.0, ( ( v >> 8 ) & 0xff ) / 255.0,
+                               ( v & 0xff ) / 255.0, 0.9 );
+    }
+
+    return KIGFX::COLOR4D( 0.23, 0.51, 0.96, 0.9 ); // palette blue fallback
+}
+
+json selectionUuids( SCH_EDIT_FRAME* aFrame )
+{
+    json uuids = json::array();
+
+    SCH_SELECTION_TOOL* selTool = aFrame->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
+
+    if( !selTool )
+        return uuids;
+
+    for( EDA_ITEM* item : selTool->GetSelection() )
+        uuids.push_back( toUtf8( item->m_Uuid.AsString() ) );
+
+    return uuids;
+}
+
+// Post-settle selection emit (see pcbnew): dedupe against the last emitted set.
+void checkSelection()
+{
+    g_selCheckScheduled = false;
+
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    std::string s = selectionUuids( fr ).dump();
+
+    if( s == g_lastSelectionJson )
+        return;
+
+    g_lastSelectionJson = s;
+
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onSelection )
+            window.kicadCollab.onSelection( UTF8ToString( $0 ) );
+    }, s.c_str() );
+}
+
+// Repaint the remote-peers overlay (CallAfter + COROUTINE — MakeOverlay's view->Add
+// and the items' virtual ViewBBox() need the fiber stack).
+void redrawOverlay()
+{
+    g_redrawScheduled = false;
+
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    KIGFX::VIEW* view = fr->GetCanvas()->GetView();
+
+    if( !g_overlay )
+        g_overlay = view->MakeOverlay();
+
+    g_overlay->Clear();
+
+    // Screen-constant sizing via the GAL matrix (GetScale() is the zoom, not px/IU).
+    double px = view->ToWorld( 1.0 );
+
+    for( const PEER& peer : g_peers )
+    {
+        g_overlay->SetIsFill( false );
+        g_overlay->SetIsStroke( true );
+        g_overlay->SetStrokeColor( peer.color );
+        g_overlay->SetLineWidth( 2.5 * px );
+
+        for( const KIID& id : peer.selection )
+        {
+            SCH_SHEET_PATH path;
+            SCH_ITEM*      item = fr->Schematic().ResolveItem( id, &path, /*allowNull*/ true );
+
+            if( !item )
+                continue;   // not in this schematic (yet) — skip silently
+
+            BOX2I bb = item->ViewBBox();
+            bb.Inflate( KiROUND( 4 * px ) );
+            g_overlay->Rectangle( bb.GetOrigin(), bb.GetEnd() );
+
+            // Who selected it — name tag just above the box's top-left corner.
+            if( !peer.name.empty() )
+            {
+                g_overlay->SetGlyphSize( VECTOR2I( KiROUND( 9 * px ), KiROUND( 9 * px ) ) );
+                g_overlay->BitmapText( wxString::FromUTF8( peer.name.c_str() ),
+                                       VECTOR2I( bb.GetOrigin().x,
+                                                 KiROUND( bb.GetOrigin().y - 8 * px ) ),
+                                       ANGLE_0 );
+            }
+        }
+
+        if( peer.hasCursor )
+        {
+            g_overlay->SetLineWidth( 2.0 * px );
+            g_overlay->Cross( peer.cursor, KiROUND( 7 * px ) );
+
+            if( !peer.name.empty() )
+            {
+                g_overlay->SetGlyphSize( VECTOR2I( KiROUND( 10 * px ), KiROUND( 10 * px ) ) );
+                g_overlay->BitmapText( wxString::FromUTF8( peer.name.c_str() ),
+                                       VECTOR2I( KiROUND( peer.cursor.x + 10 * px ),
+                                                 KiROUND( peer.cursor.y + 16 * px ) ),
+                                       ANGLE_0 );
+            }
+        }
+    }
+
+    view->Update( g_overlay.get() );
+    fr->GetCanvas()->ForceRefresh();
+}
+
+void scheduleRedraw()
+{
+    if( g_redrawScheduled )
+        return;
+
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    g_redrawScheduled = true;
+
+    fr->CallAfter( []() {
+        COROUTINE<int, int> cor( []( int ) -> int
+                                 {
+                                     redrawOverlay();
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
+}
+
+// Viewport push/pull (world↔screen mapping for the DOM layers, 0005).
+void emitViewportIfChanged()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    KIGFX::VIEW* view  = fr->GetCanvas()->GetView();
+    double       scale = view->GetScale();   // zoom — cheap change detector only
+    VECTOR2D     c     = view->GetCenter();
+
+    if( scale == g_lastVpScale && c == g_lastVpCenter )
+        return;
+
+    g_lastVpScale  = scale;
+    g_lastVpCenter = c;
+
+    const VECTOR2I& sz = view->GetScreenPixelSize();
+    // px per IU via the GAL matrix — GetScale() is the zoom, not px/IU.
+    double pxPerIu = view->ToScreen( 1.0 );
+
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onViewport )
+            window.kicadCollab.onViewport( $0, $1, $2, $3, $4 );
+    }, c.x, c.y, pxPerIu, sz.x, sz.y );
+
+    if( !g_peers.empty() )
+        scheduleRedraw();
+}
+
+void emitCursor( double aX, double aY, bool aActive )
+{
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onCursor )
+            window.kicadCollab.onCursor( $0, $1, $2 );
+    }, aX, aY, aActive ? 1 : 0 );
+}
+
+void onMotion( wxMouseEvent& aEvt )
+{
+    aEvt.Skip();
+
+    long long now = nowMs();
+
+    if( now - g_lastCursorEmitMs < 50 )     // ≤20 emits/s, event-driven (no timers)
+        return;
+
+    g_lastCursorEmitMs = now;
+
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    wxPoint  p     = aEvt.GetPosition();
+    VECTOR2D world = fr->GetCanvas()->GetView()->ToWorld( VECTOR2D( p.x, p.y ), true );
+
+    emitCursor( world.x, world.y, true );
+    emitViewportIfChanged();                // catches drag-pan while moving
+}
+
+void onLeave( wxMouseEvent& aEvt )
+{
+    aEvt.Skip();
+    emitCursor( 0, 0, false );
+}
+
+} // namespace presence
+
+void schedulePresenceSelCheck()
+{
+    if( presence::g_selCheckScheduled )
+        return;
+
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    presence::g_selCheckScheduled = true;
+    fr->CallAfter( []() { presence::checkSelection(); } );
 }
 
 } // namespace
@@ -1234,6 +1516,160 @@ extern "C" void kicadCollabOnSave( const char* aPath )
 }
 #endif // !KICAD_MERGED_EMBIND
 
+// ── presence entry points (collab-presence 0003 — eeschema port of the 0002 set) ────────────
+
+// Install the presence input hooks on the GAL canvas (idempotent). The canvas is the
+// same window across sheet navigation, so one install serves the whole session.
+void schCollabPresenceStart()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr || presence::g_started )
+        return;
+
+    presence::g_started = true;
+
+    wxWindow* canvas = fr->GetCanvas();
+
+    canvas->Bind( wxEVT_MOTION, []( wxMouseEvent& e ) { presence::onMotion( e ); } );
+    canvas->Bind( wxEVT_LEAVE_WINDOW, []( wxMouseEvent& e ) { presence::onLeave( e ); } );
+
+    auto selAndViewport = []( wxEvent& e )
+    {
+        e.Skip();
+        schedulePresenceSelCheck();
+
+        if( SCH_EDIT_FRAME* f = schFrame() )
+            f->CallAfter( []() { presence::emitViewportIfChanged(); } );
+    };
+
+    canvas->Bind( wxEVT_LEFT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+    canvas->Bind( wxEVT_RIGHT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+    canvas->Bind( wxEVT_KEY_UP, [selAndViewport]( wxKeyEvent& e ) { selAndViewport( e ); } );
+    canvas->Bind( wxEVT_MOUSEWHEEL, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+}
+
+// JS → C++: full remote-peers snapshot (same wire as pcbnew's kicadCollabSetRemote).
+// Rooms are per-sheet, so the JS rebind pushes a fresh (or empty) snapshot on every
+// sheet switch — peers here are always this sheet's.
+void schCollabSetRemote( std::string aJson )
+{
+    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
+
+    if( j.is_discarded() )
+        return;
+
+    std::vector<presence::PEER> peers;
+
+    for( const json& p : j.value( "peers", json::array() ) )
+    {
+        presence::PEER peer;
+        peer.name  = p.value( "name", "" );
+        peer.color = presence::parseColor( p.value( "color", "" ) );
+
+        if( p.contains( "cursor" ) && p["cursor"].is_object() )
+        {
+            peer.hasCursor = true;
+            peer.cursor    = VECTOR2D( p["cursor"].value( "x", 0.0 ), p["cursor"].value( "y", 0.0 ) );
+        }
+
+        for( const json& u : p.value( "selection", json::array() ) )
+        {
+            if( u.is_string() )
+                peer.selection.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
+        }
+
+        peers.push_back( std::move( peer ) );
+    }
+
+    presence::g_peers = std::move( peers );
+    schCollabPresenceStart();
+    presence::scheduleRedraw();
+}
+
+// JS pull of the current viewport transform: `{cx,cy,scale,w,h}` with scale = px per
+// IU via the GAL matrix (GetScale() is the zoom, not px/IU — pcbnew 0002 lesson).
+std::string schCollabGetViewport()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return "";
+
+    KIGFX::VIEW*    view = fr->GetCanvas()->GetView();
+    VECTOR2D        c    = view->GetCenter();
+    const VECTOR2I& sz   = view->GetScreenPixelSize();
+
+    return json{ { "cx", c.x }, { "cy", c.y }, { "scale", view->ToScreen( 1.0 ) },
+                 { "w", sz.x }, { "h", sz.y } }.dump();
+}
+
+// JS pull of the CURRENT selection's uuids (presence seed + e2e no-leak probe).
+std::string schCollabGetSelection()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return "[]";
+
+    return presence::selectionUuids( fr ).dump();
+}
+
+// Test helper: REALLY select the current sheet's first item through the selection
+// tool, then run the presence check (programmatic selects close no canvas event).
+std::string schCollabTestSelectFirst()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return "";
+
+    SCH_SCREEN* screen = currentScreen( fr );
+
+    if( !screen )
+        return "";
+
+    SCH_ITEM* target = nullptr;
+
+    for( SCH_ITEM* item : screen->Items() )
+    {
+        target = item;
+        break;
+    }
+
+    if( !target )
+        return "";
+
+    fr->CallAfter( [fr, target]() {
+        if( SCH_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>() )
+        {
+            st->AddItemToSel( target );
+            schedulePresenceSelCheck();
+        }
+    } );
+
+    return toUtf8( target->m_Uuid.AsString() );
+}
+
+// Test helper: clear the selection through the tool + run the presence check.
+bool schCollabTestClearSelection()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return false;
+
+    fr->CallAfter( [fr]() {
+        if( SCH_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>() )
+        {
+            st->ClearSelection();
+            schedulePresenceSelCheck();
+        }
+    } );
+
+    return true;
+}
+
 // Merged-image dispatch probe (kicad_editor_embind.cpp): is the active top window the
 // schematic editor? Counterpart of pcbnew_embind.cpp's pcbEditorActive().
 bool schEditorActive()
@@ -1296,6 +1732,13 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     // ysync-review repro hooks shared with pcbnew (dispatched when merged).
     function("kicadCollabTestRemoveItem", &schCollabTestRemoveItem);
     function("kicadCollabTestRotateItem", &schCollabTestRotateItem);
+    // Presence (collab-presence 0003) — shared names with pcbnew's 0002 set.
+    function("kicadCollabPresenceStart", &schCollabPresenceStart);
+    function("kicadCollabSetRemote", &schCollabSetRemote);
+    function("kicadCollabGetViewport", &schCollabGetViewport);
+    function("kicadCollabGetSelection", &schCollabGetSelection);
+    function("kicadCollabTestSelectFirst", &schCollabTestSelectFirst);
+    function("kicadCollabTestClearSelection", &schCollabTestClearSelection);
 #endif // !KICAD_MERGED_EMBIND
 }
 #endif

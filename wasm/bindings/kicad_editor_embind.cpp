@@ -62,6 +62,13 @@ std::string schCollabTestMoveFirst( int aDx, int aDy );
 std::string schCollabGetPos( std::string aId );
 bool        schCollabTestRemoveItem( std::string aId );
 bool        schCollabTestRotateItem( std::string aId, double aDeg );
+// Presence (collab-presence 0003 — eeschema counterparts of the 0002 set).
+void        schCollabPresenceStart();
+void        schCollabSetRemote( std::string aJson );
+std::string schCollabGetViewport();
+std::string schCollabGetSelection();
+std::string schCollabTestSelectFirst();
+bool        schCollabTestClearSelection();
 
 
 // Programmatically open a project file in the running editor frame, without UI
@@ -140,39 +147,36 @@ static bool collabTestRotateItem( std::string aId, double aDeg )
                              : schCollabTestRotateItem( aId, aDeg );
 }
 
-// Presence shims (collab-presence 0002): pcb-only for now — the sch frame no-ops /
-// returns empty until 0003 lands schCollab* counterparts, matching how the JS side
-// gates presence on the active tool.
+// Presence shims (collab-presence 0002 pcbnew / 0003 eeschema): route to the live
+// editor's implementation, same pattern as the collab bridge shims above.
 static void collabPresenceStart()
 {
-    if( pcbEditorActive() )
-        pcbCollabPresenceStart();
+    pcbEditorActive() ? pcbCollabPresenceStart() : schCollabPresenceStart();
 }
 
 static void collabSetRemote( std::string aJson )
 {
-    if( pcbEditorActive() )
-        pcbCollabSetRemote( aJson );
+    pcbEditorActive() ? pcbCollabSetRemote( aJson ) : schCollabSetRemote( aJson );
 }
 
 static std::string collabGetViewport()
 {
-    return pcbEditorActive() ? pcbCollabGetViewport() : std::string();
+    return pcbEditorActive() ? pcbCollabGetViewport() : schCollabGetViewport();
 }
 
 static std::string collabGetSelection()
 {
-    return pcbEditorActive() ? pcbCollabGetSelection() : std::string( "[]" );
+    return pcbEditorActive() ? pcbCollabGetSelection() : schCollabGetSelection();
 }
 
 static std::string collabTestSelectFirst()
 {
-    return pcbEditorActive() ? pcbCollabTestSelectFirst() : std::string();
+    return pcbEditorActive() ? pcbCollabTestSelectFirst() : schCollabTestSelectFirst();
 }
 
 static bool collabTestClearSelection()
 {
-    return pcbEditorActive() ? pcbCollabTestClearSelection() : false;
+    return pcbEditorActive() ? pcbCollabTestClearSelection() : schCollabTestClearSelection();
 }
 
 
