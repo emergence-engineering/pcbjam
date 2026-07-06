@@ -1206,7 +1206,7 @@ void redrawOverlay()
         g_overlay->SetIsFill( false );
         g_overlay->SetIsStroke( true );
         g_overlay->SetStrokeColor( peer.color );
-        g_overlay->SetLineWidth( 1.5 * px );
+        g_overlay->SetLineWidth( 2.5 * px );
 
         for( const KIID& id : peer.selection )
         {
@@ -1218,6 +1218,17 @@ void redrawOverlay()
             BOX2I bb = item->ViewBBox();
             bb.Inflate( KiROUND( 4 * px ) );
             g_overlay->Rectangle( bb.GetOrigin(), bb.GetEnd() );
+
+            // Who selected it — name tag just above the box's top-left corner
+            // (world y grows downward, so "above" is -y).
+            if( !peer.name.empty() )
+            {
+                g_overlay->SetGlyphSize( VECTOR2I( KiROUND( 9 * px ), KiROUND( 9 * px ) ) );
+                g_overlay->BitmapText( wxString::FromUTF8( peer.name.c_str() ),
+                                       VECTOR2I( bb.GetOrigin().x,
+                                                 KiROUND( bb.GetOrigin().y - 8 * px ) ),
+                                       ANGLE_0 );
+            }
         }
 
         if( peer.hasCursor )
