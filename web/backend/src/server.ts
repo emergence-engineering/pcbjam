@@ -153,6 +153,13 @@ async function main(): Promise<void> {
     // `true` REFLECTS the request origin (never the literal `*`), so it stays
     // valid for the editor's credentialed fetches; allow-credentials is what
     // lets the browser accept those responses (cookie-less callers unaffected).
+    //
+    // SECURITY INVARIANT: reflected-origin + allow-credentials is safe ONLY
+    // while this example backend holds no ambient credentials (no cookies, no
+    // sessions, no auth — which is its whole design; default origin is the
+    // explicit :3048, `*` is an operator opt-in). If any credentialed auth is
+    // ever added here, the `*` reflection mode MUST go — allow only explicit
+    // origin lists.
     origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN.split(","),
     credentials: true,
   });
