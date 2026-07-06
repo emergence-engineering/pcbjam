@@ -4,6 +4,7 @@ import {
   docToFile,
   fileToDoc,
   itemsWireToDelta,
+  kicadLibSymbolsMap,
   parseItemsWireDelta,
   renderItem,
   sexprToItems,
@@ -243,5 +244,101 @@ describe("bindKicadCollab — two editors over relayed Y.Docs", () => {
     expect(edB.store["pad-1"]!.body).toEqual(
       sexprToItems(`(pad "1" smd (at 0 0) (uuid "pad-1"))`, "fp-1").items["pad-1"]!.body,
     );
+  });
+
+  it("adopt applies only the DIFFERENCE (opt 13) — identical items cost nothing", () => {
+    const { edA, edB, bindA, bindB } = setup();
+    const SEG = `(segment (start 0 0) (end 1 1) (uuid "seg-1"))`;
+    seedEditor(edA, FP);
+    seedEditor(edA, SEG);
+    bindA.seed();
+
+    // B's editor already holds the IDENTICAL footprint but not the segment.
+    seedEditor(edB, FP);
+    bindB.seed();
+
+    expect(edB.store["seg-1"]).toBeDefined(); // caught up
+    expect(edB.applied).toHaveLength(1);
+    const wire = parseItemsWireDelta(edB.applied[0]!);
+    // Only the missing segment travelled — the matching footprint did not.
+    expect(wire.added).toHaveLength(1);
+    expect(wire.added[0]!.sexpr).toContain("seg-1");
+    expect(wire.changed).toHaveLength(0);
+    expect(wire.removed).toHaveLength(0);
+  });
+
+  it("adopt with a fully matching editor applies NOTHING (clean rebind)", () => {
+    const { edA, edB, bindA, bindB } = setup();
+    seedEditor(edA, FP);
+    bindA.seed();
+    seedEditor(edB, FP);
+    bindB.seed();
+    expect(edB.applied).toHaveLength(0);
+  });
+
+  it("adopt re-applies a differing item's DOC version, lifted to its root", () => {
+    const { edA, edB, bindA, bindB } = setup();
+    seedEditor(edA, FP);
+    bindA.seed();
+
+    // B holds the same footprint but its pad drifted (never-synced local state).
+    seedEditor(edB, FP.replace(`(pad "1" smd (at 0 0)`, `(pad "1" smd (at 9 9)`));
+    bindB.seed();
+
+    // Doc authority: B's editor converges on the doc's pad, via ONE root re-apply.
+    expect(edB.store["pad-1"]!.body).toEqual(
+      sexprToItems(`(pad "1" smd (at 0 0) (uuid "pad-1"))`, "fp-1").items["pad-1"]!.body,
+    );
+    expect(edB.applied).toHaveLength(1);
+    const wire = parseItemsWireDelta(edB.applied[0]!);
+    expect(wire.changed).toHaveLength(1);
+    expect(wire.changed[0]!.sexpr).toContain(`(uuid "fp-1")`); // the root, not the bare pad
+  });
+});
+
+describe("lib_symbols flow through the binding (miss 08A)", () => {
+  const DEF = `(symbol "Device:R" (property "Reference" "R" (at 2 0 90)))`;
+  const INSTANCE = `(symbol (lib_id "Device:R") (at 100 50 0) (uuid "sym-1"))`;
+
+  it("an emitted placement's definition is stored and re-rendered for the peer", () => {
+    const { a, b } = pair();
+    const edA = new FakeEditor();
+    const edB = new FakeEditor();
+    bindKicadCollab(a, edA).seed();
+    bindKicadCollab(b, edB).seed();
+
+    // A places a symbol: the eeschema blob is multi-form (definition + instance).
+    edA.localUpsert(`(lib_symbols ${DEF}) ${INSTANCE}`, null, "added");
+
+    // B's editor received the instance WITH its definition prefixed (findLib's
+    // first branch), even though B has never seen this symbol.
+    expect(edB.store["sym-1"]).toBeDefined();
+    const applied = edB.applied.map((j) => parseItemsWireDelta(j));
+    const symWire = applied
+      .flatMap((w) => [...w.added, ...w.changed])
+      .find((w) => w.sexpr.includes("sym-1"));
+    expect(symWire, "the symbol reached B").toBeTruthy();
+    expect(symWire!.sexpr).toMatch(/^\(lib_symbols \(symbol "Device:R"/);
+
+    // And the definition landed in the room's defs map on BOTH sides
+    // (materialization injection is covered by the shared-lib tests — this
+    // room was editor-snapshot-seeded, which carries no layout/meta).
+    expect(kicadLibSymbolsMap(b).get("Device:R")).toContain(`"Device:R"`);
+    expect(kicadLibSymbolsMap(a).get("Device:R")).toContain(`"Device:R"`);
+  });
+
+  it("adopt of a doc holding a symbol carries the definition too", () => {
+    const { a, b } = pair();
+    const edA = new FakeEditor();
+    const edB = new FakeEditor();
+    bindKicadCollab(a, edA).seed();
+    edA.localUpsert(`(lib_symbols ${DEF}) ${INSTANCE}`, null, "added");
+
+    // B joins with an empty editor → adopts the doc.
+    bindKicadCollab(b, edB).seed();
+    expect(edB.store["sym-1"]).toBeDefined();
+    const wire = parseItemsWireDelta(edB.applied[0]!);
+    const symWire = [...wire.added, ...wire.changed].find((w) => w.sexpr.includes("sym-1"));
+    expect(symWire!.sexpr).toMatch(/^\(lib_symbols \(symbol "Device:R"/);
   });
 });

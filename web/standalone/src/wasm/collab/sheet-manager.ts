@@ -1,5 +1,5 @@
 import type * as Y from "yjs";
-import { collabRoomId, type KicadDoc } from "@pcbjam/shared";
+import { collabRoomId, fileToDoc, syncLayoutToY, type KicadDoc } from "@pcbjam/shared";
 import { connectKicadDoc, type KicadDocSession } from "./index";
 import {
   bindKicadCollab,
@@ -40,6 +40,12 @@ export interface SheetCollabManager {
   switchTo(sheetPath: string): Promise<void>;
   /** Warm a sheet created mid-session (driven by the save hook on an unknown path). */
   onboard(sheetPath: string): Promise<void>;
+  /**
+   * Coarse non-item layout sync from a just-saved sheet file (miss 08B): title
+   * block / paper / settings edits reconcile into the sheet's room doc, which
+   * otherwise only carries them from seed time. No-op for unknown sheets.
+   */
+  syncLayoutFromSave(sheetPath: string, fileText: string): void;
   /** The currently-bound sheet, for drift-detection wiring (null before first switch). */
   active(): { sheetPath: string; doc: Y.Doc } | null;
   /** Tear down ALL bindings + providers + docs (session end / unmount). */
@@ -251,6 +257,20 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
     }
   }
 
+  function syncLayoutFromSave(sheetPath: string, fileText: string): void {
+    const room = rooms.get(sheetPath);
+    if (!room) return; // not a collab sheet (or still onboarding) — nothing to sync
+    try {
+      // Writing to a PARKED room's doc marks it dirty via startWatch — fine:
+      // the diff-on-rebind adopt makes the catch-up cost the real delta only.
+      if (syncLayoutToY(fileToDoc(fileText), room.doc, "layout-save")) {
+        clog(`[sheet] layout save-sync: ${sheetPath} updated`);
+      }
+    } catch (err) {
+      cwarn(`[sheet] layout save-sync failed for ${sheetPath}`, err);
+    }
+  }
+
   async function connectAll(sheetPaths: string[]): Promise<void> {
     await Promise.all(
       sheetPaths.map((p) =>
@@ -289,7 +309,7 @@ export function createSheetCollabManager(opts: SheetManagerOptions): SheetCollab
     opts.onActiveChange?.(null);
   }
 
-  return { connectAll, switchTo, onboard, active, destroy };
+  return { connectAll, switchTo, onboard, syncLayoutFromSave, active, destroy };
 }
 
 export interface SheetChangedWindow {

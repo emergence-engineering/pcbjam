@@ -35,6 +35,12 @@ export function registerSaveHook(
      * ("Add Sheet"), which the page-load file list can't contain.
      */
     onSaved?: (relPath: string) => void;
+    /**
+     * Like `onSaved` but with the saved file's TEXT (read back from MEMFS).
+     * The collab layout save-sync (miss 08B) uses it to reconcile non-item
+     * document state (title block, paper, setup…) into the room doc.
+     */
+    onSavedText?: (relPath: string, text: string) => void;
   },
 ): void {
   const projectPrefix = `${memfsProjectDir(opts.slug)}/`;
@@ -63,6 +69,17 @@ export function registerSaveHook(
     }
 
     opts.onSaved?.(relPath);
+
+    if (opts.onSavedText) {
+      try {
+        const data = win.FS?.readFile(absPath);
+        if (data instanceof Uint8Array) {
+          opts.onSavedText(relPath, new TextDecoder().decode(data));
+        }
+      } catch (err) {
+        opts.log(`[save] onSavedText read failed for ${relPath}: ${String(err)}`);
+      }
+    }
 
     if (!opts.saveBytes) {
       opts.log(`[save] ${relPath} saved in MEMFS (no external save target)`);

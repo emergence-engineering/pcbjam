@@ -1,7 +1,7 @@
 # Design miss 08 — Non-item document state only syncs at seed; `lib_symbols` is a landmine for the symbol-libraries milestone
 
 **Severity:** design gap (silent divergence for settings edits; structural blocker later)
-**Status:** open decision
+**Status:** IMPLEMENTED 2026-07-03 — see [18](18-miss08-opts-12-13.md) (lib_symbols channel + coarse layout save-sync; nets stay seed-frozen by design)
 
 ## Where
 

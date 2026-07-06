@@ -9,6 +9,7 @@ import {
   projectToolPath,
   toolSchema,
   ydocHasState,
+  syncLayoutToY,
   yToDoc,
   type KicadDoc,
   type Tool,
@@ -570,6 +571,9 @@ export function WasmTool({
   const startedRef = React.useRef(false);
   const driftRef = React.useRef<{ stop(): void } | null>(null);
   const sheetManagerRef = React.useRef<SheetCollabManager | null>(null);
+  // The single-room collab doc (pcbnew/pl_editor), for the layout save-sync
+  // (miss 08B); eeschema routes per sheet through the manager instead.
+  const collabDocRef = React.useRef<import("yjs").Doc | null>(null);
   const [status, setStatus] = React.useState("Loading tool…");
   const [logs, setLogs] = React.useState<string[]>([]);
   const [showLog, setShowLog] = React.useState(false);
@@ -795,6 +799,21 @@ export function WasmTool({
           onSaved: (relPath) => {
             if (relPath.endsWith(".kicad_sch")) void sheetManagerRef.current?.onboard(relPath);
           },
+          // Non-item document state (title block, paper, setup…) only reaches the
+          // room at seed time; reconcile it from every save (miss 08B).
+          onSavedText: (relPath, text) => {
+            if (sheetManagerRef.current) {
+              sheetManagerRef.current.syncLayoutFromSave(relPath, text);
+              return;
+            }
+            if (collabDocRef.current && relPath === targetPath) {
+              try {
+                syncLayoutToY(fileToDoc(text), collabDocRef.current, "layout-save");
+              } catch (err) {
+                append(`[save] layout sync failed: ${String(err)}`);
+              }
+            }
+          },
         });
         const { session, targetBytes } = await maybeConnectDocSession(win, {
           docSource,
@@ -865,6 +884,7 @@ export function WasmTool({
             log: append,
             onStatus: setStatus,
           });
+          collabDocRef.current = collabHandle?.doc ?? null;
           if (collabHandle && targetPath && COLLAB_TOOLS.has(tool)) {
             driftRef.current = startDriftDetection({
               doc: collabHandle.doc,
@@ -897,6 +917,7 @@ export function WasmTool({
       // onActiveChange(null).
       sheetManagerRef.current?.destroy();
       sheetManagerRef.current = null;
+      collabDocRef.current = null;
       oom.stop();
     };
     // Boot is one-shot per mount; deps intentionally exclude files/targetPath so

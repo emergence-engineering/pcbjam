@@ -45,4 +45,39 @@ describe("registerSaveHook path routing", () => {
     expect(onSaved).not.toHaveBeenCalled();
     expect(saveBytes).not.toHaveBeenCalled();
   });
+
+  it("onSavedText receives the decoded file text (layout save-sync, miss 08B)", () => {
+    const onSavedText = vi.fn();
+    const win: SaveHookWindow = {
+      FS: {
+        readFile: () => new TextEncoder().encode("(kicad_sch (version 1))"),
+      } as unknown as SaveHookWindow["FS"],
+      kicadCollab: {},
+    };
+    registerSaveHook(win, {
+      slug: SLUG,
+      onSavedText,
+      log: () => {},
+      onStatus: () => {},
+    });
+    win.kicadCollab!.onSave!(`${PROJ}/sheet.kicad_sch`);
+    expect(onSavedText).toHaveBeenCalledWith("sheet.kicad_sch", "(kicad_sch (version 1))");
+  });
+
+  it("an onSavedText read failure is logged, not thrown", () => {
+    const onSavedText = vi.fn();
+    const log = vi.fn();
+    const win: SaveHookWindow = {
+      FS: {
+        readFile: () => {
+          throw new Error("gone");
+        },
+      } as unknown as SaveHookWindow["FS"],
+      kicadCollab: {},
+    };
+    registerSaveHook(win, { slug: SLUG, onSavedText, log, onStatus: () => {} });
+    win.kicadCollab!.onSave!(`${PROJ}/sheet.kicad_sch`);
+    expect(onSavedText).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("onSavedText read failed"));
+  });
 });

@@ -1,7 +1,7 @@
 # Optimization 13 — Parked-dirty sheet rebind re-applies the entire sheet instead of the delta
 
 **Severity:** performance + UX (heavy on big sheets; creates the adopt undo-bomb)
-**Status:** open
+**Status:** FIXED 2026-07-03 — option 2 (diff on rebind) — see [18](18-miss08-opts-12-13.md)
 
 ## Where
 

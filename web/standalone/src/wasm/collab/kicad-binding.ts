@@ -7,13 +7,16 @@ import {
   isEmptyKicadDelta,
   itemsWireToDelta,
   kicadItemsMap,
+  kicadLibSymbolsMap,
   parseItemsWireDelta,
-  renderItem,
   seedDocToY,
+  upsertLibSymbolsToY,
+  wireItemUuids,
+  wireLibSymbols,
   Y_KDOC_META,
   Y_KDOC_SEED_NONCE,
   ydocHasState,
-  yToItem,
+  yToItemUnchecked,
   type ItemsWireDelta,
   type KicadDoc,
   type KicadItem,
@@ -87,14 +90,23 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
   // Concurrent double-seed arbitration cleanup (bug 06); set by the file-seed branch.
   let detachSeedArbitration: (() => void) | undefined;
 
-  /** Plain snapshot of the Y items (the `current`/`view` the conversions need). */
+  /**
+   * Plain snapshot of the Y items (the `current`/`view` the conversions need).
+   * Unchecked reads (opt 12): this runs on every local emit AND every remote
+   * batch; the zod walk of each body tree dominated at scale. The wire parse
+   * zod-validates at the trust boundary; seed/materialize keep checked reads.
+   */
   const itemsView = (): Record<string, KicadItem> => {
     const view: Record<string, KicadItem> = {};
     items.forEach((ym, uuid) => {
-      view[uuid] = yToItem(ym);
+      view[uuid] = yToItemUnchecked(ym);
     });
     return view;
   };
+
+  /** kdoc_libsymbols reader for the apply direction (miss 08). */
+  const libDefs = (libId: string): string | undefined =>
+    kicadLibSymbolsMap(doc).get(libId);
 
   // DOWN: local editor change → Y.Doc
   bridge.onItems((json: string) => {
@@ -107,13 +119,19 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
       return;
     }
     const delta = itemsWireToDelta(wire, itemsView());
-    if (isEmptyKicadDelta(delta)) return;
+    // Library definitions the blob carried (a placed symbol's lib_symbols
+    // context — miss 08): store them alongside the items, same transaction.
+    const defs = wireLibSymbols(wire);
+    if (isEmptyKicadDelta(delta) && Object.keys(defs).length === 0) return;
     clog("⬇ onItems (local edit):", {
       added: delta.added.length,
       updated: delta.updated.length,
       removed: delta.removed.length,
     });
-    applyDeltaToY(doc, delta, ORIGIN);
+    doc.transact(() => {
+      applyDeltaToY(doc, delta, ORIGIN);
+      upsertLibSymbolsToY(doc, defs, ORIGIN);
+    }, ORIGIN);
   });
 
   // UP: remote Y change → editor. The subscription + origin policy live HERE
@@ -123,7 +141,7 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
     if (!seeded) return; // pre-seed state sync — seed()'s adopt covers it
     const delta = deltaFromYEvents(items, events);
     if (isEmptyKicadDelta(delta)) return;
-    const wire = deltaToItemsWire(delta, itemsView());
+    const wire = deltaToItemsWire(delta, itemsView(), libDefs);
     if (isEmptyItemsWireDelta(wire)) return;
     clog("⬆ remote Y change → apply to editor:", {
       added: wire.added.length,
@@ -203,32 +221,69 @@ export function bindKicadCollab(doc: Y.Doc, bridge: KicadItemsBridge): KicadBind
       cwarn("seed: snapshotItems unparseable", err);
       return;
     }
-    const local = itemsWireToDelta(wire, {});
 
     const hasState = ydocHasState(doc);
-    clog(
-      `seed: doc has ${items.size} item(s), editor has ${local.added.length} →`,
-      hasState ? "ADOPTING doc (joining)" : "SEEDING doc (first tab)",
-    );
 
     if (!hasState) {
       // First tab, no file source: seed the shared doc from the editor model.
-      applyDeltaToY(doc, local, ORIGIN);
+      const local = itemsWireToDelta(wire, {});
+      clog(`seed: doc empty → SEEDING from editor snapshot (${local.added.length} item(s))`);
+      doc.transact(() => {
+        applyDeltaToY(doc, local, ORIGIN);
+        upsertLibSymbolsToY(doc, wireLibSymbols(wire), ORIGIN);
+      }, ORIGIN);
       return;
     }
 
     // Joining a populated doc: the editor adopts it (seed-once authority, same
     // rationale as the scalar reconciler §2 — divergent local uuids from a
-    // never-saved cold open must yield to the doc's identity). Apply the doc's
-    // ROOT items (their sexprs embed all descendants) and remove local-only roots.
+    // never-saved cold open must yield to the doc's identity). Diff the editor
+    // snapshot against the doc VIEW and apply only the DIFFERENCE (opt 13):
+    // identical items cost nothing, the apply commit (and its undo entry — the
+    // adopt undo-bomb, miss 09) shrinks to the real changed set, and a clean
+    // rebind degrades to baseline-only.
     const view = itemsView();
-    const docRoots = Object.entries(view)
-      .filter(([, item]) => item.parent === null)
-      .map(([uuid]) => ({ sexpr: renderItem({ items: view }, uuid), parent: null }));
-    const removed = local.added
+    const editorDelta = itemsWireToDelta(wire, view); // editor state vs doc view
+    const editorUuids = wireItemUuids(wire);
+
+    // Doc authority, inverted per class:
+    //  - doc-only ROOTS → add to the editor (their sexprs embed descendants;
+    //    a doc-only CHILD makes its shared parent's body differ → covered below);
+    //  - items that DIFFER → re-apply the doc's version, lifted to their root
+    //    (the C++ upsert replaces roots; a bare child apply would mis-parent);
+    //  - editor-only ROOTS → remove (editor-only children disappear with their
+    //    parent's re-apply).
+    const liftToRoot = (uuid: string): string => {
+      let cur = uuid;
+      while (view[cur]?.parent != null) cur = view[cur]!.parent!;
+      return cur;
+    };
+    const docOnly = Object.entries(view)
+      .filter(([uuid, it]) => it.parent === null && !editorUuids.has(uuid))
+      .map(([uuid, it]) => ({ uuid, ...it }));
+    const changedRoots = [
+      ...new Set(
+        editorDelta.updated.filter((it) => it.uuid in view).map((it) => liftToRoot(it.uuid)),
+      ),
+    ]
+      .filter((uuid) => !docOnly.some((it) => it.uuid === uuid))
+      .map((uuid) => ({ uuid, ...view[uuid]! }));
+    const removed = editorDelta.added
       .filter((it) => it.parent === null && !(it.uuid in view))
       .map((it) => it.uuid);
-    bridge.applyItems(JSON.stringify({ added: docRoots, changed: [], removed }));
+
+    const adoptWire = deltaToItemsWire(
+      { added: docOnly, updated: changedRoots, removed },
+      view,
+      libDefs,
+    );
+
+    clog(
+      `seed: doc has ${items.size} item(s) → ADOPTING diff:`,
+      `+${adoptWire.added.length} ~${adoptWire.changed.length} -${adoptWire.removed.length}`,
+    );
+    if (isEmptyItemsWireDelta(adoptWire)) return; // editor already matches — baseline only
+    bridge.applyItems(JSON.stringify(adoptWire));
   }
 
   return {

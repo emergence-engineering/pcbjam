@@ -1,7 +1,7 @@
 # Optimization 12 — O(full-model) work on every edit, apply, and remote batch
 
 **Severity:** performance (fine on demo boards; seconds-per-edit territory at 5–10k items)
-**Status:** open
+**Status:** TS items DONE 2026-07-03 (zod off the observer path, children index once — see [18](18-miss08-opts-12-13.md)); C++ item 1 delivered by [17](17-fixes-bugs-01-07.md) batch 3 except the scalar-scan/legacy-wire retirement (goes with the legacy-wire removal)
 
 ## The costs, per hot path
 

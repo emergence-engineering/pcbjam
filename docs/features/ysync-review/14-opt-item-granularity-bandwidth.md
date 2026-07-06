@@ -1,7 +1,7 @@
 # Optimization 14 — Item-level body granularity: whole-item payloads per nudge, LWW drops concurrent property edits
 
 **Severity:** known/documented v1 tradeoff — recorded here so its costs are visible when prioritizing
-**Status:** open (deliberate design decision; revisit trigger below)
+**Status:** open (deliberate design decision; revisit trigger below — reaffirmed 2026-07-03, see [18](18-miss08-opts-12-13.md))
 
 ## Where
 
