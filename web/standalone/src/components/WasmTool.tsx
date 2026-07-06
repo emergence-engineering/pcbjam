@@ -52,6 +52,11 @@ import {
   type PresenceHandle,
   type PresencePeer,
 } from "@/wasm/collab/presence";
+import {
+  bindKicadPresence,
+  hasPresenceBridge,
+  type PresenceKicadWindow,
+} from "@/wasm/collab/presence-kicad";
 import { PresenceRoster } from "@/components/PresenceRoster";
 import {
   createSheetCollabManager,
@@ -580,6 +585,7 @@ export function WasmTool({
   const startedRef = React.useRef(false);
   const driftRef = React.useRef<{ stop(): void } | null>(null);
   const presenceRef = React.useRef<PresenceHandle | null>(null);
+  const presenceBridgeRef = React.useRef<{ destroy(): void } | null>(null);
   const sheetManagerRef = React.useRef<SheetCollabManager | null>(null);
   // The single-room collab doc (pcbnew/pl_editor), for the layout save-sync
   // (miss 08B); eeschema routes per sheet through the manager instead.
@@ -748,6 +754,8 @@ export function WasmTool({
     // pcbnew/pl_editor bind once; eeschema rebinds per active sheet, so the
     // roster shows who is on the SAME sheet (room = sheet).
     const startPresence = (provider: YjsProvider | undefined, sheetPath?: string) => {
+      presenceBridgeRef.current?.destroy();
+      presenceBridgeRef.current = null;
       presenceRef.current?.destroy();
       presenceRef.current = null;
       const awareness = provider?.awareness;
@@ -764,6 +772,16 @@ export function WasmTool({
       presenceRef.current = presence;
       presence.subscribe(setPeers);
       setPeers(presence.peers());
+      // Canvas presence (0002): cursor + selection emit and the remote
+      // VIEW_OVERLAY render. pcbnew only until the eeschema port (0003); the
+      // bridge gate also skips wasm builds predating the presence exports.
+      if (tool === "pcbnew" && hasPresenceBridge(win.Module)) {
+        presenceBridgeRef.current = bindKicadPresence({
+          mod: win.Module,
+          win: win as unknown as PresenceKicadWindow,
+          presence,
+        });
+      }
     };
 
     // Cmd/Ctrl+S belongs to the editor: preventDefault suppresses ONLY the
@@ -949,6 +967,8 @@ export function WasmTool({
 
     return () => {
       win.removeEventListener("keydown", swallowBrowserSave, true);
+      presenceBridgeRef.current?.destroy();
+      presenceBridgeRef.current = null;
       presenceRef.current?.destroy();
       presenceRef.current = null;
       driftRef.current?.stop();

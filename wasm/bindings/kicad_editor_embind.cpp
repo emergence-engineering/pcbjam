@@ -45,6 +45,13 @@ std::string pcbCollabTestMoveFirst( int aDx, int aDy );
 std::string pcbCollabGetPos( std::string aId );
 bool        pcbCollabTestRemoveItem( std::string aId );
 bool        pcbCollabTestRotateItem( std::string aId, double aDeg );
+// Presence (collab-presence 0002) — pcbnew only until 0003 adds the sch side.
+void        pcbCollabPresenceStart();
+void        pcbCollabSetRemote( std::string aJson );
+std::string pcbCollabGetViewport();
+std::string pcbCollabGetSelection();
+std::string pcbCollabTestSelectFirst();
+bool        pcbCollabTestClearSelection();
 
 bool        schEditorActive();
 void        schCollabApply( std::string aJson );
@@ -133,6 +140,41 @@ static bool collabTestRotateItem( std::string aId, double aDeg )
                              : schCollabTestRotateItem( aId, aDeg );
 }
 
+// Presence shims (collab-presence 0002): pcb-only for now — the sch frame no-ops /
+// returns empty until 0003 lands schCollab* counterparts, matching how the JS side
+// gates presence on the active tool.
+static void collabPresenceStart()
+{
+    if( pcbEditorActive() )
+        pcbCollabPresenceStart();
+}
+
+static void collabSetRemote( std::string aJson )
+{
+    if( pcbEditorActive() )
+        pcbCollabSetRemote( aJson );
+}
+
+static std::string collabGetViewport()
+{
+    return pcbEditorActive() ? pcbCollabGetViewport() : std::string();
+}
+
+static std::string collabGetSelection()
+{
+    return pcbEditorActive() ? pcbCollabGetSelection() : std::string( "[]" );
+}
+
+static std::string collabTestSelectFirst()
+{
+    return pcbEditorActive() ? pcbCollabTestSelectFirst() : std::string();
+}
+
+static bool collabTestClearSelection()
+{
+    return pcbEditorActive() ? pcbCollabTestClearSelection() : false;
+}
+
 
 EMSCRIPTEN_BINDINGS(kicad_editor) {
     // Programmatic file open (preferred over UI automation from the web app).
@@ -150,6 +192,13 @@ EMSCRIPTEN_BINDINGS(kicad_editor) {
     // endpoint, field text — flow from the per-editor blocks unchanged).
     function("kicadCollabTestRemoveItem", &collabTestRemoveItem);
     function("kicadCollabTestRotateItem", &collabTestRotateItem);
+    // Presence (collab-presence 0002).
+    function("kicadCollabPresenceStart", &collabPresenceStart);
+    function("kicadCollabSetRemote", &collabSetRemote);
+    function("kicadCollabGetViewport", &collabGetViewport);
+    function("kicadCollabGetSelection", &collabGetSelection);
+    function("kicadCollabTestSelectFirst", &collabTestSelectFirst);
+    function("kicadCollabTestClearSelection", &collabTestClearSelection);
 }
 
 #endif // __EMSCRIPTEN__

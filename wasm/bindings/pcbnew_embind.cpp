@@ -30,6 +30,7 @@
 #include <io/kicad/kicad_io_utils.h>
 #include <richio.h>
 #include <tools/pcb_selection.h>
+#include <tools/pcb_selection_tool.h>
 #include <geometry/shape_poly_set.h>
 #include <geometry/shape_line_chain.h>
 #include <geometry/eda_angle.h>
@@ -38,13 +39,21 @@
 #include <kiid.h>
 #include <layer_ids.h>
 #include <lset.h>
+#include <math/util.h>
 #include <tool/coroutine.h>
+#include <tool/tool_manager.h>
+#include <view/view.h>
+#include <view/view_overlay.h>
+#include <pcb_draw_panel_gal.h>
 #include <nlohmann/json.hpp>
+#include <chrono>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 #include <wx/app.h>
+#include <wx/event.h>
 #include <wx/string.h>
 #include <wx/window.h>
 
@@ -825,6 +834,11 @@ void scheduleFlush()
     }
 }
 
+// Presence (collab-presence 0002): board changes often change the selection too
+// (delete, paste) with no closing canvas event — piggyback a selection re-check
+// on the collab listener trigger. Defined in the presence section below.
+void schedulePresenceSelCheck();
+
 // ChangeSource: the native BOARD_LISTENER is just a trigger — the actual change set comes from
 // the post-settle snapshot diff above. Skipped while applying a remote delta (no echo); doApply
 // rebaselines instead. OnBoardCompositeUpdate (the single combined add/remove/change event,
@@ -859,6 +873,7 @@ private:
             noteDirty( item );
 
         scheduleFlush();
+        schedulePresenceSelCheck();
     }
 };
 
@@ -1062,6 +1077,280 @@ void collabTestMove( PCB_EDIT_FRAME* aFrame, BOARD_ITEM* aItem, int aDx, int aDy
     commit.Modify( aItem );
     aItem->Move( VECTOR2I( aDx, aDy ) );
     commit.Push( wxT( "Collab test move" ) );
+}
+
+// ───────────────────────── collab presence (collab-presence 0002) ─────────────────────────
+//
+// Ephemeral presence: emit THIS tab's selection + cursor to JS (they ride Yjs awareness),
+// and render REMOTE peers' cursors + selection outlines into a per-user-colored
+// KIGFX::VIEW_OVERLAY. Never via the SELECTED/BRIGHTENED item flags — those have one
+// global color and mutate real selection state (events, serialization, races with the
+// local user); the overlay's command list takes a COLOR4D per command, never enters
+// m_selection, and never serializes.
+//
+// Zero kicad-fork changes: the input triggers are wx-layer Bind() handlers on the GAL
+// canvas (bound after WX_VIEW_CONTROLS' own, so they run FIRST and Skip() onward), the
+// selection is read from PCB_SELECTION_TOOL after the event settles (CallAfter), and the
+// repaint is the MakeOverlay()/VIEW::Update()/ForceRefresh() combo the cross-probe flash
+// already uses. Selection changes with no closing canvas event (Edit→Select All from the
+// menu) are missed until the next input or board change — acceptable for an ephemeral
+// layer that fully resyncs on every emit.
+namespace presence {
+
+struct PEER
+{
+    std::string       name;
+    KIGFX::COLOR4D    color;
+    bool              hasCursor = false;
+    VECTOR2D          cursor;            // world coords (IU/nm)
+    std::vector<KIID> selection;
+};
+
+std::vector<PEER>                    g_peers;
+std::shared_ptr<KIGFX::VIEW_OVERLAY> g_overlay;
+bool        g_started         = false;
+bool        g_redrawScheduled = false;
+bool        g_selCheckScheduled = false;
+std::string g_lastSelectionJson;   // dedupe: emit only when the uuid set changed
+long long   g_lastCursorEmitMs = 0;
+double      g_lastVpScale  = 0.0;
+VECTOR2D    g_lastVpCenter;
+
+long long nowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now().time_since_epoch() )
+            .count();
+}
+
+KIGFX::COLOR4D parseColor( const std::string& aHex )
+{
+    if( aHex.size() == 7 && aHex[0] == '#' )
+    {
+        long v = strtol( aHex.c_str() + 1, nullptr, 16 );
+        return KIGFX::COLOR4D( ( ( v >> 16 ) & 0xff ) / 255.0, ( ( v >> 8 ) & 0xff ) / 255.0,
+                               ( v & 0xff ) / 255.0, 0.9 );
+    }
+
+    return KIGFX::COLOR4D( 0.23, 0.51, 0.96, 0.9 ); // palette blue fallback
+}
+
+json selectionUuids( PCB_EDIT_FRAME* aFrame )
+{
+    json uuids = json::array();
+
+    PCB_SELECTION_TOOL* selTool = aFrame->GetToolManager()->GetTool<PCB_SELECTION_TOOL>();
+
+    if( !selTool )
+        return uuids;
+
+    for( EDA_ITEM* item : selTool->GetSelection() )
+        uuids.push_back( toUtf8( item->m_Uuid.AsString() ) );
+
+    return uuids;
+}
+
+// Post-settle selection emit: read the selection AFTER the triggering event finished
+// (CallAfter), dedupe against the last emitted set, hand the uuid list to JS.
+void checkSelection()
+{
+    g_selCheckScheduled = false;
+
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    std::string s = selectionUuids( fr ).dump();
+
+    if( s == g_lastSelectionJson )
+        return;
+
+    g_lastSelectionJson = s;
+
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onSelection )
+            window.kicadCollab.onSelection( UTF8ToString( $0 ) );
+    }, s.c_str() );
+}
+
+// Repaint the remote-peers overlay. Runs in CallAfter + COROUTINE: the first
+// MakeOverlay() view->Add and each item's virtual ViewBBox() need the fiber stack
+// (asyncify virtual dispatch — same constraint as doApply above).
+void redrawOverlay()
+{
+    g_redrawScheduled = false;
+
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    KIGFX::VIEW* view = fr->GetCanvas()->GetView();
+
+    if( !g_overlay )
+        g_overlay = view->MakeOverlay();
+
+    g_overlay->Clear();
+
+    BOARD* board = fr->GetBoard();
+    // Screen-constant sizing: px → world units, so cursors/outline widths don't
+    // scale with zoom. MUST go through the GAL matrix (ToWorld(double)) — the
+    // naive 1/GetScale() is the ZOOM factor, not px-per-IU (the GAL world-unit
+    // scale is folded into the matrix only), and it under-sizes the drawing by
+    // ~7 orders of magnitude (invisible cursors).
+    double px = view->ToWorld( 1.0 );
+
+    for( const PEER& peer : g_peers )
+    {
+        g_overlay->SetIsFill( false );
+        g_overlay->SetIsStroke( true );
+        g_overlay->SetStrokeColor( peer.color );
+        g_overlay->SetLineWidth( 1.5 * px );
+
+        for( const KIID& id : peer.selection )
+        {
+            BOARD_ITEM* item = board->ResolveItem( id, /*aAllowNullptrReturn*/ true );
+
+            if( !item )
+                continue;   // not on this board (yet) — skip silently
+
+            BOX2I bb = item->ViewBBox();
+            bb.Inflate( KiROUND( 4 * px ) );
+            g_overlay->Rectangle( bb.GetOrigin(), bb.GetEnd() );
+        }
+
+        if( peer.hasCursor )
+        {
+            g_overlay->SetLineWidth( 2.0 * px );
+            g_overlay->Cross( peer.cursor, KiROUND( 7 * px ) );
+
+            if( !peer.name.empty() )
+            {
+                g_overlay->SetGlyphSize( VECTOR2I( KiROUND( 10 * px ), KiROUND( 10 * px ) ) );
+                g_overlay->BitmapText( wxString::FromUTF8( peer.name.c_str() ),
+                                       VECTOR2I( KiROUND( peer.cursor.x + 10 * px ),
+                                                 KiROUND( peer.cursor.y + 16 * px ) ),
+                                       ANGLE_0 );
+            }
+        }
+    }
+
+    view->Update( g_overlay.get() );
+    // The canvas repaints on its own only with focus/input — force it, exactly as
+    // the cross-probe flash does.
+    fr->GetCanvas()->ForceRefresh();
+}
+
+void scheduleRedraw()
+{
+    if( g_redrawScheduled )
+        return;
+
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    g_redrawScheduled = true;
+
+    fr->CallAfter( []() {
+        COROUTINE<int, int> cor( []( int ) -> int
+                                 {
+                                     redrawOverlay();
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
+}
+
+// Viewport emit (world→screen mapping for the React comment/DOM layer, 0005): pushed
+// when the view center/scale changed (checked from the input handlers below), pulled
+// any time via kicadCollabGetViewport. Zoom also invalidates the overlay's
+// screen-constant sizes, so a change schedules a redraw too.
+void emitViewportIfChanged()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    KIGFX::VIEW* view  = fr->GetCanvas()->GetView();
+    double       scale = view->GetScale();   // zoom — cheap change detector only
+    VECTOR2D     c     = view->GetCenter();
+
+    if( scale == g_lastVpScale && c == g_lastVpCenter )
+        return;
+
+    g_lastVpScale  = scale;
+    g_lastVpCenter = c;
+
+    const VECTOR2I& sz = view->GetScreenPixelSize();
+    // px per IU via the GAL matrix — GetScale() is the zoom, not px/IU.
+    double pxPerIu = view->ToScreen( 1.0 );
+
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onViewport )
+            window.kicadCollab.onViewport( $0, $1, $2, $3, $4 );
+    }, c.x, c.y, pxPerIu, sz.x, sz.y );
+
+    if( !g_peers.empty() )
+        scheduleRedraw();
+}
+
+void emitCursor( double aX, double aY, bool aActive )
+{
+    EM_ASM( {
+        if( window.kicadCollab && window.kicadCollab.onCursor )
+            window.kicadCollab.onCursor( $0, $1, $2 );
+    }, aX, aY, aActive ? 1 : 0 );
+}
+
+void onMotion( wxMouseEvent& aEvt )
+{
+    aEvt.Skip();
+
+    long long now = nowMs();
+
+    if( now - g_lastCursorEmitMs < 50 )     // ≤20 emits/s, event-driven (no timers)
+        return;
+
+    g_lastCursorEmitMs = now;
+
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    // Screen→world via the non-virtual VIEW::ToWorld (the virtual
+    // VIEW_CONTROLS::GetMousePosition is an asyncify dispatch risk here).
+    wxPoint  p     = aEvt.GetPosition();
+    VECTOR2D world = fr->GetCanvas()->GetView()->ToWorld( VECTOR2D( p.x, p.y ), true );
+
+    emitCursor( world.x, world.y, true );
+    emitViewportIfChanged();                // catches drag-pan while moving
+}
+
+void onLeave( wxMouseEvent& aEvt )
+{
+    aEvt.Skip();
+    emitCursor( 0, 0, false );
+}
+
+} // namespace presence
+
+void schedulePresenceSelCheck()
+{
+    if( presence::g_selCheckScheduled )
+        return;
+
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    presence::g_selCheckScheduled = true;
+    fr->CallAfter( []() { presence::checkSelection(); } );
 }
 
 } // namespace
@@ -1286,6 +1575,160 @@ std::string pcbCollabGetPos( std::string aId )
     return "";
 }
 
+
+// ── presence entry points (collab-presence 0002) ────────────────────────────────────────────
+
+// Install the presence input hooks on the GAL canvas (idempotent). Called by the JS
+// presence binding at collab attach; also implied by the first kicadCollabSetRemote.
+// Handlers Skip() so WX_VIEW_CONTROLS' own processing is untouched; selection checks
+// run POST-event via CallAfter (the selection tool acts on the same event after us).
+void pcbCollabPresenceStart()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr || presence::g_started )
+        return;
+
+    presence::g_started = true;
+
+    wxWindow* canvas = fr->GetCanvas();
+
+    canvas->Bind( wxEVT_MOTION, []( wxMouseEvent& e ) { presence::onMotion( e ); } );
+    canvas->Bind( wxEVT_LEAVE_WINDOW, []( wxMouseEvent& e ) { presence::onLeave( e ); } );
+
+    auto selAndViewport = []( wxEvent& e )
+    {
+        e.Skip();
+        schedulePresenceSelCheck();
+
+        if( PCB_EDIT_FRAME* f = pcbFrame() )
+            f->CallAfter( []() { presence::emitViewportIfChanged(); } );
+    };
+
+    canvas->Bind( wxEVT_LEFT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+    canvas->Bind( wxEVT_RIGHT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+    canvas->Bind( wxEVT_KEY_UP, [selAndViewport]( wxKeyEvent& e ) { selAndViewport( e ); } );
+    canvas->Bind( wxEVT_MOUSEWHEEL, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+}
+
+// JS → C++: full remote-peers snapshot — `{peers:[{id,name,color,cursor:{x,y}|null,
+// selection:[uuid]}]}`, trivially derived from awareness.getStates() and idempotent
+// (the overlay is cleared + fully redrawn). An empty peers list clears the overlay.
+void pcbCollabSetRemote( std::string aJson )
+{
+    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
+
+    if( j.is_discarded() )
+        return;
+
+    std::vector<presence::PEER> peers;
+
+    for( const json& p : j.value( "peers", json::array() ) )
+    {
+        presence::PEER peer;
+        peer.name  = p.value( "name", "" );
+        peer.color = presence::parseColor( p.value( "color", "" ) );
+
+        if( p.contains( "cursor" ) && p["cursor"].is_object() )
+        {
+            peer.hasCursor = true;
+            peer.cursor    = VECTOR2D( p["cursor"].value( "x", 0.0 ), p["cursor"].value( "y", 0.0 ) );
+        }
+
+        for( const json& u : p.value( "selection", json::array() ) )
+        {
+            if( u.is_string() )
+                peer.selection.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
+        }
+
+        peers.push_back( std::move( peer ) );
+    }
+
+    presence::g_peers = std::move( peers );
+    pcbCollabPresenceStart();
+    presence::scheduleRedraw();
+}
+
+// JS pull of the current viewport transform (world↔screen mapping for the DOM layer):
+// `{cx,cy,scale,w,h}` — world center, pixels-per-IU scale, canvas size in px.
+std::string pcbCollabGetViewport()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return "";
+
+    KIGFX::VIEW*    view = fr->GetCanvas()->GetView();
+    VECTOR2D        c    = view->GetCenter();
+    const VECTOR2I& sz   = view->GetScreenPixelSize();
+
+    // scale = px per IU via the GAL matrix (GetScale() is the zoom, not px/IU).
+    return json{ { "cx", c.x }, { "cy", c.y }, { "scale", view->ToScreen( 1.0 ) },
+                 { "w", sz.x }, { "h", sz.y } }.dump();
+}
+
+// JS pull of the CURRENT selection's uuids (presence seed at attach + the e2e's
+// no-state-leak probe: a remote render must leave this empty).
+std::string pcbCollabGetSelection()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return "[]";
+
+    return presence::selectionUuids( fr ).dump();
+}
+
+// Test helper: REALLY select the first top-level item through the selection tool (the
+// same call the cross-probe flash uses), then run the presence check — a programmatic
+// select has no closing canvas event. Returns the selected uuid.
+std::string pcbCollabTestSelectFirst()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return "";
+
+    BOARD_ITEM* target = nullptr;
+
+    forEachTopItem( *fr->GetBoard(), [&]( BOARD_ITEM* item )
+                    {
+                        if( !target )
+                            target = item;
+                    } );
+
+    if( !target )
+        return "";
+
+    fr->CallAfter( [fr, target]() {
+        if( PCB_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>() )
+        {
+            st->AddItemToSel( target );
+            schedulePresenceSelCheck();
+        }
+    } );
+
+    return toUtf8( target->m_Uuid.AsString() );
+}
+
+// Test helper: clear the selection through the tool + run the presence check.
+bool pcbCollabTestClearSelection()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return false;
+
+    fr->CallAfter( [fr]() {
+        if( PCB_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>() )
+        {
+            st->ClearSelection();
+            schedulePresenceSelCheck();
+        }
+    } );
+
+    return true;
+}
 
 // Test helper: the s-expr clipboard blob for an item by uuid (what the emit side attaches to an
 // `added` payload). Lets the e2e round-trip the blob add path without a real draw.
@@ -1531,6 +1974,14 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     // ysync-review repro hooks shared with eeschema (dispatched when merged).
     function("kicadCollabTestRemoveItem", &pcbCollabTestRemoveItem);
     function("kicadCollabTestRotateItem", &pcbCollabTestRotateItem);
+    // Presence (collab-presence 0002) — shared names; eeschema's counterparts land
+    // with 0003 (the merged image dispatches pcb-only until then).
+    function("kicadCollabPresenceStart", &pcbCollabPresenceStart);
+    function("kicadCollabSetRemote", &pcbCollabSetRemote);
+    function("kicadCollabGetViewport", &pcbCollabGetViewport);
+    function("kicadCollabGetSelection", &pcbCollabGetSelection);
+    function("kicadCollabTestSelectFirst", &pcbCollabTestSelectFirst);
+    function("kicadCollabTestClearSelection", &pcbCollabTestClearSelection);
 #endif // !KICAD_MERGED_EMBIND
 }
 #endif
