@@ -1,4 +1,5 @@
 import { SyncStack, type SyncStackOptions } from "@pcbjam/sync-client";
+import { asyncMap } from "@/lib/async-map";
 import type { LibInfo, LibItemInfo, LibsSource } from "./source";
 
 /**
@@ -122,7 +123,7 @@ export function cdnLibsSource(
       return (await stack.list()).map((e) => splitPath(e.path));
     },
     async presync(opts): Promise<void> {
-      const { kind, concurrency = 6, onProgress, signal } = opts ?? {};
+      const { kind, concurrency = 8, onProgress, signal } = opts ?? {};
       let m: CdnLibsManifest;
       try {
         m = await loadManifest();
@@ -136,25 +137,23 @@ export function cdnLibsSource(
       const total = libs.length;
       let done = 0;
       onProgress?.({ done, total, current: "" });
-      // Concurrency-limited pool: each openStack cold-fetches one bundle into IDB
+      // Concurrency-limited: each openStack cold-fetches one bundle into IDB
       // (warm ⇒ a cheap manifest diff). Tolerate per-lib failures so one bad lib
-      // doesn't abort the warm-up.
-      let idx = 0;
-      const worker = async (): Promise<void> => {
-        while (idx < libs.length) {
+      // doesn't abort the warm-up. Progress is reported on COMPLETION only —
+      // with several libs in flight there is no single "current" one.
+      await asyncMap(
+        libs,
+        async (lib) => {
           if (signal?.aborted) return;
-          const lib = libs[idx++]!;
-          onProgress?.({ done, total, current: lib.name });
           try {
             await openStack(lib.id);
           } catch {
             // best-effort: the lib still loads lazily on demand
           }
+          if (signal?.aborted) return;
           onProgress?.({ done: ++done, total, current: lib.name });
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(concurrency, total) }, () => worker()),
+        },
+        concurrency,
       );
     },
     async getAllItems(

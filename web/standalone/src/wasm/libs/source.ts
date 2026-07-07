@@ -1,3 +1,4 @@
+import { asyncMap } from "@/lib/async-map";
 import { handleModel3dRequest } from "./models-bridge";
 import { libIdFromUri, libUri } from "./uri";
 
@@ -70,7 +71,7 @@ export interface LibsSource {
   presync?(opts?: {
     /** Limit to libs holding this item kind ("symbol" | "footprint"). */
     kind?: string;
-    /** Max concurrent bundle fetches (default 6). */
+    /** Max concurrent bundle fetches (default 8). */
     concurrency?: number;
     onProgress?: (p: LibPresyncProgress) => void;
     signal?: AbortSignal;
@@ -189,7 +190,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Slow-path "fat list" for sources without a bulk `getAllItems` (the example
  * backend / per-item remote): just listItems + one getItemBody each. Same N
  * round-trips as before — but it keeps the single WASM-side code path (the plugin
- * always asks for bodies once) working against every source.
+ * always asks for bodies once) working against every source. The per-item gets
+ * run 8 at a time (they're independent HTTP round-trips); order is preserved.
  */
 async function fallbackGetAllItems(
   source: LibsSource,
@@ -197,13 +199,17 @@ async function fallbackGetAllItems(
 ): Promise<Array<{ kind: string; name: string; body: Uint8Array }>> {
   const items = await source.listItems(libId);
   const enc = new TextEncoder();
-  const out: Array<{ kind: string; name: string; body: Uint8Array }> = [];
-  for (const it of items) {
-    const body = await source.getItemBody(libId, it.kind, it.name);
-    if (body != null)
-      out.push({ kind: it.kind, name: it.name, body: enc.encode(body) });
-  }
-  return out;
+  const bodies = await asyncMap(
+    items,
+    (it) => source.getItemBody(libId, it.kind, it.name).catch(() => null),
+    8,
+  );
+  return items.flatMap((it, i) => {
+    const body = bodies[i];
+    return body != null
+      ? [{ kind: it.kind, name: it.name, body: enc.encode(body) }]
+      : [];
+  });
 }
 
 /** Escape a string for a KiCad s-expr quoted token. */

@@ -619,8 +619,14 @@ export function WasmTool({
   // A library item currently being fetched (open/save), for a transient spinner.
   const [libBusy, setLibBusy] = React.useState<string | null>(null);
   // Load-screen pre-sync progress: warming the project's lib bundles into IDB in
-  // parallel with the wasm download. Null when idle/done.
-  const [libSync, setLibSync] = React.useState<string | null>(null);
+  // parallel with the wasm download. Null when idle/done. Counts only (no
+  // "current lib") — the fetches run several-at-a-time, so there is no single
+  // current one, and a fixed label keeps the line still while it ticks.
+  const [libSync, setLibSync] = React.useState<{
+    kind: string;
+    done: number;
+    total: number;
+  } | null>(null);
   // Last lib error (e.g. a backend 404 on open), shown as a dismissible toast.
   const [libError, setLibError] = React.useState<string | null>(null);
   // Eager whole-library idb→wasm load in flight (the ~tens-of-seconds fat-load on
@@ -876,11 +882,9 @@ export function WasmTool({
           void source
             .presync({
               kind: libKind,
-              onProgress: ({ done, total, current }) =>
+              onProgress: ({ done, total }) =>
                 setLibSync(
-                  done >= total
-                    ? null
-                    : `Syncing ${libKind}s — ${current} (${done}/${total})`,
+                  done >= total ? null : { kind: libKind, done, total },
                 ),
             })
             .then(() => setLibSync(null))
@@ -1095,7 +1099,9 @@ export function WasmTool({
               </p>
               <DownloadProgress progress={progress} />
               {libSync && (
-                <p className="font-mono text-xs text-emerald-300/90">{libSync}</p>
+                <p className="whitespace-pre font-mono text-xs text-emerald-300/90">
+                  {libSyncLabel(libSync)}
+                </p>
               )}
               <p className="font-mono text-xs text-white/40">
                 First load downloads the tool (large) — this can take a moment.
@@ -1142,9 +1148,14 @@ export function WasmTool({
                   }}
                 />
               </div>
-              <p className="mt-1 text-center font-mono text-[11px] text-white/50">
-                {Math.min(libLoading.done, libLoading.total)} / {libLoading.total}{" "}
-                libraries
+              {/* Space-pad `done` to `total`'s width so the centered line
+                  doesn't shift as the count gains a digit. */}
+              <p className="mt-1 whitespace-pre text-center font-mono text-[11px] text-white/50">
+                {String(Math.min(libLoading.done, libLoading.total)).padStart(
+                  String(libLoading.total).length,
+                  " ",
+                )}{" "}
+                / {libLoading.total} libraries
               </p>
             </div>
           )}
@@ -1189,8 +1200,9 @@ export function WasmTool({
       {/* Lib pre-sync still warming IDB after the editor opened (big set) — small
           unobtrusive indicator so the user knows browsing is still filling in. */}
       {ready && libSync && (
-        <div className="pointer-events-none absolute bottom-9 left-3 z-20 flex items-center gap-2 rounded bg-black/80 px-3 py-1.5 text-xs text-emerald-200">
-          <Loader2 className="animate-spin" size={14} /> {libSync}
+        <div className="pointer-events-none absolute bottom-9 left-3 z-20 flex items-center gap-2 rounded bg-black/80 px-3 py-1.5 font-mono text-xs text-emerald-200">
+          <Loader2 className="animate-spin" size={14} />{" "}
+          <span className="whitespace-pre">{libSyncLabel(libSync)}</span>
         </div>
       )}
 
@@ -1235,6 +1247,18 @@ export function WasmTool({
       </div>
     </div>
   );
+}
+
+/**
+ * Fixed-width lib pre-sync line, e.g. "Syncing symbol libraries —  42/208".
+ * The prefix is constant and `done` is space-padded to `total`'s digit count,
+ * so the text stays still while the counter ticks (render it in a font-mono +
+ * whitespace-pre element so the pad spaces hold their width).
+ */
+function libSyncLabel(s: { kind: string; done: number; total: number }): string {
+  const total = String(s.total);
+  const done = String(Math.min(s.done, s.total)).padStart(total.length, " ");
+  return `Syncing ${s.kind} libraries — ${done}/${total}`;
 }
 
 /**
