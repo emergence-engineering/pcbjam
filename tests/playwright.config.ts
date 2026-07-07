@@ -76,15 +76,20 @@ export default defineConfig({
   outputDir: process.env.CI ? 'pw-artifacts/wx' : 'test-results',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  // 1 local retry absorbs transient `npx serve` connection refusals under heavy
-  // parallel load (many workers fetching large WASM bundles at once).
-  retries: process.env.CI ? 2 : 1,
+  // retries:0 — the suite is deterministic (no blind sleeps, no "if element exists"
+  // branches; screenshots are captured via stableShot for the offline gate, not asserted
+  // inline), so a failure is a real failure, not flake to paper over with a retry.
+  retries: 0,
   // Run parallel workers on CI too (Playwright default ≈ 50% of cores), same as
   // local — the serial CI run was the dominant wall-clock cost. Cap (e.g. '50%'
   // or a fixed count) if contention OOMs/flakes; retries:2 covers transient.
   workers: undefined,
   reporter: 'html',
   timeout: 60000,  // WASM can be slow to load
+
+  // No expect.toHaveScreenshot block: screenshots are captured via stableShot() (render-settle +
+  // raw PNG to test-results/) and compared OFFLINE by tools/screenshots against tests/baseline-
+  // screenshots on CI's deterministic Linux render — Playwright does no inline pixel comparison.
 
   use: {
     baseURL: `http://localhost:${port}`,

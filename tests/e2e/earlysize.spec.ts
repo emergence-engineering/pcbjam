@@ -1,31 +1,44 @@
 // Early Size Test - Verifies GetClientSize() returns reasonable values before Show()
 // This reproduces KiCad's pattern where GetClientSize() is called in the constructor.
-import { test, expect, tryLoadApp } from './utils/fixtures';
+//
+// Determinism: no waitForTimeout. Readiness via waitForWxApp (loud). The app emits its
+// early client/frame size logs and a terminal PASS/FAIL during init; instead of sleeping
+// 500ms we poll for the terminal PASS/FAIL marker, which guarantees every size log the
+// assertions parse is already present. Static loaded/result states use stableShot.
+import { test, expect, waitForWxApp } from './utils/fixtures';
+import { stableShot } from './utils/element-tracker';
 
 test.describe('Early GetClientSize() Tests', () => {
 
   test('Early size test app loads successfully', async ({ page, testLogger }) => {
     await page.goto('/standalone/earlysize/earlysize_test.html');
-    const loaded = await tryLoadApp(page);
+    await waitForWxApp(page);
 
-    await page.screenshot({ path: 'test-results/earlysize-01-loaded.png', fullPage: true });
+    await stableShot(page, 'earlysize-01-loaded.png', { fullPage: true });
 
     const hasStartup = testLogger.consoleLogs.some(l => l.includes('[EARLYSIZE_TEST] Early size test app started'));
 
-    expect(loaded, 'Early size app should load').toBe(true);
     expect(hasStartup, 'Startup log should be present').toBe(true);
     expect(testLogger.errors.filter(e => !e.includes('favicon'))).toHaveLength(0);
   });
 
   test('GetClientSize() returns reasonable values before Show()', async ({ page, testLogger }) => {
     await page.goto('/standalone/earlysize/earlysize_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForWxApp(page);
 
-    // Wait for the app to finish initialization
-    await page.waitForTimeout(500);
+    // Wait for the app to finish initialization: it logs a terminal PASS/FAIL result once
+    // its early size checks are done, which implies the client/frame size logs are present.
+    await expect
+      .poll(
+        () =>
+          testLogger.consoleLogs.some(
+            l => l.includes('[EARLYSIZE_TEST] PASS') || l.includes('[EARLYSIZE_TEST] FAIL'),
+          ),
+        { message: 'earlysize test should log its terminal PASS/FAIL result' },
+      )
+      .toBe(true);
 
-    await page.screenshot({ path: 'test-results/earlysize-02-result.png', fullPage: true });
+    await stableShot(page, 'earlysize-02-result.png', { fullPage: true });
 
     // Check for early client size log
     const clientSizeLogs = testLogger.consoleLogs.filter(l => l.includes('[EARLYSIZE_TEST] Early client size:'));

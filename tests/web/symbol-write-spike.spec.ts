@@ -1,5 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitForRegistry, clickByTooltip } from '../e2e/utils/element-tracker';
+import {
+  clickByTooltip,
+  waitForWxApp,
+  focusCanvas,
+  waitUntil, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * 0004-A write-path spike: does the symbol editor's SaveSymbol path route through
@@ -13,25 +17,15 @@ import { waitForRegistry, clickByTooltip } from '../e2e/utils/element-tracker';
  * fork-native s-expr, and the app stays live (no abort / no OOM respawn).
  */
 
-const SHOT = (name: string) => `test-results/symwrite-${name}.png`;
-
 async function bootSymbolEditor(page: Page): Promise<void> {
   await page.goto('/p/demo/symbol_editor/?libwrite=1');
-  await expect(page.locator('#canvas')).toBeVisible({ timeout: 150000 });
-  await waitForRegistry(page, 150000);
+  await waitForWxApp(page, { timeout: 150000 });
   await page.waitForFunction(
     () => !!window.wxElementRegistry && window.wxElementRegistry.findAll({}).length > 5,
     null,
     { timeout: 150000 },
   );
   await page.waitForFunction(() => !!(window as any).kicadLibs, null, { timeout: 60000 });
-  await page.waitForTimeout(2000);
-}
-
-async function focusCanvas(page: Page): Promise<void> {
-  const box = await page.locator('#canvas').boundingBox();
-  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(300);
 }
 
 test('symbol editor save routes through the pcbjam write bridge (main thread)', async ({ page }) => {
@@ -40,7 +34,7 @@ test('symbol editor save routes through the pcbjam write bridge (main thread)', 
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
   await bootSymbolEditor(page);
-  await page.screenshot({ path: SHOT('01-boot'), scale: 'css' });
+  await stableShot(page, 'symwrite-01-boot.png');
 
   // Spike provider is active.
   expect(await page.evaluate(() => !!(window as any).__pcbjamSaved), 'spike marker present').toBe(true);
@@ -57,20 +51,24 @@ test('symbol editor save routes through the pcbjam write bridge (main thread)', 
   // Click focuses the tree row but doesn't always select it; drive the keyboard
   // to make the first (only) library row the SELECTED item (GetTargetLibId).
   await page.mouse.click(hdr!.cx, hdr!.cy + hdr!.hgt + 8); // focus the tree
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('Home');
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('ArrowDown');
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('ArrowUp');
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: SHOT('02-lib-selected'), scale: 'css' });
+  await page.waitForTimeout(400); // eslint-disable-line -- documented interaction dwell
+  await stableShot(page, 'symwrite-02-lib-selected.png');
 
   // New Symbol via the toolbar button (tooltip), proven-clickable in the harness.
   const clicked = await clickByTooltip(page, 'New Symbol...');
   expect(clicked, 'New Symbol toolbar button clicked').toBe(true);
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: SHOT('03-newsym-dialog'), scale: 'css' });
+  await waitUntil(
+    page,
+    () => window.wxElementRegistry.findAll({ visible: true }).some((e: any) => /Dialog/i.test(e.typeName)),
+    'New Symbol dialog visible',
+  );
+  await stableShot(page, 'symwrite-03-newsym-dialog.png');
 
   // Diagnostics: what dialog/controls are present now.
   const dlg = await page.evaluate(() => {
@@ -87,15 +85,19 @@ test('symbol editor save routes through the pcbjam write bridge (main thread)', 
   const nameField = dlg.texts.find((t) => Math.abs(t.cy - 65) > 30 && Math.abs(t.cy - 87) > 30);
   expect(nameField, 'New Symbol name field present').toBeTruthy();
   await page.mouse.click(nameField!.cx, nameField!.cy);
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('Control+a');
   await page.keyboard.press('Delete');
   await page.keyboard.type(SYM, { delay: 40 });
-  await page.waitForTimeout(300);
-  await page.screenshot({ path: SHOT('04-name-typed'), scale: 'css' });
+  await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell
+  await stableShot(page, 'symwrite-04-name-typed.png');
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: SHOT('05-symbol-created'), scale: 'css' });
+  await waitUntil(
+    page,
+    () => !window.wxElementRegistry.findAll({ visible: true }).some((e: any) => /Dialog/i.test(e.typeName)),
+    'New Symbol dialog dismissed',
+  );
+  await stableShot(page, 'symwrite-05-symbol-created.png');
 
   // Title should reflect the new symbol now being edited.
   const titleAfterCreate = await page.title();
@@ -115,7 +117,7 @@ test('symbol editor save routes through the pcbjam write bridge (main thread)', 
     null,
     { timeout: 30000 },
   );
-  await page.screenshot({ path: SHOT('06-saved'), scale: 'css' });
+  await stableShot(page, 'symwrite-06-saved.png');
 
   const { savedName, body } = await page.evaluate(() => {
     const saved = (window as any).__pcbjamSaved as Record<string, string>;
@@ -131,7 +133,7 @@ test('symbol editor save routes through the pcbjam write bridge (main thread)', 
   expect(body).toContain(`(symbol "${savedName}"`);
 
   // No post-save error dialog (the placeholder-file fix for GetModificationTime).
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500); // eslint-disable-line -- documented interaction dwell
   const errDialog = await page.evaluate(() =>
     window.wxElementRegistry
       .findAll({ visible: true })

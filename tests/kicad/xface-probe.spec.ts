@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { clickMenuBarItem } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, waitUntil, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * Cross-face probe for the merged kicad_editor bundle (editor-unification Part 2).
@@ -26,14 +26,23 @@ test.describe('merged bundle cross-face (schematic session starts the PCB kiface
         await expect
             .poll(() => page.title(), { timeout: 120000, intervals: [1000] })
             .toMatch(/Schematic Editor/i);
-        await page.waitForTimeout(1500);
 
         // Open Preferences → Preferences… . NOTE: clickMenuItem('Preferences') would
         // match the MENUBAR item again (same elementType) and toggle the menu shut —
         // find the POPUP entry explicitly (not subType 'menubar') and click its coords.
         const menuClicked = await clickMenuBarItem(page, 'Preferences');
         expect(menuClicked, 'Preferences menubar item should be clickable').toBe(true);
-        await page.waitForTimeout(600);
+        // Wait for the popup Preferences… item to render (replaces a fixed 600ms).
+        await waitUntil(
+            page,
+            () => {
+                const reg = window.wxElementRegistry;
+                if (!reg?.findAllRendered) return false;
+                return reg.findAllRendered({ elementType: 'menuitem' })
+                    .some((i) => i.subType !== 'menubar' && /Preferences/i.test(i.label ?? ''));
+            },
+            'Preferences… popup item rendered',
+        );
 
         const popupItem = await page.evaluate(() => {
             const reg = (window as unknown as {
@@ -52,11 +61,23 @@ test.describe('merged bundle cross-face (schematic session starts the PCB kiface
         expect(popupItem, 'the Preferences… popup menu item should be rendered').not.toBeNull();
         console.log(`[xface] clicking popup item ${JSON.stringify(popupItem)}`);
         await page.mouse.click(popupItem!.x, popupItem!.y);
-        // The dialog builds pages for every registered kiface — give the lazy
-        // PCB OnKifaceStart + page construction time to run.
-        await page.waitForTimeout(4000);
+        // The dialog builds pages for every registered kiface — wait for the lazy PCB
+        // OnKifaceStart to contribute its "PCB Editor" page (deterministic, replaces a
+        // fixed 4000ms; this is also the cross-face assertion's precondition).
+        await waitUntil(
+            page,
+            () => {
+                const reg = window.wxElementRegistry;
+                if (!reg) return false;
+                const a = reg.findAll({ visible: true }).map((e) => e.label ?? '');
+                const b = (reg.findAllRendered?.({}) ?? []).map((e) => (e as { label?: string }).label ?? '');
+                return [...a, ...b].includes('PCB Editor');
+            },
+            'PCB Editor preference page (lazy PCB kiface) present',
+            { timeout: 30000 },
+        );
 
-        await page.screenshot({ path: 'test-results/xface-preferences.png', scale: 'device' });
+        await stableShot(page, 'xface-preferences.png');
 
         // A dialog should be up.
         const dialogCount = await page.evaluate(() => {

@@ -1,0 +1,5 @@
+# Screenshot model: specs capture via stableShot() → page.screenshot into test-results/, which is
+# transient and gitignored at the repo root (/tests/test-results/). The committed baselines live in
+# tests/baseline-screenshots/ (+ 3d-regression/, gal-regression/), authored from CI's deterministic
+# Linux render and diffed OFFLINE by tools/screenshots. There are no Playwright-native
+# *-snapshots/ baselines — Playwright does no inline screenshot comparison.

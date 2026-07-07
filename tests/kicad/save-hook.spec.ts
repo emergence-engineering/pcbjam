@@ -80,7 +80,9 @@ async function bootOpen(page: Page, cfg: ToolCfg): Promise<string> {
     },
     { content: cfg.fixture, abs },
   );
-  await page.waitForTimeout(2000); // let the async OpenProjectFiles settle
+  // Wait for the async OpenProjectFiles to complete: the editor title switches to
+  // the opened file (deterministic, replaces a fixed "let it settle" sleep).
+  await expect.poll(() => page.title(), { timeout: BOOT_TIMEOUT, intervals: [300] }).toMatch(new RegExp(NAME, "i"));
   return abs;
 }
 
@@ -88,8 +90,11 @@ async function bootOpen(page: Page, cfg: ToolCfg): Promise<string> {
  *  the wx canvas hosts the whole app UI). */
 async function focusCanvas(page: Page): Promise<void> {
   const box = await page.locator("#canvas").boundingBox();
-  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(300);
+  expect(box, "#canvas has a bounding box").not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  // Small settle so the focus click is processed before the Ctrl+S accelerator —
+  // no JS-observable "canvas focused" signal to poll (documented interaction wait).
+  await page.waitForTimeout(300); // eslint-disable-line -- see comment above
 }
 
 async function expectSaveHookFires(page: Page, cfg: ToolCfg): Promise<void> {
@@ -121,7 +126,9 @@ async function expectSaveHookFires(page: Page, cfg: ToolCfg): Promise<void> {
     ({ fn, args }) => (window as unknown as HookWindow).Module[fn](...args),
     cfg.modify,
   );
-  await page.waitForTimeout(500);
+  // Let the local edit mark the document modified (enables Save) before Ctrl+S —
+  // no JS-observable dirty-state signal to poll (documented interaction wait).
+  await page.waitForTimeout(500); // eslint-disable-line -- see comment above
   await focusCanvas(page);
   await page.keyboard.press("Control+s");
 

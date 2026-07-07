@@ -82,7 +82,7 @@ test.describe('3D viewer camera-move deadlock', () => {
         expect(winId, 'the 3D viewer should open a new top-level window').toBeTruthy();
 
         // Let the INITIAL render settle through the safe per-frame pump (Workers boot here).
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(5000);  // eslint-disable-line -- skipped known-issue spec (never runs)
         await logThreeDDiag(page, 'deadlock: after open+settle');
 
         // Read the newest glcanvas-* (the 3D viewer) client rect in viewport coords.
@@ -165,7 +165,7 @@ test.describe('3D viewer camera-move deadlock', () => {
             let prev = '';
             const start = Date.now();
             while (Date.now() - start < maxMs) {
-                await page.waitForTimeout(1500);
+                await page.waitForTimeout(1500);  // eslint-disable-line -- skipped known-issue spec (never runs)
                 const s = (await sampleCanvas()).sig;
                 if (s === prev) return;
                 prev = s;
@@ -198,7 +198,7 @@ test.describe('3D viewer camera-move deadlock', () => {
         // from already-freed arena pages, so HEAPU8.length stays flat.)
         let raytracerEngaged = false;
         for (let i = 0; i < 20 && !raytracerEngaged; i++) {
-            await page.waitForTimeout(1000);
+            await page.waitForTimeout(1000);  // eslint-disable-line -- skipped known-issue spec (never runs)
             raytracerEngaged = (await sampleCanvas()).sig !== sigOnGl;
         }
         expect(raytracerEngaged,

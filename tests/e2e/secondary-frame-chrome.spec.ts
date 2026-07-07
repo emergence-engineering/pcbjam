@@ -1,5 +1,5 @@
-import { test, expect, waitForApp } from './utils/fixtures';
-import { clickByLabel, waitForRegistry } from './utils/element-tracker';
+import { test, expect } from './utils/fixtures';
+import { clickByLabel, waitForWxApp } from './utils/element-tracker';
 
 /**
  * Validates the real-DOM title bar for secondary (non-main) wxFrames in the WASM
@@ -22,8 +22,7 @@ const URL = '/standalone/secondary-frame-chrome/secondary-frame-chrome_test.html
 test.describe('secondary-frame DOM title bar (drag / close)', () => {
     test('frames and dialogs get a draggable, closable DOM title bar', async ({ page }) => {
         await page.goto(URL);
-        await waitForApp(page);
-        await waitForRegistry(page);
+        await waitForWxApp(page);
 
         const listWindows = () =>
             page.evaluate(() =>
@@ -46,7 +45,7 @@ test.describe('secondary-frame DOM title bar (drag / close)', () => {
             const after = await listWindows();
             const id = after.find((w) => !before.includes(w));
             expect(id, `${buttonLabel} should open a new window`).toBeTruthy();
-            await page.waitForTimeout(200);
+            await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell (new-window DOM population settle; no event/registry observable)
             return id as string;
         }
 
@@ -54,22 +53,22 @@ test.describe('secondary-frame DOM title bar (drag / close)', () => {
         async function dragViaTitlebar(winId: string): Promise<boolean> {
             const bar = page.locator(`#${winId} .window-titlebar`);
             const box = await bar.boundingBox();
-            if (!box) return false;
+            expect(box, `#${winId} .window-titlebar should have a bounding box`).not.toBeNull();
             const before = await styleRect(winId);
-            const sx = box.x + box.width / 2;
-            const sy = box.y + box.height / 2;
+            const sx = box!.x + box!.width / 2;
+            const sy = box!.y + box!.height / 2;
             await page.mouse.move(sx, sy);
             await page.mouse.down();
             await page.mouse.move(sx, sy + 90, { steps: 10 });
             await page.mouse.up();
-            await page.waitForTimeout(250);
+            await page.waitForTimeout(250); // eslint-disable-line -- documented interaction dwell (title-bar drag commit; no event/registry observable)
             const after = await styleRect(winId);
             return !!before && !!after && (Math.abs(after.top - before.top) > 5 || Math.abs(after.left - before.left) > 5);
         }
 
         async function closeViaTitlebar(winId: string): Promise<boolean> {
             await page.locator(`#${winId} .window-titlebar-close`).click();
-            await page.waitForTimeout(400);
+            await page.waitForTimeout(400); // eslint-disable-line -- documented interaction dwell (× close / modal EndModal commit; no event/registry observable)
             return page.evaluate((wid) => {
                 const el = document.getElementById(wid);
                 return !el || getComputedStyle(el).display === 'none';
@@ -80,15 +79,15 @@ test.describe('secondary-frame DOM title bar (drag / close)', () => {
         async function resizeViaCorner(winId: string): Promise<boolean> {
             const handle = page.locator(`#${winId} .window-resize-se`);
             const box = await handle.boundingBox();
-            if (!box) return false;
+            expect(box, `#${winId} .window-resize-se should have a bounding box`).not.toBeNull();
             const before = await styleRect(winId);
-            const sx = box.x + box.width / 2;
-            const sy = box.y + box.height / 2;
+            const sx = box!.x + box!.width / 2;
+            const sy = box!.y + box!.height / 2;
             await page.mouse.move(sx, sy);
             await page.mouse.down();
             await page.mouse.move(sx + 60, sy + 60, { steps: 10 });
             await page.mouse.up();
-            await page.waitForTimeout(250);
+            await page.waitForTimeout(250); // eslint-disable-line -- documented interaction dwell (se-corner resize drag commit; no event/registry observable)
             const after = await styleRect(winId);
             return !!before && !!after
                 && (after.width - before.width > 20) && (after.height - before.height > 20);

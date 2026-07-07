@@ -223,8 +223,12 @@ test.describe('3D viewer from pcbnew', () => {
             Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id));
         const glBefore = await countGlCanvases(page);
         await openThreeDViewer(page, glBefore);
-        await page.waitForTimeout(1500);
 
+        // Wait for the new top-level window div to appear (replaces a fixed 1500ms).
+        await expect.poll(async () => page.evaluate((before: string[]) => {
+            const all = Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id);
+            return all.find((id) => !before.includes(id)) ?? null;
+        }, winsBefore), { timeout: 60000, intervals: [300] }).not.toBeNull();
         const winId = await page.evaluate((before: string[]) => {
             const all = Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id);
             return all.find((id) => !before.includes(id)) ?? all[all.length - 1] ?? null;
@@ -261,13 +265,16 @@ test.describe('3D viewer from pcbnew', () => {
         await page.mouse.down();
         await page.mouse.move(cx, cy + 80, { steps: 10 });
         await page.mouse.up();
-        await page.waitForTimeout(300);
+        // Let the frame-move op (wx_window_move → wxWindow::Move) fully settle before the
+        // next interaction: the DOM style.top updates before the wx-side op completes, so
+        // polling the outcome races the following close click (documented interaction dwell).
+        await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell
         const afterTop = await styleTop(winId as string);
         expect(afterTop, 'dragging the title bar should move the 3D viewer frame').not.toBe(beforeTop);
 
         // Close via the × (wx_window_close → wx Close() → OnCloseWindow).
         await page.locator(`#${winId} .window-titlebar-close`).click();
-        await page.waitForTimeout(600);
+        await page.waitForTimeout(600); // eslint-disable-line -- documented interaction dwell
         const gone = await page.evaluate((wid) => {
             const el = document.getElementById(wid);
             return !el || getComputedStyle(el).display === 'none';
@@ -298,8 +305,12 @@ test.describe('3D viewer from pcbnew', () => {
             Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id));
         const glBefore = await countGlCanvases(page);
         await openThreeDViewer(page, glBefore);
-        await page.waitForTimeout(1500);
 
+        // Wait for the new top-level window div to appear (replaces a fixed 1500ms).
+        await expect.poll(async () => page.evaluate((before: string[]) => {
+            const all = Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id);
+            return all.find((id) => !before.includes(id)) ?? null;
+        }, winsBefore), { timeout: 60000, intervals: [300] }).not.toBeNull();
         const winId = await page.evaluate((before: string[]) => {
             const all = Array.from(document.querySelectorAll('#window-container [id^="window-"]')).map((e) => e.id);
             return all.find((id) => !before.includes(id)) ?? all[all.length - 1] ?? null;
@@ -338,7 +349,9 @@ test.describe('3D viewer from pcbnew', () => {
         await page.mouse.down();
         await page.mouse.move(sx - 220, sy, { steps: 12 });
         await page.mouse.up();
-        await page.waitForTimeout(500);
+        // Let the resize op (wx_window_resize → SetSize → relayout + GL canvas resize)
+        // settle before reading widths (documented interaction dwell).
+        await page.waitForTimeout(500); // eslint-disable-line -- documented interaction dwell
 
         const afterFrame = await frameWidth(winId as string);
         const afterGl = await glWidth();

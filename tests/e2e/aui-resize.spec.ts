@@ -10,13 +10,18 @@
 //
 // These are RED before the wasm-layer fix and GREEN after it. See
 // features/kicad-resize-panel / docs and the plan for the fix details.
+//
+// Determinism: readiness via waitForWxApp (loud). The hover-cursor and the
+// live-resize width are real observables, so we poll them (same conditions the
+// assertions check) instead of sleeping. The remaining waits are genuine
+// interaction dwells around mouse press/drag-commit with no positive observable,
+// kept and documented. Static hover / mid-drag states use stableShot; the
+// two stipple frames feed a functional pixel-diff so they stay Buffer-only.
 
-import { test, expect, tryLoadApp, MAIN_CANVAS } from './utils/fixtures';
+import { test, expect, waitForWxApp, MAIN_CANVAS } from './utils/fixtures';
 import {
-  waitForRegistry,
   findRenderedByType,
-  findAuiPaneContent,
-} from './utils/element-tracker';
+  findAuiPaneContent, stableShot } from './utils/element-tracker';
 import type { Page } from '@playwright/test';
 
 const APP = '/standalone/aui/aui_test.html';
@@ -154,10 +159,7 @@ async function leftPaneTrailRegion(
 
 async function load(page: Page): Promise<void> {
   await page.goto(APP);
-  expect(await tryLoadApp(page), 'AUI app should load').toBe(true);
-  expect(await waitForRegistry(page), 'element registry should init').toBe(true);
-  // Let canvas-island geometry settle before reading positions.
-  await page.waitForTimeout(400);
+  await waitForWxApp(page);
 }
 
 test.describe('wxAuiManager dock-sash resize UX (pcbjam#20)', () => {
@@ -168,21 +170,25 @@ test.describe('wxAuiManager dock-sash resize UX (pcbjam#20)', () => {
 
     // Move OFF the sash first (into the Properties pane) and confirm no resize cursor.
     const props = await findAuiPaneContent(page, 'Properties');
-    if (props) {
-      await page.mouse.move(props.centerX, props.centerY);
-      await page.waitForTimeout(120);
-      const offCursor = await readCursorAt(page, props.centerX, props.centerY);
-      console.log(`[aui-resize] cursor off-sash = ${offCursor}`);
-      expect(RESIZE_CURSORS, 'cursor should NOT be a resize cursor inside the pane').not.toContain(offCursor);
-    }
+    expect(props, 'Properties pane content should be present to test off-sash cursor').not.toBeNull();
+    await page.mouse.move(props!.centerX, props!.centerY);
+    await page.waitForTimeout(120); // eslint-disable-line -- documented interaction dwell: let the cursor settle after moving into the pane before reading it (negative assertion, no positive observable to poll)
+    const offCursor = await readCursorAt(page, props!.centerX, props!.centerY);
+    console.log(`[aui-resize] cursor off-sash = ${offCursor}`);
+    expect(RESIZE_CURSORS, 'cursor should NOT be a resize cursor inside the pane').not.toContain(offCursor);
 
-    // Hover the sash → resize cursor.
+    // Hover the sash → resize cursor. Poll the live CSS cursor until it becomes a
+    // resize cursor (same observable the assertion below checks), replacing the sleep.
     await page.mouse.move(sash.x, sash.y);
-    await page.waitForTimeout(150);
+    await expect
+      .poll(async () => RESIZE_CURSORS.includes(await readCursorAt(page, sash.x, sash.y)), {
+        message: 'expected a resize cursor over the sash',
+      })
+      .toBe(true);
     const cursor = await readCursorAt(page, sash.x, sash.y);
     console.log(`[aui-resize] cursor on-sash = ${cursor}`);
 
-    await page.screenshot({ path: 'test-results/aui-resize-01-hover.png' });
+    await stableShot(page, 'aui-resize-01-hover.png');
     expect(RESIZE_CURSORS, `expected a resize cursor over the sash, got "${cursor}"`).toContain(cursor);
   });
 
@@ -197,17 +203,23 @@ test.describe('wxAuiManager dock-sash resize UX (pcbjam#20)', () => {
     expect(before, 'Properties pane width should be readable').not.toBeNull();
 
     await page.mouse.move(sash.x, sash.y);
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(100); // eslint-disable-line -- documented interaction dwell: settle the hover before pressing the sash
     await page.mouse.down();
     // Widen the pane (move right) without releasing — avoids the MinSize clamp.
     await page.mouse.move(sash.x + 80, sash.y, { steps: 8 });
-    await page.waitForTimeout(150);
+    // LIVE preview is deterministic: poll the pane width until it has changed
+    // mid-drag (same observable the assertion below checks), replacing the sleep.
+    await expect
+      .poll(async () => Math.abs(((await widthOf()) ?? 0) - (before ?? 0)), {
+        message: 'pane should resize live during drag',
+      })
+      .toBeGreaterThan(20);
 
     const midDrag = await widthOf(); // read while button STILL held
-    await page.screenshot({ path: 'test-results/aui-resize-02-mid-drag-live.png' });
+    await stableShot(page, 'aui-resize-02-mid-drag-live.png');
 
     await page.mouse.up();
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(250); // eslint-disable-line -- documented interaction dwell: let the drag-release commit before reading the final width (no positive observable — the good path leaves the width unchanged)
     const after = await widthOf();
 
     console.log(`[aui-resize] width before=${before} mid=${midDrag} after=${after}`);
@@ -224,17 +236,17 @@ test.describe('wxAuiManager dock-sash resize UX (pcbjam#20)', () => {
     const region = await leftPaneTrailRegion(page, sash.x);
 
     await page.mouse.move(sash.x, sash.y);
-    await page.waitForTimeout(100);
+    await page.waitForTimeout(100); // eslint-disable-line -- documented interaction dwell: settle the hover before pressing the sash
     await page.mouse.down();
     // Drag NARROWER (the user's specific complaint) in steps; capture an
     // intermediate frame while the button is still held.
     await page.mouse.move(sash.x - 90, sash.y, { steps: 10 });
-    await page.waitForTimeout(70);
-    const midShot = await page.screenshot({ path: 'test-results/aui-resize-03-mid-drag.png', scale: 'css' });
+    await page.waitForTimeout(70); // eslint-disable-line -- documented interaction dwell: let the mid-drag frame paint before capturing it for the pixel-diff
+    const midShot = await page.screenshot({ scale: 'css' });
 
     await page.mouse.up();
-    await page.waitForTimeout(200);
-    const afterShot = await page.screenshot({ path: 'test-results/aui-resize-04-after.png', scale: 'css' });
+    await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell: let the release settle before capturing the after frame for the pixel-diff
+    const afterShot = await page.screenshot({ scale: 'css' });
 
     const midFrac = await stippleFraction(page, midShot, region);
     const afterFrac = await stippleFraction(page, afterShot, region);

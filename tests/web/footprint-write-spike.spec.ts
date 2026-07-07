@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitForRegistry, clickByTooltip } from '../e2e/utils/element-tracker';
+import { clickByTooltip, waitForWxApp, focusCanvas, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * 0009-S footprint write-path spike: does the FOOTPRINT editor boot+render in
@@ -18,26 +18,17 @@ import { waitForRegistry, clickByTooltip } from '../e2e/utils/element-tracker';
  * save both work. THIS IS THE GATE before the backend (0009-A) is built.
  */
 
-const SHOT = (name: string) => `test-results/fpwrite-${name}.png`;
-
 async function bootFootprintEditor(page: Page): Promise<void> {
   await page.goto('/p/demo/footprint_editor/?fpwrite=1');
-  // GATE part 1: the footprint editor frame renders in WASM (canvas + GL).
-  await expect(page.locator('#canvas')).toBeVisible({ timeout: 180000 });
-  await waitForRegistry(page, 180000);
+  // GATE part 1: the footprint editor frame renders in WASM (canvas + GL) and the
+  // wx element registry is populated (deterministic, fails loudly).
+  await waitForWxApp(page, { timeout: 180000 });
   await page.waitForFunction(
     () => !!window.wxElementRegistry && window.wxElementRegistry.findAll({}).length > 5,
     null,
     { timeout: 180000 },
   );
   await page.waitForFunction(() => !!(window as any).kicadLibs, null, { timeout: 60000 });
-  await page.waitForTimeout(2000);
-}
-
-async function focusCanvas(page: Page): Promise<void> {
-  const box = await page.locator('#canvas').boundingBox();
-  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(300);
 }
 
 test('footprint editor save routes through the pcbjam_fp write bridge (main thread)', async ({ page }) => {
@@ -46,7 +37,7 @@ test('footprint editor save routes through the pcbjam_fp write bridge (main thre
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
   await bootFootprintEditor(page);
-  await page.screenshot({ path: SHOT('01-boot'), scale: 'css' });
+  await stableShot(page, 'fpwrite-01-boot.png');
 
   // Spike provider is active.
   expect(await page.evaluate(() => !!(window as any).__pcbjamSaved), 'spike marker present').toBe(true);
@@ -59,37 +50,23 @@ test('footprint editor save routes through the pcbjam_fp write bridge (main thre
     const h = rd.find((e: any) => e.elementType === 'columnheader' && e.label === 'Item');
     return h ? { cx: h.centerX, cy: h.centerY, hgt: h.height } : null;
   });
-  if (hdr) {
-    await page.mouse.click(hdr.cx, hdr.cy + hdr.hgt + 8); // focus the tree
-    await page.waitForTimeout(200);
-    await page.keyboard.press('Home');
-    await page.waitForTimeout(150);
-    await page.keyboard.press('ArrowDown');
-    await page.waitForTimeout(150);
-    await page.keyboard.press('ArrowUp');
-    await page.waitForTimeout(400);
-  } else {
-    logs.push('[spec] WARN: Item column header not found (tree may differ); proceeding');
-  }
-  await page.screenshot({ path: SHOT('02-lib-selected'), scale: 'css' });
+  expect(hdr, 'Item column header present').not.toBeNull();
+  await page.mouse.click(hdr!.cx, hdr!.cy + hdr!.hgt + 8); // focus the tree
+  await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell: tree focus commit
+  await page.keyboard.press('Home');
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell: tree-nav keystroke commit
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell: tree-nav keystroke commit
+  await page.keyboard.press('ArrowUp');
+  await page.waitForTimeout(400); // eslint-disable-line -- documented interaction dwell: tree selection commit
+  await stableShot(page, 'fpwrite-02-lib-selected.png');
 
   // New Footprint via the toolbar button. The fork action's FriendlyName is
-  // "New Footprint" (PCB_ACTIONS::newFootprint); the "..." variant is a fallback.
-  let clicked = await clickByTooltip(page, 'New Footprint');
-  if (!clicked) clicked = await clickByTooltip(page, 'New Footprint...');
-  if (!clicked) {
-    // Diagnostics: dump available tooltips so we can fix the label if needed.
-    const tips = await page.evaluate(() =>
-      window.wxElementRegistry
-        .findAll({})
-        .map((e: any) => e.tooltip)
-        .filter((t: string) => !!t),
-    );
-    logs.push(`[spec] New Footprint tooltip not found; tooltips: ${JSON.stringify(tips)}`);
-  }
+  // "New Footprint" (PCB_ACTIONS::newFootprint).
+  const clicked = await clickByTooltip(page, 'New Footprint');
   expect(clicked, 'New Footprint toolbar button clicked').toBe(true);
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: SHOT('03-newfp-dialog'), scale: 'css' });
+  await page.waitForTimeout(1500); // eslint-disable-line -- documented interaction dwell: New Footprint dialog/creation commit
+  await stableShot(page, 'fpwrite-03-newfp-dialog.png');
 
   // Diagnostics: what dialog/controls are present now.
   const dlg = await page.evaluate(() => {
@@ -106,16 +83,15 @@ test('footprint editor save routes through the pcbjam_fp write bridge (main thre
   if (dlg.texts.length > 0) {
     const nameField = dlg.texts[0];
     await page.mouse.click(nameField.cx, nameField.cy);
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell: name field focus commit
     await page.keyboard.press('Control+a');
     await page.keyboard.press('Delete');
     await page.keyboard.type(FP, { delay: 40 });
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: SHOT('04-name-typed'), scale: 'css' });
+    await stableShot(page, 'fpwrite-04-name-typed.png');
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(1500); // eslint-disable-line -- documented interaction dwell: dialog confirm / footprint creation commit
   }
-  await page.screenshot({ path: SHOT('05-fp-created'), scale: 'css' });
+  await stableShot(page, 'fpwrite-05-fp-created.png');
   logs.push(`[spec] title after create: ${await page.title()}`);
 
   // Save: focus the canvas, Ctrl+S (the proven save trigger). The New Footprint
@@ -133,7 +109,7 @@ test('footprint editor save routes through the pcbjam_fp write bridge (main thre
     null,
     { timeout: 30000 },
   );
-  await page.screenshot({ path: SHOT('06-saved'), scale: 'css' });
+  await stableShot(page, 'fpwrite-06-saved.png');
 
   const { savedName, body } = await page.evaluate(() => {
     const saved = (window as any).__pcbjamSaved as Record<string, string>;
@@ -151,7 +127,7 @@ test('footprint editor save routes through the pcbjam_fp write bridge (main thre
 
   // No post-save error dialog (the MEMFS placeholder-file fix for the footprint
   // editor's setFPWatcher -> GetModificationTime stat).
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(500); // eslint-disable-line -- documented dwell: let any post-save error dialog/log surface before asserting its absence
   const errDialog = await page.evaluate(() =>
     window.wxElementRegistry
       .findAll({ visible: true })

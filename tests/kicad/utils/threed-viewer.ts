@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect } from '@playwright/test';
-import { clickMenuBarItem, clickMenuItem } from '../../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItemByText, waitUntil } from '../../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './fs-inject';
 import { waitForBoardLoaded } from './board-ready';
 
@@ -28,15 +28,18 @@ export async function loadBoard(
         `${PROJECT_DIR_MEMFS}/${proFilename}`);
 
     expect(await clickMenuBarItem(page, 'File'), 'File menu should be findable').toBe(true);
-    await page.waitForTimeout(400);
-    expect(await clickMenuItem(page, 'Open...'), 'Open… menu item should be findable').toBe(true);
+    await clickMenuItemByText(page, 'Open');
 
     await page.waitForFunction(() => {
         const registry = window.wxElementRegistry;
         return !!registry && registry.findAll({ visible: true })
             .some((el) => el.typeName === 'wxFileDialog');
     }, null, { timeout: 15000 });
-    await page.waitForTimeout(1000);
+    // Wait for the filename text input to paint (replaces a fixed 1000ms).
+    await waitUntil(page, () => {
+        const r = window.wxElementRegistry;
+        return !!r && r.findAll({ visible: true }).some((el) => el.typeName === 'wxTextCtrl' && el.name === 'text');
+    }, 'file dialog filename input');
 
     const filenameInput = await page.evaluate(() => {
         const registry = window.wxElementRegistry;
@@ -49,11 +52,11 @@ export async function loadBoard(
     if (!filenameInput) throw new Error('filename text input not found');
 
     await page.mouse.click(filenameInput.x, filenameInput.y);
-    await page.waitForTimeout(200);
+    // Documented interaction dwells: focus + typed-text registration have no observable signal.
+    await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell
     await page.keyboard.type(pcbFilename);
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
 
     const result = await waitForBoardLoaded(page, testLogger, 60000);
     console.log(`[TEST] ${DEMO.name} board-ready result: ${result}`);
@@ -99,17 +102,11 @@ export async function logThreeDDiag(page: Page, label: string): Promise<void> {
 // itself a wxGLCanvas, so the viewer is detected by the GL-canvas COUNT increasing.
 // Returns the glcanvas count after opening. `glBefore` is the count beforehand.
 export async function openThreeDViewer(page: Page, glBefore: number): Promise<number> {
-    let opened = false;
-    if (await clickMenuBarItem(page, 'View')) {
-        await page.waitForTimeout(400);
-        opened = await clickMenuItem(page, '3D Viewer');
-    }
-    if (!opened) {
-        console.log('[TEST] View → 3D Viewer not found via menu; trying Alt+3');
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(200);
-        await page.keyboard.press('Alt+3');
-    }
+    // Open View → 3D Viewer deterministically (clickMenuItemByText waits for the item to
+    // render, then clicks — no fixed post-menu sleep and no Alt+3 fallback that could mask
+    // a real menu regression).
+    expect(await clickMenuBarItem(page, 'View'), 'View menu should be findable').toBe(true);
+    await clickMenuItemByText(page, '3D Viewer');
 
     // 180s (not 60s): opening the viewer kicks the scene build + first render. On CI
     // (headless SwiftShader software WebGL, 30 contended vCPUs) the raytracer-era run

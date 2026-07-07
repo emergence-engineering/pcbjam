@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clickMenuBarItem, clickMenuItem } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItemByText, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * Tool-switch e2e: eeschema Tools → "Switch to PCB Editor" (and the reverse)
@@ -38,9 +38,7 @@ async function switchTool(
   expectedTitle: RegExp
 ): Promise<void> {
   expect(await clickMenuBarItem(page, 'Tools'), 'Tools menubar item clickable').toBe(true);
-  await page.waitForTimeout(400); // popup render settle, same as tests/kicad specs
-
-  expect(await clickMenuItem(page, menuLabel), `"${menuLabel}" menu item clickable`).toBe(true);
+  await clickMenuItemByText(page, menuLabel);
 
   await page.waitForURL(expectedUrl, { timeout: 30000 });
   await waitForToolReady(page, expectedTitle);
@@ -60,10 +58,7 @@ test.describe('web app — tool switching', () => {
       /demo — PCB Editor/i
     );
 
-    await page.screenshot({
-      path: 'test-results/web-switch-sch-to-pcb.png',
-      scale: 'css',
-    });
+    await stableShot(page, 'web-switch-sch-to-pcb.png');
   });
 
   test('pcbnew → Switch to Schematic Editor navigates to eeschema', async ({ page }) => {
@@ -79,9 +74,6 @@ test.describe('web app — tool switching', () => {
       /demo — Schematic Editor/i
     );
 
-    await page.screenshot({
-      path: 'test-results/web-switch-pcb-to-sch.png',
-      scale: 'css',
-    });
+    await stableShot(page, 'web-switch-pcb-to-sch.png');
   });
 });

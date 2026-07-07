@@ -6,8 +6,8 @@
 // KiCad's APPEARANCE_CONTROLS. Without the fix that collapses the scrolled
 // viewport and clip-paths the rows away after a tab round-trip; with it,
 // OnDomEvent re-asserts the geometry so the rows stay painted.
-import { test, expect, tryLoadApp } from './utils/fixtures';
-import { clickTab } from './utils/element-tracker';
+import { test, expect } from './utils/fixtures';
+import { clickTab, waitForWxApp, stableShot } from './utils/element-tracker';
 import type { Page } from '@playwright/test';
 
 declare global {
@@ -51,15 +51,13 @@ async function rowsVisible(page: Page, labels: string[]): Promise<Record<string,
 test.describe('DOM-port wxNotebook page relayout', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/standalone/notebook/notebook_test.html');
-    expect(await tryLoadApp(page, 30000), 'notebook app should load').toBe(true);
-    await page.waitForTimeout(500);
+    await waitForWxApp(page);
   });
 
   test('scrolled page rows survive a tab round-trip', async ({ page, testLogger }) => {
     // First visit to the scrolled page: rows must be painted.
     expect(await clickTab(page, 'Scrolled'), 'switch to Scrolled').toBe(true);
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: 'test-results/notebook-01-scrolled.png', fullPage: true });
+    await stableShot(page, 'notebook-01-scrolled.png', { fullPage: true });
 
     let vis = await rowsVisible(page, ['Row 0', 'Row 1']);
     expect(vis['Row 0'], 'Row 0 visible on first visit').toBe(true);
@@ -67,10 +65,9 @@ test.describe('DOM-port wxNotebook page relayout', () => {
     // Round-trip: away to Plain, then back to Scrolled. The PAGE_CHANGED Fit()
     // collapses the scrolled child; WasmRelayoutSelectedPage must restore it.
     expect(await clickTab(page, 'Plain'), 'switch to Plain').toBe(true);
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell: let the Plain PAGE_CHANGED relayout commit before switching back
     expect(await clickTab(page, 'Scrolled'), 'switch back to Scrolled').toBe(true);
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: 'test-results/notebook-02-scrolled-again.png', fullPage: true });
+    await stableShot(page, 'notebook-02-scrolled-again.png', { fullPage: true });
 
     vis = await rowsVisible(page, ['Row 0', 'Row 1']);
     expect(vis['Row 0'], 'Row 0 visible after tab round-trip').toBe(true);

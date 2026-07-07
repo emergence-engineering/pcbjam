@@ -24,7 +24,7 @@ test.describe('pcbnew perf', () => {
 
         const openMs = await measureOpenRender(page, DEMO, 'board', testLogger);
         console.log(`[perf] pcbnew open+render = ${openMs} ms`);
-        await page.keyboard.press('Escape').catch(() => {});
+        await page.keyboard.press('Escape').catch(() => {});  // eslint-disable-line -- best-effort Escape (may not apply in all states)
 
         const cdp = await page.context().newCDPSession(page);
         const fps: { throttle: number; fps: number }[] = [];

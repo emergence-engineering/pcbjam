@@ -120,10 +120,42 @@
       }
     };
 
+    // Land the user in a sane, writable directory instead of MEMFS root.
+    var setupHomeDir = function() {
+      var home = '/home/kicad';
+      FS.mkdirTree(home);
+      FS.chdir(home);
+      console.log('[KICAD] cwd set to ' + home);
+    };
+
+    // single_top.cpp runs STARTWIZARD on launch: a modal first-run "Setup"
+    // wizard shown whenever the settings dir lacks a kicad_common.json or valid
+    // global library tables. In this ephemeral MEMFS that is EVERY load. Seed a
+    // minimal default config before main() so every provider reports
+    // NeedsUserInput()==false and the wizard never opens — same as eeschema.html
+    // and pl_editor.html.
+    var seedKicadConfig = function() {
+      var cfgDir = '/home/kicad/.config/kicad/kicad/9.99';
+      FS.mkdirTree(cfgDir);
+
+      var writeIfAbsent = function(path, contents) {
+        try { FS.stat(path); return; } catch (e) { /* absent — seed it */ }
+        FS.writeFile(path, contents);
+        console.log('[KICAD] Seeded ' + path);
+      };
+
+      writeIfAbsent(cfgDir + '/kicad_common.json', JSON.stringify({
+        do_not_show_again: { update_check_prompt: true, data_collection_prompt: true }
+      }, null, 2));
+      writeIfAbsent(cfgDir + '/sym-lib-table', '(sym_lib_table\n  (version 7)\n)\n');
+      writeIfAbsent(cfgDir + '/fp-lib-table', '(fp_lib_table\n  (version 7)\n)\n');
+      writeIfAbsent(cfgDir + '/design-block-lib-table', '(design_block_lib_table\n  (version 7)\n)\n');
+    };
+
     var Module = {
       thisProgram: '/usr/bin/pcb_calculator',  // argv[0]
 
-      preRun: [createCanvas, writeResources],
+      preRun: [createCanvas, writeResources, setupHomeDir, seedKicadConfig],
       postRun: [],
 
       print: function(text) {

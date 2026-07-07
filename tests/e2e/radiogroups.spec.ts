@@ -5,7 +5,8 @@
 // collapsing all radio groups in a window into one. The harness lays out three
 // independent groups, each pre-selecting a different column, so a correct build
 // keeps three distinct group `name`s with exactly one checked radio per group.
-import { test, expect, tryLoadApp } from './utils/fixtures';
+import { test, expect, waitForWxApp } from './utils/fixtures';
+import { stableShot } from './utils/element-tracker';
 
 const URL = '/standalone/radiogroups/radiogroups_test.html';
 
@@ -34,15 +35,14 @@ async function readGroups(page: import('@playwright/test').Page) {
 test.describe('wxRadioButton groups', () => {
   test('radio groups app loads without errors', async ({ page, testLogger }) => {
     await page.goto(URL);
-    const loaded = await tryLoadApp(page);
-    await page.screenshot({ path: 'test-results/radiogroups-01-loaded.png', fullPage: true });
-    expect(loaded, 'radio groups app should load').toBe(true);
+    await waitForWxApp(page);
+    await stableShot(page, 'radiogroups-01-loaded.png', { fullPage: true });
     expect(testLogger.errors.filter(e => !e.includes('favicon'))).toHaveLength(0);
   });
 
   test('selecting in one group does not disturb the others', async ({ page }) => {
     await page.goto(URL);
-    expect(await tryLoadApp(page), 'app should load').toBe(true);
+    await waitForWxApp(page);
 
     // 3 groups x 4 columns = 12 radios.
     await page.waitForFunction(
@@ -64,10 +64,18 @@ test.describe('wxRadioButton groups', () => {
     await radios.nth(1).click();  // Group A, Ctrl
     await radios.nth(6).click();  // Group B, Shift
     await radios.nth(11).click(); // Group C, Alt
-    await page.waitForTimeout(100);
+
+    // Deterministically wait for the three clicks to settle into their groups
+    // (replaces a blind 100ms dwell; the checked-radio set is the observable).
+    await expect
+      .poll(
+        async () => (await readGroups(page)).details.filter(d => d.checked).map(d => d.i),
+        { message: 'each click should register independently in its own group' }
+      )
+      .toEqual([1, 6, 11]);
 
     const after = await readGroups(page);
-    await page.screenshot({ path: 'test-results/radiogroups-02-selections.png', fullPage: true });
+    await stableShot(page, 'radiogroups-02-selections.png', { fullPage: true });
 
     // Each group keeps exactly its own selection. Pre-fix, the three clicks land
     // in one merged group so only the last survives => totalChecked === 1.

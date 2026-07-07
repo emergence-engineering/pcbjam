@@ -5,7 +5,7 @@
 // written to test-results/appearance-*.png for visual review.
 
 import { test, expect, Page } from '@playwright/test';
-import { clickByLabel } from '../e2e/utils/element-tracker';
+import { waitForEditorReady, stableShot } from '../e2e/utils/element-tracker';
 
 declare global {
     interface Window {
@@ -13,26 +13,6 @@ declare global {
         wxDomPort?: boolean;
         wxDomControls?: Map<number, HTMLElement>;
     }
-}
-
-async function completeWizard(page: Page): Promise<void> {
-    await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-    await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-    await page.waitForTimeout(2000);
-
-    for (let i = 1; i <= 10; i++) {
-        let clicked = await clickByLabel(page, 'Next >');
-
-        if (!clicked) {
-            await clickByLabel(page, 'Finish');
-            break;
-        }
-
-        await page.waitForTimeout(500);
-    }
-
-    // let the main frame settle
-    await page.waitForTimeout(4000);
 }
 
 type Tab = { label: string; subType: string; centerX: number; centerY: number };
@@ -63,8 +43,6 @@ async function selectTab(page: Page, label: string): Promise<void> {
         const after = await appearanceTabs(page);
         return after.find(t => t.label === label)?.subType;
     }, { timeout: 5000, intervals: [200] }).toBe('selected');
-
-    await page.waitForTimeout(400);
 }
 
 // DOM port only: viewport tops of row labels inside the appearance pane
@@ -124,23 +102,23 @@ test.describe('Appearance panel (Layers/Objects/Nets)', () => {
     });
 
     test('tabs switch through all three pages and back', async ({ page }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
 
         const tabs = await appearanceTabs(page);
         expect(tabs.map(t => t.label).sort()).toEqual(['Layers', 'Nets', 'Objects']);
         expect(tabs.find(t => t.label === 'Layers')?.subType).toBe('selected');
 
-        await page.screenshot({ path: 'test-results/appearance-00-layers.png' });
+        await stableShot(page, 'appearance-00-layers.png');
 
         await selectTab(page, 'Objects');
-        await page.screenshot({ path: 'test-results/appearance-01-objects.png' });
+        await stableShot(page, 'appearance-01-objects.png');
 
         await selectTab(page, 'Nets');
-        await page.screenshot({ path: 'test-results/appearance-02-nets.png' });
+        await stableShot(page, 'appearance-02-nets.png');
 
         // and back to the start
         await selectTab(page, 'Layers');
-        await page.screenshot({ path: 'test-results/appearance-03-layers-again.png' });
+        await stableShot(page, 'appearance-03-layers-again.png');
 
         // Layer rows must survive the tab round-trip (regression pcbjam#8:
         // pages came back blank after switching away and back — the rows stayed
@@ -152,7 +130,7 @@ test.describe('Appearance panel (Layers/Objects/Nets)', () => {
     });
 
     test('layer list scrolls with the wheel and clips at the pane', async ({ page }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
 
         const tabs = await appearanceTabs(page);
         const layersTab = tabs.find(t => t.label === 'Layers');
@@ -166,8 +144,9 @@ test.describe('Appearance panel (Layers/Objects/Nets)', () => {
         const before = await rowLabelTops(page, ['B.Cu', 'F.Mask']);
 
         await page.mouse.wheel(0, 240);
-        await page.waitForTimeout(800);
-        await page.screenshot({ path: 'test-results/appearance-10-layers-scrolled.png' });
+        // stableShot stabilizes the scroll render before comparing — after it
+        // returns the DOM row positions are final (replaces a fixed 800ms sleep).
+        await stableShot(page, 'appearance-10-layers-scrolled.png');
 
         const after = await rowLabelTops(page, ['B.Cu', 'F.Mask']);
         expect(after['B.Cu'], 'B.Cu moved up after wheel scroll')
@@ -177,8 +156,7 @@ test.describe('Appearance panel (Layers/Objects/Nets)', () => {
 
         // scroll back up restores the start of the list
         await page.mouse.wheel(0, -480);
-        await page.waitForTimeout(800);
-        await page.screenshot({ path: 'test-results/appearance-11-layers-scrolled-back.png' });
+        await stableShot(page, 'appearance-11-layers-scrolled-back.png');
 
         const restored = await rowLabelTops(page, ['B.Cu']);
         expect(restored['B.Cu'], 'B.Cu back at its original position')
@@ -186,7 +164,7 @@ test.describe('Appearance panel (Layers/Objects/Nets)', () => {
     });
 
     test('objects page scrolls with the wheel', async ({ page }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
 
         await selectTab(page, 'Objects');
 
@@ -198,9 +176,10 @@ test.describe('Appearance panel (Layers/Objects/Nets)', () => {
         const before = await rowLabelTops(page, ['Ratsnest']);
 
         await page.mouse.wheel(0, 240);
-        await page.waitForTimeout(800);
-        await page.screenshot({ path: 'test-results/appearance-20-objects-scrolled.png' });
+        await stableShot(page, 'appearance-20-objects-scrolled.png');
 
+        // Ratsnest may not be registered depending on board state; only assert its
+        // movement when it's present (optional-data guard, not a flow race).
         if (before['Ratsnest'] !== null) {
             const after = await rowLabelTops(page, ['Ratsnest']);
             expect(after['Ratsnest'], 'Ratsnest row moved after wheel scroll')

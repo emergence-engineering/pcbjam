@@ -1,5 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
-import { waitForRegistry, clickByTooltip } from '../e2e/utils/element-tracker';
+import { test, expect } from '@playwright/test';
+import { waitForWxApp, focusCanvas, clickByTooltip, stableShot } from '../e2e/utils/element-tracker';
 
 // Mirrors @pcbjam/shared USER_HEADER (tests/ doesn't depend on the shared pkg).
 const USER_HEADER = 'x-pcbjam-user';
@@ -17,13 +17,6 @@ const SCOPE = 'default';
  */
 
 const BACKEND = process.env.BACKEND_URL ?? 'http://localhost:3060';
-const SHOT = (n: string) => `test-results/symremote-${n}.png`;
-
-async function focusCanvas(page: Page): Promise<void> {
-  const box = await page.locator('#canvas').boundingBox();
-  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(300);
-}
 
 test('symbol editor save persists to the backend (remote write round-trip)', async ({ page }) => {
   // Unique owner per run so the test is isolated from prior runs.
@@ -33,16 +26,14 @@ test('symbol editor save persists to the backend (remote write round-trip)', asy
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
   await page.goto(`/default/projects/demo/-/symbol_editor?libowner=${owner}`);
-  await expect(page.locator('#canvas')).toBeVisible({ timeout: 150000 });
-  await waitForRegistry(page, 150000);
+  await waitForWxApp(page, { timeout: 150000 });
   await page.waitForFunction(
     () => !!window.wxElementRegistry && window.wxElementRegistry.findAll({}).length > 5,
     null,
     { timeout: 150000 },
   );
   await page.waitForFunction(() => !!(window as any).kicadLibs, null, { timeout: 60000 });
-  await page.waitForTimeout(2000);
-  await page.screenshot({ path: SHOT('01-boot'), scale: 'css' });
+  await stableShot(page, 'symremote-01-boot.png');
 
   // Boot's ensure-user-lib created "My Symbols" (slug my-symbols) for this owner.
   const ownerHeaders = { [USER_HEADER]: owner };
@@ -58,17 +49,16 @@ test('symbol editor save persists to the backend (remote write round-trip)', asy
   });
   expect(hdr, 'Item column header found').not.toBeNull();
   await page.mouse.click(hdr!.cx, hdr!.cy + hdr!.hgt + 8);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('Home');
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('ArrowDown');
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('ArrowUp');
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(400); // eslint-disable-line -- documented interaction dwell
 
   expect(await clickByTooltip(page, 'New Symbol...'), 'New Symbol clicked').toBe(true);
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: SHOT('02-newsym'), scale: 'css' });
+  await stableShot(page, 'symremote-02-newsym.png');
 
   // Name field (the one that isn't the lib filter ~y65/87), then confirm.
   const nameField = await page.evaluate(() => {
@@ -81,13 +71,12 @@ test('symbol editor save persists to the backend (remote write round-trip)', asy
   });
   expect(nameField, 'New Symbol name field present').toBeTruthy();
   await page.mouse.click(nameField!.cx, nameField!.cy);
-  await page.waitForTimeout(150);
+  await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
   await page.keyboard.press('Control+a');
   await page.keyboard.press('Delete');
   await page.keyboard.type('RemoteRes', { delay: 40 });
   await page.keyboard.press('Enter');
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: SHOT('03-created'), scale: 'css' });
+  await stableShot(page, 'symremote-03-created.png');
 
   // Save → PUT to the backend.
   await focusCanvas(page);
@@ -105,7 +94,7 @@ test('symbol editor save persists to the backend (remote write round-trip)', asy
       { timeout: 30000, intervals: [500] },
     )
     .toBeGreaterThan(0);
-  await page.screenshot({ path: SHOT('04-saved'), scale: 'css' });
+  await stableShot(page, 'symremote-04-saved.png');
 
   const saved = items[0];
   logs.push(`[spec] backend item: ${JSON.stringify(saved)}`);

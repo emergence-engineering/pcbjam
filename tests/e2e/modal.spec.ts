@@ -14,7 +14,8 @@
 //      `canvas.width/height` on every move, clearing the canvas to transparent;
 //      the `.window` div's `background-color:black` then showed through with no
 //      repaint queued. Fixed by only resizing the canvas on a real size change.
-import { test, expect, tryLoadApp, waitForRegistry, clickByLabel, findByType } from './utils/fixtures';
+import { test, expect, waitForWxApp, clickByLabel, findByType } from './utils/fixtures';
+import { stableShot } from './utils/element-tracker';
 
 const DIALOG_APP = '/standalone/dialog/dialog_test.html';
 
@@ -89,15 +90,13 @@ async function sampleModalCanvas(page: import('@playwright/test').Page) {
 test.describe('Modal dialog border + drag (pcbjam #22)', () => {
   test('modal has a visible border and shadow', async ({ page, testLogger }) => {
     await page.goto(DIALOG_APP);
-    expect(await tryLoadApp(page), 'App should load').toBe(true);
-    await waitForRegistry(page);
+    await waitForWxApp(page);
 
     await clickByLabel(page, 'Custom Dialog');
     const rect = await waitForModalRect(page);
     expect(rect, 'modal should be visible').not.toBeNull();
-    await page.waitForTimeout(400);
 
-    await page.screenshot({ path: 'test-results/modal-01-border.png', fullPage: true });
+    await stableShot(page, 'modal-01-border.png', { fullPage: true });
 
     const style = await page.evaluate((sel) => {
       const el = Array.from(document.querySelectorAll(sel)).find((w) => {
@@ -125,8 +124,7 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
 
   test('modal background stays painted (not black) after drag', async ({ page, testLogger }) => {
     await page.goto(DIALOG_APP);
-    expect(await tryLoadApp(page), 'App should load').toBe(true);
-    await waitForRegistry(page);
+    await waitForWxApp(page);
 
     // The bare test shell lays out #window-container BELOW the full-size main
     // canvas, so the modal (and its DOM title bar) render off the bottom of the
@@ -144,7 +142,6 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
 
     await clickByLabel(page, 'Custom Dialog');
     await waitForModalRect(page); // wait for the .window.toplevel to exist
-    await page.waitForTimeout(400);
 
     // The modal's INPUT model and VISUAL position are decoupled: the wasm places
     // the dialog at its registry screen coords (mouse events route through the
@@ -159,7 +156,7 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     testLogger.consoleLogs.push(
       `[MODAL_DRAG] before=${JSON.stringify(beforeStats)} dlg=${JSON.stringify(dlgBefore)}`
     );
-    await page.screenshot({ path: 'test-results/modal-02-before-drag.png', fullPage: true });
+    await stableShot(page, 'modal-02-before-drag.png', { fullPage: true });
 
     // The dialog now drags via its real DOM title bar (`.window-titlebar`):
     // pointer events on it → wx_window_move → wxWindow::Move. So grab the element
@@ -172,9 +169,9 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     const startX = tbox!.x + tbox!.width / 2;
     const startY = tbox!.y + tbox!.height / 2;
     await page.mouse.move(startX, startY);
-    await page.waitForTimeout(350);
+    await page.waitForTimeout(350); // eslint-disable-line -- documented interaction dwell (pointer settle before grabbing the title bar)
     await page.mouse.down();
-    await page.waitForTimeout(150);
+    await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell (press commit before the drag begins)
 
     // Drag in many small steps, sampling the modal canvas immediately after each
     // move. Each move calls setWindowRect, which clears the canvas; the dialog's
@@ -195,7 +192,6 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     }
 
     await page.mouse.up();
-    await page.waitForTimeout(600); // let any repaint settle
 
     const dlgAfter = (await findByType(page, 'wxDialog'))[0];
     const afterStats = await sampleModalCanvas(page);
@@ -205,7 +201,7 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     testLogger.consoleLogs.push(
       `[MODAL_DRAG] minOpaque=${minOpaque} lowFrames=${lowFrames}/${STEPS} after=${JSON.stringify(afterStats)} moved=${moved} dlgAfter=${JSON.stringify(dlgAfter)}`
     );
-    await page.screenshot({ path: 'test-results/modal-03-after-drag.png', fullPage: true });
+    await stableShot(page, 'modal-03-after-drag.png', { fullPage: true });
 
     // Sanity: the drag must actually have moved the modal, otherwise the
     // black-background assertion below is meaningless (the bug only triggers on
@@ -223,8 +219,7 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
 
   test('modal background stays painted (not black) after resize', async ({ page, testLogger }) => {
     await page.goto(DIALOG_APP);
-    expect(await tryLoadApp(page), 'App should load').toBe(true);
-    await waitForRegistry(page);
+    await waitForWxApp(page);
 
     // As above: the bare shell lays out #window-container below the fold, so overlay
     // it at the origin to make the modal's DOM resize handles reachable by the pointer.
@@ -239,7 +234,6 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
 
     await clickByLabel(page, 'Custom Dialog');
     await waitForModalRect(page);
-    await page.waitForTimeout(400);
 
     // The Custom dialog now carries wxRESIZE_BORDER, so it has DOM resize handles.
     const handle = page.locator(`${MODAL_SEL} .window-resize-se`);
@@ -248,7 +242,7 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
 
     const beforeStats = await sampleModalCanvas(page);
     testLogger.consoleLogs.push(`[MODAL_RESIZE] before=${JSON.stringify(beforeStats)}`);
-    await page.screenshot({ path: 'test-results/modal-04-before-resize.png', fullPage: true });
+    await stableShot(page, 'modal-04-before-resize.png', { fullPage: true });
 
     // Grab the bottom-right corner and grow the dialog in small steps, sampling the
     // modal canvas immediately after each move. A resize legitimately reassigns
@@ -259,7 +253,7 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     const startY = hbox!.y + hbox!.height / 2;
     await page.mouse.move(startX, startY);
     await page.mouse.down();
-    await page.waitForTimeout(120);
+    await page.waitForTimeout(120); // eslint-disable-line -- documented interaction dwell (press commit before the resize drag begins)
 
     let minOpaque = 1;
     let lowFrames = 0;
@@ -274,13 +268,12 @@ test.describe('Modal dialog border + drag (pcbjam #22)', () => {
     }
 
     await page.mouse.up();
-    await page.waitForTimeout(400);
 
     const afterStats = await sampleModalCanvas(page);
     testLogger.consoleLogs.push(
       `[MODAL_RESIZE] minOpaque=${minOpaque} lowFrames=${lowFrames}/${STEPS} after=${JSON.stringify(afterStats)}`
     );
-    await page.screenshot({ path: 'test-results/modal-05-after-resize.png', fullPage: true });
+    await stableShot(page, 'modal-05-after-resize.png', { fullPage: true });
 
     // Sanity: the resize actually grew the modal canvas (otherwise the assertion
     // below is meaningless — the corner grab must have taken effect).

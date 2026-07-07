@@ -153,7 +153,7 @@ async function roundTrip(
   for (;;) {
     const probe = await saveRead(rebuild, cfg, "regen_probe");
     if (probe.includes(`(uuid "${ids[0]}")`) || Date.now() >= deadline) break;
-    await rebuild.waitForTimeout(300);
+    await rebuild.waitForTimeout(300);  // eslint-disable-line -- deliberate best-effort poll (a hard wait would hide which items failed)
   }
 
   const regen = await saveRead(rebuild, cfg, "regen_dump");

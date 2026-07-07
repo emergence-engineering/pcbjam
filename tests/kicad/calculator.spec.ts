@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByLabel, clickTreeItem, findAllTreeItems } from '../e2e/utils/element-tracker';
+import { clickTreeItem, findAllTreeItems, waitUntil, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * PCB Calculator WASM E2E Tests
@@ -9,82 +9,35 @@ import { clickByLabel, clickTreeItem, findAllTreeItems } from '../e2e/utils/elem
  * panels grouped under four section pages. There's no GAL canvas, no
  * toolbars-as-tested, and no setup wizard for the calculator itself.
  *
- * However, KiCad's first-run setup wizard pops up before *any* app's frame
- * (same wizard pcbnew sees) because Emscripten's MEMFS starts empty each
- * page load and KiCad finds no config. We click through it the same way
- * pcbnew.spec.ts's completeWizard() does, then verify:
- *   1. The calculator frame loads and registers its panels.
- *   2. The treebook contains the panel labels we expect.
- *   3. Clicking a leaf panel ("Color Code") switches the active page.
+ * calculator.html seeds a default KiCad config in preRun (like eeschema.html /
+ * pl_editor.html), so KiCad's first-run setup wizard never opens — the frame
+ * comes straight up and we wait deterministically for its panels to register.
+ * No wizard click-through, no fixed sleeps.
  *
  * Panel labels are sourced from pcb_calculator_frame.cpp:170-192 (kicad fork).
  */
 
-async function waitForRegistry(page: Page): Promise<void> {
-    await page.waitForFunction(() => !!(window as any).wxElementRegistry, null, { timeout: 90000 });
-    // Give the C++ side a moment to register every panel after the frame
-    // first appears — the treebook is populated synchronously in the frame
-    // ctor, but wxElementRegistry registrations are flushed on idle.
-    await page.waitForTimeout(2000);
-}
-
-/**
- * Click through KiCad's first-run setup wizard. Mirrors the intent of
- * tests/kicad/pcbnew.spec.ts's completeWizard() but waits actively for each
- * "Next >" / "Finish" button to appear in wxElementRegistry before clicking
- * — the calculator boots quickly enough that the wizard buttons can lag
- * behind by a second or two, and a fixed sleep proved flaky.
- */
-async function waitForLabel(page: Page, label: string, timeoutMs: number): Promise<boolean> {
-    try {
-        await page.waitForFunction(
-            (l) => {
-                const r = (window as any).wxElementRegistry;
-                return !!(r && r.findByLabel && r.findByLabel(l, {}).length > 0);
-            },
-            label,
-            { timeout: timeoutMs }
-        );
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-async function completeFirstRunWizard(page: Page): Promise<void> {
-    // The canvas becomes visible only after Module.onRuntimeInitialized fires,
-    // which is a reliable witness that the WASM has booted.
+async function waitForCalculatorReady(page: Page): Promise<void> {
     await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-    await waitForRegistry(page);
-
-    for (let i = 1; i <= 12; i++) {
-        const haveNext = await waitForLabel(page, 'Next >', 15000);
-        if (haveNext) {
-            const clickedNext = await clickByLabel(page, 'Next >');
-            if (clickedNext) {
-                await page.waitForTimeout(400);
-                continue;
-            }
-        }
-        const haveFinish = await waitForLabel(page, 'Finish', 5000);
-        if (haveFinish) {
-            await clickByLabel(page, 'Finish');
-            await page.waitForTimeout(400);
-        }
-        break;
-    }
-
-    // Allow the wizard to dismiss and the calculator frame to register.
-    await page.waitForTimeout(2500);
+    // "Calculate" is a unique button on the default Regulator panel — a reliable
+    // witness that the calculator frame is live and its panels have registered.
+    await waitUntil(
+        page,
+        () => {
+            const r = window.wxElementRegistry;
+            return !!r && r.findByLabel('Calculate', {}).length > 0;
+        },
+        'calculator Regulator panel live (Calculate button registered)',
+        { timeout: 90000 }
+    );
 }
 
 async function getRegistryLabels(page: Page): Promise<string[]> {
     return await page.evaluate(() => {
-        const registry = (window as any).wxElementRegistry;
-        if (!registry || !registry.findAll) return [];
-        const all = registry.findAll({});
-        return all
-            .map((el: any) => (el && el.label ? String(el.label) : ''))
+        const registry = window.wxElementRegistry;
+        if (!registry) return [];
+        return registry.findAll({})
+            .map((el) => (el && el.label ? String(el.label) : ''))
             .filter((l: string) => l.length > 0);
     });
 }
@@ -96,21 +49,18 @@ test.describe('PCB Calculator WASM', () => {
 
     test('loads calculator frame', async ({ page, testLogger }) => {
         void testLogger;
-        await completeFirstRunWizard(page);
+        await waitForCalculatorReady(page);
 
-        // The default panel (Regulator) renders its controls into the registry
-        // as soon as the frame is up. "Calculate" is a unique button label on
-        // panel_regulator and a reliable witness that the calculator is live.
         const labels = await getRegistryLabels(page);
         const hasRegulatorPanel = labels.some(l => l === 'Calculate');
         expect(hasRegulatorPanel, `expected the calculator's default Regulator panel to be live (Calculate button registered). Got: ${JSON.stringify(labels.slice(0, 30))}`).toBe(true);
 
-        await page.screenshot({ path: 'test-results/calculator-loaded.png', scale: 'css' });
+        await stableShot(page, 'calculator-loaded.png');
     });
 
     test('treebook lists expected panels', async ({ page, testLogger }) => {
         void testLogger;
-        await completeFirstRunWizard(page);
+        await waitForCalculatorReady(page);
 
         const treeItems = await findAllTreeItems(page);
         const treeLabels = treeItems.map(i => i.label).filter((l): l is string => typeof l === 'string');
@@ -130,21 +80,30 @@ test.describe('PCB Calculator WASM', () => {
 
     test('switch to Color Code panel', async ({ page, testLogger }) => {
         void testLogger;
-        await completeFirstRunWizard(page);
+        await waitForCalculatorReady(page);
 
-        await page.screenshot({ path: 'test-results/calculator-before-switch.png', scale: 'css' });
+        await stableShot(page, 'calculator-before-switch.png');
 
         const clicked = await clickTreeItem(page, 'Color Code');
         expect(clicked, 'expected to find and click the Color Code tree item').toBe(true);
 
-        // Allow the panel to swap in. The Color Code panel exposes a unique
-        // "Tolerance" label that the Regulator panel does not — use it as a
-        // proof-of-switch.
-        await page.waitForTimeout(800);
+        // The Color Code panel exposes a unique "Tolerance" label the Regulator
+        // panel does not — wait for it as proof the panel swapped in (replaces
+        // waitForTimeout(800)).
+        await waitUntil(
+            page,
+            () => {
+                const r = window.wxElementRegistry;
+                if (!r) return false;
+                return r.findAll({}).some((el) => /Tolerance/i.test(el.label || ''));
+            },
+            'Color Code panel active (Tolerance label present)',
+        );
+
         const labelsAfter = await getRegistryLabels(page);
         const onColorCodePanel = labelsAfter.some(l => /Tolerance/i.test(l));
         expect(onColorCodePanel, `expected Color Code panel to be active after click; labels: ${JSON.stringify(labelsAfter.slice(0, 40))}`).toBe(true);
 
-        await page.screenshot({ path: 'test-results/calculator-color-code.png', scale: 'css' });
+        await stableShot(page, 'calculator-color-code.png');
     });
 });

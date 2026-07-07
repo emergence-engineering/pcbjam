@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitForRegistry } from '../e2e/utils/element-tracker';
+import { waitForWxApp, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * 0009-B footprint READ path: does the footprint editor browse + LOAD a real,
@@ -18,22 +18,38 @@ import { waitForRegistry } from '../e2e/utils/element-tracker';
  * The LIB_TREE's rendered dataviewitem Y is offset by a constant (the rows live
  * below the column header); we calibrate that offset from the "Item" header +
  * row pitch, then double-click true positions.
+ *
+ * Determinism: no blind waitForTimeout. Readiness via waitForWxApp + the app's
+ * own observables (kicadLibs, then the LIB_TREE's dataviewitem rows). Each
+ * navigation step waits for the state it produces — child rows after enumerate,
+ * the editor title after load — instead of sleeping; the static boot/expanded/
+ * loaded frames use stableShot.
  */
 
-const SHOT = (name: string) => `test-results/fpbrowse-${name}.png`;
 const LIB = 'Resistor_SMD';
 
 async function bootFootprintEditor(page: Page): Promise<void> {
   await page.goto('/p/demo/footprint_editor/');
-  await expect(page.locator('#canvas')).toBeVisible({ timeout: 180000 });
-  await waitForRegistry(page, 180000);
+  await waitForWxApp(page, { timeout: 180000 });
   await page.waitForFunction(
     () => !!window.wxElementRegistry && window.wxElementRegistry.findAll({}).length > 5,
     null,
     { timeout: 180000 },
   );
   await page.waitForFunction(() => !!(window as any).kicadLibs, null, { timeout: 60000 });
-  await page.waitForTimeout(2000);
+  // Deterministic replacement for the fixed settle: the fp-lib-table is generated
+  // from kicadLibs and rendered into the LIB_TREE — wait until its footprint-lib
+  // rows (dataviewitems) actually exist, which is exactly what the downstream tree
+  // navigation + geom assertions require.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => window.wxElementRegistry.findAllRendered({ elementType: 'dataviewitem' }).length,
+        ),
+      { message: 'footprint lib tree rows rendered', timeout: 60000 },
+    )
+    .toBeGreaterThan(0);
 }
 
 /** Map a rendered tree row's offset Y to its true screen Y (see header note). */
@@ -71,7 +87,7 @@ test('footprint editor browses + loads a real ingested footprint (read path / ve
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
   await bootFootprintEditor(page);
-  await page.screenshot({ path: SHOT('01-boot'), scale: 'css' });
+  await stableShot(page, 'fpbrowse-01-boot.png');
 
   const geom0 = await treeGeom(page);
   logs.push(`[spec] tree geom: ${JSON.stringify(geom0)}`);
@@ -79,14 +95,32 @@ test('footprint editor browses + loads a real ingested footprint (read path / ve
   // Expand the footprint lib (FootprintEnumerate) by double-clicking its row.
   const libClicked = await dblclickRow(page, new RegExp(`^${LIB}$`));
   logs.push(`[spec] expanded lib: ${libClicked}`);
-  await page.waitForTimeout(2000);
-  await page.screenshot({ path: SHOT('02-expanded'), scale: 'css' });
+  // Enumerate is done when the footprint child rows (SMD fixtures carry "Metric")
+  // appear in the tree — that's what the next dblclick targets.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          window.wxElementRegistry
+            .findAllRendered({ elementType: 'dataviewitem' })
+            .some((e: any) => /Metric/.test(e.label || '')),
+        ),
+      { message: 'footprint child rows present after FootprintEnumerate', timeout: 60000 },
+    )
+    .toBe(true);
+  await stableShot(page, 'fpbrowse-02-expanded.png');
 
   // Open a footprint child (FootprintLoad → Parse). SMD fixtures carry "Metric".
   const fpClicked = await dblclickRow(page, /Metric/);
   logs.push(`[spec] opened footprint: ${fpClicked}`);
-  await page.waitForTimeout(2500);
-  await page.screenshot({ path: SHOT('03-loaded'), scale: 'css' });
+  // Load+Parse is done when the editor title reflects the opened footprint.
+  await expect
+    .poll(() => page.title(), {
+      message: 'editor title reflects opened footprint (FootprintLoad + Parse)',
+      timeout: 60000,
+    })
+    .toContain(LIB);
+  await stableShot(page, 'fpbrowse-03-loaded.png');
 
   const title = await page.title();
   logs.push(`[spec] title after open: ${title}`);

@@ -1,9 +1,21 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickMenuBarItem, clickMenuItem } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItem, waitForEditorReady, waitUntil, stableShot } from '../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './utils/fs-inject';
 import { waitForBoardLoaded } from './utils/board-ready';
-import { waitForPcbnew } from './utils/pcbnew-ready';
+
+/** Wait for a rendered popup menu to have its items (replaces a fixed post-menu-click sleep). */
+async function waitForMenuItems(page: Page): Promise<void> {
+    await waitUntil(
+        page,
+        () => {
+            const r = window.wxElementRegistry;
+            if (!r?.findAllRendered) return false;
+            return r.findAllRendered({ elementType: 'menuitem' }).length > 3;
+        },
+        'popup menu items rendered',
+    );
+}
 
 /**
  * STEP export through the occ_service worker (docs/features/occ-split/):
@@ -35,7 +47,7 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
         `${PROJECT_DIR_MEMFS}/${proFilename}`);
 
     expect(await clickMenuBarItem(page, 'File'), 'File menu should be findable').toBe(true);
-    await page.waitForTimeout(400);
+    await waitForMenuItems(page);
     expect(await clickMenuItem(page, 'Open...'), 'Open… menu item should be findable').toBe(true);
 
     await page.waitForFunction(() => {
@@ -43,7 +55,12 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
         return !!registry && registry.findAll({ visible: true })
             .some((el) => el.typeName === 'wxFileDialog');
     }, null, { timeout: 15000 });
-    await page.waitForTimeout(1000);
+    // Wait for the filename text input to paint (the dialog object exists before its
+    // inner controls register; replaces a fixed 1000ms).
+    await waitUntil(page, () => {
+        const r = window.wxElementRegistry;
+        return !!r && r.findAll({ visible: true }).some((el) => el.typeName === 'wxTextCtrl' && el.name === 'text');
+    }, 'file dialog filename input');
 
     const filenameInput = await page.evaluate(() => {
         const registry = window.wxElementRegistry;
@@ -56,11 +73,11 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
     if (!filenameInput) throw new Error('filename text input not found');
 
     await page.mouse.click(filenameInput.x, filenameInput.y);
-    await page.waitForTimeout(200);
+    // Documented interaction dwells: focus + typed-text registration have no observable signal.
+    await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell
     await page.keyboard.type(pcbFilename);
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
 
     const result = await waitForBoardLoaded(page, testLogger, 60000);
     console.log(`[TEST] ${DEMO.name} board-ready result: ${result}`);
@@ -94,16 +111,16 @@ test.describe('OCC export via occ_service worker', () => {
         });
 
         await page.goto('/kicad/pcbnew.html');
-        await waitForPcbnew(page);
+        await waitForEditorReady(page);
         await loadBoard(page, testLogger);
 
         expect(occFetches, 'occ_service must NOT be fetched before the export').toHaveLength(0);
 
         // File → Export → STEP/GLB/…
         expect(await clickMenuBarItem(page, 'File'), 'File menu').toBe(true);
-        await page.waitForTimeout(400);
+        await waitForMenuItems(page);
         expect(await clickMenuItem(page, 'Export'), 'Export submenu').toBe(true);
-        await page.waitForTimeout(400);
+        await waitForMenuItems(page);
         expect(await clickMenuItem(page, 'STEP/GLB/BREP/XAO/PLY/STL...'),
             'STEP export menu item').toBe(true);
 
@@ -114,8 +131,7 @@ test.describe('OCC export via occ_service worker', () => {
                 .some((el) => (el.label === 'Export' || el.label === '&Export')
                     && (el.typeName ?? '').includes('Button'));
         }, null, { timeout: 20000 });
-        await page.waitForTimeout(800);
-        await page.screenshot({ path: 'test-results/occ-export-dialog.png', scale: 'css' });
+        await stableShot(page, 'occ-export-dialog.png');
 
         expect(await clickWxButton(page, 'Export'), 'Export button click').toBe(true);
 
@@ -138,10 +154,12 @@ test.describe('OCC export via occ_service worker', () => {
         expect(occFetches.length, 'occ_service was fetched lazily by the export')
             .toBeGreaterThan(0);
 
-        // Dismiss the "Export complete" report dialog if present.
-        await page.waitForTimeout(1000);
+        // Dismiss the "Export complete" report dialog if present. Its appearance after
+        // the worker returns has no distinct registry signal to poll — a short documented
+        // dwell, then click OK if present.
+        await page.waitForTimeout(1000); // eslint-disable-line -- documented interaction dwell
         await clickWxButton(page, 'OK');
 
-        await page.screenshot({ path: 'test-results/occ-export-done.png', scale: 'css' });
+        await stableShot(page, 'occ-export-done.png');
     });
 });

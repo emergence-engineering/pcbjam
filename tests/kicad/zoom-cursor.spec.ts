@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByLabel } from '../e2e/utils/element-tracker';
+import { waitForCanvasStable, waitForEditorReady } from '../e2e/utils/element-tracker';
 
 /**
  * Zoom-to-cursor regression test (REAL mouse events).
@@ -26,25 +26,7 @@ import { clickByLabel } from '../e2e/utils/element-tracker';
 
 const APP = process.env.ZOOM_APP || 'pl_editor';
 
-async function waitForEditor( page: Page ): Promise<void> {
-    await expect( page.locator( '#canvas' ) ).toBeVisible( { timeout: 90000 } );
-    await page.waitForFunction( () => !!window.wxElementRegistry, null, { timeout: 90000 } );
-    await page.waitForTimeout( 2000 );
-
-    // Dismiss the first-run setup wizard if present (pcbnew); harmless otherwise
-    // (pl_editor's seeded config skips it). A modal wizard blocks canvas zoom.
-    for ( let i = 0; i < 10; i++ ) {
-        const next = await clickByLabel( page, 'Next >' );
-        if ( !next ) {
-            await clickByLabel( page, 'Finish' );
-            break;
-        }
-        await page.waitForTimeout( 400 );
-    }
-    await page.waitForTimeout( 1500 );
-}
-
-async function getGlBox( page: Page ): Promise<{ x: number; y: number; width: number; height: number }> {
+async function getGlBox( page: Page ): Promise<{ x: number; y: number; width: number; height: number; sel: string }> {
     const id = await page.evaluate( () => {
         const visible = Array.from( document.querySelectorAll( '[id^="glcanvas-"]' ) )
             .map( ( c ) => c as HTMLCanvasElement )
@@ -57,7 +39,7 @@ async function getGlBox( page: Page ): Promise<{ x: number; y: number; width: nu
     if ( !id ) throw new Error( 'No visible GL canvas found' );
     const box = await page.locator( `#${id}` ).boundingBox();
     if ( !box ) throw new Error( 'GL canvas bounding box unavailable' );
-    return box;
+    return { ...box, sel: `#${id}` };
 }
 
 async function placeMarker( page: Page, x: number, y: number, color: string ): Promise<void> {
@@ -109,32 +91,34 @@ test.describe( `${APP} zoom-to-cursor`, () => {
         // debug-symbols investigation in the wx wasm layer; skipping (not
         // weakening) so the regression discriminator stays intact locally.
         test.fixme( !!process.env.CI, 'zoom anchor wrong in headed-xvfb Firefox — wx wasm coordinate path' );
-        await waitForEditor( page );
+        await waitForEditorReady( page );
         const box = await getGlBox( page );
 
         // An off-centre cursor point. The discriminator only works off-centre: at the
         // centre every zoom mode looks the same.
         const P = { x: Math.round( box.x + box.width * 0.32 ), y: Math.round( box.y + box.height * 0.34 ) };
-        const shot = ( n: string ) => page.screenshot( { path: `test-results/zoom-${APP}-${n}.png`, scale: 'css' } );
+        const shot = ( _n?: string ) => page.screenshot( { scale: 'css' } );
 
         await placeMarker( page, P.x, P.y, '#ff2020' );
         const base = await shot( '00-baseline' );
 
         // Move to P, then zoom IN twice at P (first wheel after the move is the case
         // the user reported breaking).
+        // Move to P, then zoom IN twice at P. Each wheel redraws the GAL; wait for the
+        // canvas to settle after each (deterministic, replaces the fixed 300/400ms sleeps).
         await page.mouse.move( P.x, P.y );
-        await page.waitForTimeout( 300 );
+        await waitForCanvasStable( page, box.sel );
         await page.mouse.wheel( 0, -120 );
-        await page.waitForTimeout( 300 );
+        await waitForCanvasStable( page, box.sel );
         await page.mouse.wheel( 0, -120 );
-        await page.waitForTimeout( 400 );
+        await waitForCanvasStable( page, box.sel );
         const zoomedIn = await shot( '01-zoomed-in-at-P' );
 
         // Zoom OUT twice at the SAME point (no mouse move in between).
         await page.mouse.wheel( 0, 120 );
-        await page.waitForTimeout( 300 );
+        await waitForCanvasStable( page, box.sel );
         await page.mouse.wheel( 0, 120 );
-        await page.waitForTimeout( 400 );
+        await waitForCanvasStable( page, box.sel );
         const restored = await shot( '02-zoomed-out-back' );
 
         await clearMarkers( page );

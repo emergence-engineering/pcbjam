@@ -1,40 +1,38 @@
 // wxDragDrop Tests - HTML5 file drop support for KiCad
 // Tests external file drops via HTML5 drag and drop API
-import { test, expect, tryLoadApp, getCanvasBox } from './utils/fixtures';
+import { test, expect, getCanvasBox, waitForCanvasApp } from './utils/fixtures';
 import * as path from 'path';
 import * as fs from 'fs';
+import { stableShot } from './utils/element-tracker';
 
 test.describe('wxDragDrop Tests', () => {
 
   test('DnD test app loads successfully', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
+    await waitForCanvasApp(page);
 
-    await page.screenshot({ path: 'test-results/dnd-01-loaded.png', fullPage: true });
+    await stableShot(page, 'dnd-01-loaded.png', { fullPage: true });
 
     const hasStartup = testLogger.consoleLogs.some(l => l.includes('DND_TEST'));
 
-    expect(loaded, 'wxDragDrop app should load').toBe(true);
     expect(testLogger.errors.filter(e => !e.includes('favicon'))).toHaveLength(0);
   });
 
   test('DnD handlers are registered', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
-    await page.screenshot({ path: 'test-results/dnd-02-handlers.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('[DND] Drag and drop handlers registered')),
+      { message: 'DnD handlers should be registered' }
+    ).toBe(true);
 
-    const hasDndRegistered = testLogger.consoleLogs.some(l =>
-      l.includes('[DND] Drag and drop handlers registered'));
-
-    expect(hasDndRegistered, 'DnD handlers should be registered').toBe(true);
+    await stableShot(page, 'dnd-02-handlers.png', { fullPage: true });
   });
 
   test('DragEnter event is detected', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
@@ -55,17 +53,17 @@ test.describe('wxDragDrop Tests', () => {
       }
     }, { x: box.x + 400, y: box.y + 200 });
 
-    await page.waitForTimeout(100);
-    await page.screenshot({ path: 'test-results/dnd-03-dragenter.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('[DND] dragenter')),
+      { message: 'DragEnter event should be logged' }
+    ).toBe(true);
 
-    const hasDragEnter = testLogger.consoleLogs.some(l => l.includes('[DND] dragenter'));
-    expect(hasDragEnter, 'DragEnter event should be logged').toBe(true);
+    await stableShot(page, 'dnd-03-dragenter.png', { fullPage: true });
   });
 
   test('DragLeave event is detected', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
@@ -93,17 +91,17 @@ test.describe('wxDragDrop Tests', () => {
       }
     }, { x: box.x + 400, y: box.y + 200 });
 
-    await page.waitForTimeout(100);
-    await page.screenshot({ path: 'test-results/dnd-04-dragleave.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('[DND] dragleave')),
+      { message: 'DragLeave event should be logged' }
+    ).toBe(true);
 
-    const hasDragLeave = testLogger.consoleLogs.some(l => l.includes('[DND] dragleave'));
-    expect(hasDragLeave, 'DragLeave event should be logged').toBe(true);
+    await stableShot(page, 'dnd-04-dragleave.png', { fullPage: true });
   });
 
   test('Drop event triggers file processing', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
@@ -131,18 +129,18 @@ test.describe('wxDragDrop Tests', () => {
       }
     }, { x: box.x + 400, y: box.y + 200, fileName: testFileName, content: testContent });
 
-    // Wait for async file processing
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'test-results/dnd-05-drop.png', fullPage: true });
+    // Wait for async file processing (deterministic: poll for the drop log)
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('[DND] drop')),
+      { message: 'Drop event should be logged' }
+    ).toBe(true);
 
-    const hasDropLog = testLogger.consoleLogs.some(l => l.includes('[DND] drop'));
-    expect(hasDropLog, 'Drop event should be logged').toBe(true);
+    await stableShot(page, 'dnd-05-drop.png', { fullPage: true });
   });
 
   test('Dropped file is written to WASM filesystem', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
@@ -169,19 +167,19 @@ test.describe('wxDragDrop Tests', () => {
       }
     }, { x: box.x + 400, y: box.y + 200, fileName: testFileName, content: testContent });
 
-    // Wait for file to be written
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'test-results/dnd-06-file-written.png', fullPage: true });
+    // Wait for file to be written (deterministic: poll for the write log)
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l =>
+        l.includes('[DND] Wrote file:') && l.includes(testFileName)),
+      { message: 'File should be written to WASM filesystem' }
+    ).toBe(true);
 
-    const hasFileWritten = testLogger.consoleLogs.some(l =>
-      l.includes('[DND] Wrote file:') && l.includes(testFileName));
-    expect(hasFileWritten, 'File should be written to WASM filesystem').toBe(true);
+    await stableShot(page, 'dnd-06-file-written.png', { fullPage: true });
   });
 
   test('wxDropFilesEvent is fired after drop', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
@@ -208,21 +206,19 @@ test.describe('wxDragDrop Tests', () => {
       }
     }, { x: box.x + 400, y: box.y + 200, fileName: testFileName, content: testContent });
 
-    // Wait for wxDropFilesEvent processing
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'test-results/dnd-07-event-fired.png', fullPage: true });
+    // Wait for wxDropFilesEvent processing (deterministic: poll for the [DND_EVENT] log).
+    // The app logs "=== wxDropFilesEvent received! ===" which includes DND_EVENT prefix.
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('[DND_EVENT]')),
+      { message: 'wxDropFilesEvent should be fired' }
+    ).toBe(true);
 
-    // Check that the app received the drop event (logged via [DND_EVENT] prefix)
-    // The app logs "=== wxDropFilesEvent received! ===" which includes DND_EVENT prefix
-    const hasDropEvent = testLogger.consoleLogs.some(l =>
-      l.includes('[DND_EVENT]'));
-    expect(hasDropEvent, 'wxDropFilesEvent should be fired').toBe(true);
+    await stableShot(page, 'dnd-07-event-fired.png', { fullPage: true });
   });
 
   test('Multiple files can be dropped', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
@@ -250,18 +246,17 @@ test.describe('wxDragDrop Tests', () => {
       }
     }, { x: box.x + 400, y: box.y + 200 });
 
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'test-results/dnd-08-multiple-files.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('[DND] drop: 3 files')),
+      { message: 'Multiple files should be detected' }
+    ).toBe(true);
 
-    const hasMultipleFiles = testLogger.consoleLogs.some(l =>
-      l.includes('[DND] drop: 3 files'));
-    expect(hasMultipleFiles, 'Multiple files should be detected').toBe(true);
+    await stableShot(page, 'dnd-08-multiple-files.png', { fullPage: true });
   });
 
   test('Clear files button exists in UI', async ({ page, testLogger }) => {
     await page.goto('/standalone/dnd/dnd_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForCanvasApp(page);
 
     // First drop a file to verify drop works
     const canvas = page.locator('#canvas');
@@ -286,11 +281,12 @@ test.describe('wxDragDrop Tests', () => {
       }
     }, { x: box.x + 400, y: box.y + 200 });
 
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'test-results/dnd-09-with-file.png', fullPage: true });
+    // Verify file was dropped (from JS side) - deterministic poll for the write log
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('[DND] Wrote file:')),
+      { message: 'File should be dropped and logged' }
+    ).toBe(true);
 
-    // Verify file was dropped (from JS side)
-    const hasDropped = testLogger.consoleLogs.some(l => l.includes('[DND] Wrote file:'));
-    expect(hasDropped, 'File should be dropped and logged').toBe(true);
+    await stableShot(page, 'dnd-09-with-file.png', { fullPage: true });
   });
 });

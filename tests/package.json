@@ -43,6 +43,7 @@
     "test:asyncify:chrome": "playwright test --config=playwright-asyncify.config.ts --project=chromium --headed",
     "test:asyncify:safari": "playwright test --config=playwright-asyncify.config.ts --project=webkit",
     "test:asyncify:all": "npm run test:asyncify:firefox && npm run test:asyncify:safari && npm run test:asyncify:chrome",
+    "lint:determinism": "tsx tools/lint-determinism.ts",
     "screenshots:check": "tsx tools/screenshots/compare.ts",
     "screenshots:promote": "tsx tools/screenshots/promote.ts",
     "screenshots:noise": "tsx tools/screenshots/noise.ts",

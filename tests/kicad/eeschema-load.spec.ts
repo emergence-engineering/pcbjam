@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * Eeschema schematic-LOAD regression test (fiber / Asyncify trampoline shim).
@@ -126,13 +127,9 @@ test.describe('Eeschema schematic load', () => {
             })
             .toMatch(/regression/i);
 
-        // Give the canvas a moment to paint the loaded geometry, then capture a
-        // screenshot so a dev can eyeball the rendered wires/junctions (box with
-        // a crossbar) as a quick "is it working?" check.
-        await page.waitForTimeout(1000);
-        await page.screenshot({
-            path: 'test-results/eeschema-load-rendered.png',
-            scale: 'css',
-        });
+        // Capture the loaded geometry (box with a crossbar) so a dev can eyeball that
+        // it rendered. stableShot stabilizes the paint before comparing, replacing
+        // the old fixed "give the canvas a moment" sleep.
+        await stableShot(page, 'eeschema-load-rendered.png');
     });
 });

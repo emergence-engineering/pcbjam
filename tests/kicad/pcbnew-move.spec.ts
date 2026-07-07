@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByTooltip, findByTooltip } from '../e2e/utils/element-tracker';
-import { completeWizard, hideCursor } from './utils/screenshot-compare';
+import { clickByTooltip, findByTooltip, waitForEditorReady } from '../e2e/utils/element-tracker';
+import { hideCursor } from './utils/screenshot-compare';
 
 /**
  * PCBnew "m" move regression — GitHub issue #9.
@@ -81,7 +81,7 @@ test.describe('PCBnew move with "m" (#9)', () => {
     });
 
     test('selected item moves with the arrow keys after pressing m', async ({ page, testLogger }) => {
-        await completeWizard(page, { screenshots: false });
+        await waitForEditorReady(page);
         await hideCursor(page);
         await waitForCollabModule(page);
 
@@ -113,21 +113,28 @@ test.describe('PCBnew move with "m" (#9)', () => {
         const endPoint = { x: Math.round(glBox.x + glBox.width * 0.55), y: Math.round(glBox.y + glBox.height * 0.45) };
         const midPoint = { x: Math.round((startPoint.x + endPoint.x) / 2), y: startPoint.y };
 
+        // Draw a line segment. These per-vertex dwells are documented irreducible
+        // interaction waits (see pcbnew.spec.ts draw-lines): a line-vertex commit has no
+        // JS-observable signal, and the asyncified pointer-move handler needs wall-clock
+        // time to update the world cursor before each button press.
         await page.mouse.move(startPoint.x, startPoint.y);
-        await page.waitForTimeout(350);
+        await page.waitForTimeout(350); // eslint-disable-line -- documented interaction dwell
         await page.mouse.down();
         await page.mouse.up();
-        await page.waitForTimeout(350);
+        await page.waitForTimeout(350); // eslint-disable-line -- documented interaction dwell
         await page.mouse.move(endPoint.x, endPoint.y);
-        await page.waitForTimeout(350);
+        await page.waitForTimeout(350); // eslint-disable-line -- documented interaction dwell
         await page.mouse.down();
         await page.mouse.up();
-        await page.waitForTimeout(500);
-        // Finish the segment and return to the selection tool.
+        await page.waitForTimeout(500); // eslint-disable-line -- documented interaction dwell
+        // Finish the segment, then wait for the new board item to register
+        // (deterministic — replaces two fixed 250ms sleeps).
         await page.keyboard.press('Escape');
-        await page.waitForTimeout(250);
         await page.keyboard.press('Escape');
-        await page.waitForTimeout(250);
+        await expect.poll(async () =>
+            (await snapshotItems(page)).filter((i) => !idsBeforeDraw.has(i.id)).length,
+            { timeout: 8000, intervals: [200] },
+        ).toBe(1);
 
         // Identify the drawn item and its starting position.
         const newItems = (await snapshotItems(page)).filter((i) => !idsBeforeDraw.has(i.id));
@@ -135,27 +142,31 @@ test.describe('PCBnew move with "m" (#9)', () => {
         const drawnId = newItems[0].id;
         const pos0 = await getPos(page, drawnId);
 
-        const beforeMove = await page.screenshot({ path: 'test-results/pcbnew-move-00-before.png', scale: 'css' });
+        const beforeMove = await page.screenshot({ scale: 'css' });
 
-        // Hover the cursor onto the line and select it, then move with the keyboard.
+        // Hover onto the line, select it, press m, nudge right, commit with Enter. These
+        // are documented interaction dwells: selection, move-mode entry, and per-arrow
+        // nudges have no JS-observable per-step signal, and each keystroke needs the
+        // asyncified event loop to process before the next. The outcome (the item moved
+        // right) is asserted below via the embind position hook.
         await page.mouse.move(midPoint.x, midPoint.y);
-        await page.waitForTimeout(350);
+        await page.waitForTimeout(350); // eslint-disable-line -- documented interaction dwell
         await page.mouse.down();
         await page.mouse.up();
-        await page.waitForTimeout(350);
+        await page.waitForTimeout(350); // eslint-disable-line -- documented interaction dwell
 
         const NUDGES = 10;
         await page.keyboard.press('m');
-        await page.waitForTimeout(400);
+        await page.waitForTimeout(400); // eslint-disable-line -- documented interaction dwell
         for (let i = 0; i < NUDGES; i++) {
             await page.keyboard.press('ArrowRight');
-            await page.waitForTimeout(150);
+            await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
         }
         // Commit at the nudged position WITHOUT moving the cursor (Enter, not click).
         await page.keyboard.press('Enter');
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(500); // eslint-disable-line -- documented interaction dwell
 
-        const afterMove = await page.screenshot({ path: 'test-results/pcbnew-move-01-after.png', scale: 'css' });
+        const afterMove = await page.screenshot({ scale: 'css' });
 
         const pos1 = await getPos(page, drawnId);
         const dx = pos1.x - pos0.x;

@@ -1,4 +1,4 @@
-import { test, expect, MAIN_CANVAS, waitForApp } from './utils/fixtures';
+import { test, expect, MAIN_CANVAS, waitForWxApp } from './utils/fixtures';
 import { Page } from '@playwright/test';
 import {
   clickTab,
@@ -10,8 +10,7 @@ import {
   clickTextCtrl,
   findSingleLineTextCtrl,
   findMultiLineTextCtrl,
-  clickListboxItemByIndex
-} from './utils/element-tracker';
+  clickListboxItemByIndex, stableShot } from './utils/element-tracker';
 
 // Capture console events with [EVENT] prefix
 function captureEvents(page: Page): string[] {
@@ -68,93 +67,70 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
 
     await page.goto('/minimal_test.html');
 
-    // Screenshot 1: During loading
-    await page.screenshot({ path: 'test-results/01-loading.png', fullPage: true });
-
-    // Wait for canvas
-    try {
-      await page.waitForSelector('#canvas', { state: 'visible', timeout: 30000 });
-    } catch (e) {
-      await page.screenshot({ path: 'test-results/02-timeout.png', fullPage: true });
-      console.log('Logs so far:', testLogger.consoleLogs);
-      console.log('Errors:', testLogger.errors);
-      throw e;
-    }
-
-    await page.waitForTimeout(1000); // Let it settle
+    // Deterministic app readiness: canvas visible + wx registry populated.
+    // Fails loudly (replaces the try/catch waitForSelector + 1s settle).
+    await waitForWxApp(page);
 
     const canvas = page.locator('#canvas');
     const box = await canvas.boundingBox();
     if (!box) throw new Error('Canvas not found');
 
     // Screenshot after load
-    await page.screenshot({ path: 'test-results/03-after-load.png', fullPage: true });
+    await stableShot(page, '03-after-load.png', { fullPage: true });
 
     // === TAB 1: Controls ===
     // Click Controls tab using element registry
     await clickTab(page, 'Controls');
-    await page.waitForTimeout(300);
 
     // Click "Click Me" button using element registry
     await clickByLabel(page, 'Click Me');
-    await page.waitForTimeout(300);
 
     // Click "Toggle" button using element registry
     await clickByLabel(page, 'Toggle');
-    await page.waitForTimeout(300);
 
     // Click checkbox "Enable feature" using element registry
     await clickByLabel(page, 'Enable feature');
-    await page.waitForTimeout(300);
 
     // Click radio button "Option B" using element registry
     await clickByLabel(page, 'Option B');
-    await page.waitForTimeout(300);
 
     // Click radio button "Option C" using element registry
     await clickByLabel(page, 'Option C');
-    await page.waitForTimeout(300);
 
     // Interact with slider using element tracking
     await clickSlider(page);
-    await page.waitForTimeout(200);
     // Drag slider to 80% position
     await dragSliderTo(page, 0.8);
-    await page.waitForTimeout(300);
 
-    await page.screenshot({ path: 'test-results/04-controls-tab.png', fullPage: true });
+    await stableShot(page, '04-controls-tab.png', { fullPage: true });
 
     // === TAB 2: Text Input ===
     // Click Text Input tab using element registry
     await clickTab(page, 'Text Input');
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/05-text-input-tab.png', fullPage: true });
+    await stableShot(page, '05-text-input-tab.png', { fullPage: true });
 
     // Click in single-line text field using element tracking
     const singleLine = await findSingleLineTextCtrl(page);
     expect(singleLine, 'Single-line text control should be tracked').not.toBeNull();
     await page.mouse.click(singleLine!.centerX, singleLine!.centerY);
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell: let focus land before typing (no registry/console observable for focus commit)
     await page.keyboard.type('Hello World');
-    await page.waitForTimeout(300);
 
     // Click multiline text area using element tracking
     const multiLine = await findMultiLineTextCtrl(page);
     expect(multiLine, 'Multi-line text control should be tracked').not.toBeNull();
     await page.mouse.click(multiLine!.centerX, multiLine!.centerY);
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell: let focus land before typing (no registry/console observable for focus commit)
     await page.keyboard.type('Line 1\nLine 2\nLine 3');
-    await page.waitForTimeout(300);
 
-    await page.screenshot({ path: 'test-results/06-text-input-typed.png', fullPage: true });
+    await stableShot(page, '06-text-input-typed.png', { fullPage: true });
 
     // === TAB 3: Drawing ===
     // Click Drawing tab using element registry
     await clickTab(page, 'Drawing');
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/07-drawing-tab.png', fullPage: true });
+    await stableShot(page, '07-drawing-tab.png', { fullPage: true });
 
     // Draw on the canvas - multiple strokes
     for (let i = 0; i < 3; i++) {
@@ -164,25 +140,22 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
       await page.mouse.down();
       await page.mouse.move(box.x + startX + 100, box.y + startY + 50, { steps: 10 });
       await page.mouse.up();
-      await page.waitForTimeout(200);
     }
 
-    await page.screenshot({ path: 'test-results/08-drawing-done.png', fullPage: true });
+    await stableShot(page, '08-drawing-done.png', { fullPage: true });
 
     // === TAB 4: Lists ===
     // Click Lists tab using element registry
     await clickTab(page, 'Lists');
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/09-lists-tab.png', fullPage: true });
+    await stableShot(page, '09-lists-tab.png', { fullPage: true });
 
     // Click on listbox items using element registry (wxListBox uses listboxitem type)
     for (let i = 0; i < 5; i++) {
       await clickListboxItemByIndex(page, i);
-      await page.waitForTimeout(200);
     }
 
-    await page.screenshot({ path: 'test-results/10-lists-clicked.png', fullPage: true });
+    await stableShot(page, '10-lists-clicked.png', { fullPage: true });
 
     // Test the wxChoice dropdown. It renders as a native <select> (the
     // browser owns the popup, so it cannot be driven by coordinate
@@ -194,30 +167,25 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
     expect(await choice.count(), 'Choice <select> should exist').toBe(1);
 
     await choice.selectOption({ label: 'Green' });
-    await page.waitForTimeout(300);
 
-    await page.screenshot({ path: 'test-results/10b-choice-selected.png', fullPage: true });
+    await stableShot(page, '10b-choice-selected.png', { fullPage: true });
 
     expect(await choice.inputValue(), 'Choice should now be Green').toBe('Green');
 
     // === Menu interaction ===
     // Click File menu using element registry
     await clickMenuBarItem(page, 'File');
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'test-results/11-file-menu.png', fullPage: true });
+    await stableShot(page, '11-file-menu.png', { fullPage: true });
 
     // Close menu with Escape
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
 
     // Click Help menu using element registry
     await clickMenuBarItem(page, 'Help');
-    await page.waitForTimeout(500);
-    await page.screenshot({ path: 'test-results/12-help-menu.png', fullPage: true });
+    await stableShot(page, '12-help-menu.png', { fullPage: true });
 
     // Close menu with Escape
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
 
     // === Rapid interactions ===
     // Click rapidly on various areas
@@ -225,17 +193,16 @@ test.describe('wxWidgets WASM - Diagnostics', () => {
       const x = 50 + (i * 37) % 400;
       const y = 50 + (i * 23) % 350;
       await page.mouse.click(box.x + x, box.y + y);
-      await page.waitForTimeout(50);
     }
 
-    await page.screenshot({ path: 'test-results/13-final.png', fullPage: true });
+    await stableShot(page, '13-final.png', { fullPage: true });
   });
 });
 
 test.describe('wxWidgets WASM - Loading', () => {
   test('app loads without JavaScript errors', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     // Filter out known non-critical errors
     const criticalErrors = testLogger.errors.filter(e =>
@@ -274,7 +241,7 @@ test.describe('wxWidgets WASM - Loading', () => {
 
   test('WASM module initializes successfully', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     const moduleExists = await page.evaluate(() => {
       return typeof (window as any).Module !== 'undefined';
@@ -285,12 +252,15 @@ test.describe('wxWidgets WASM - Loading', () => {
 
   test('application started event is logged', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
-    // Wait for the startup event to be logged
-    await page.waitForTimeout(500);
-
-    expect(testLogger.consoleLogs.some(e => e.includes('Application started'))).toBe(true);
+    // Deterministically wait for the startup event to be logged (same assertion,
+    // no blind settle).
+    await expect
+      .poll(() => testLogger.consoleLogs.some(e => e.includes('Application started')), {
+        message: 'Application started event should be logged'
+      })
+      .toBe(true);
   });
 });
 
@@ -298,20 +268,21 @@ test.describe('wxWidgets WASM - Canvas Interaction', () => {
   test('canvas receives click events', async ({ page, testLogger }) => {
     const events = captureEvents(page);
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     // Click on the canvas (somewhere in the middle)
     await clickCanvas(page, 320, 240);
-    await page.waitForTimeout(300);
 
     // Should have received the startup event at minimum
     // Additional click events may or may not be logged depending on what's clicked
-    expect(events.length).toBeGreaterThanOrEqual(1);
+    await expect
+      .poll(() => events.length, { message: 'At least one [EVENT] should be logged' })
+      .toBeGreaterThanOrEqual(1);
   });
 
   test('canvas receives keyboard events', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     // Focus the canvas
     const canvas = page.locator(MAIN_CANVAS);
@@ -319,7 +290,7 @@ test.describe('wxWidgets WASM - Canvas Interaction', () => {
 
     // Type some text
     await page.keyboard.type('test');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell: keystroke commit; test asserts no errors surface during keyboard input, no observable to poll
 
     // The test passes if no errors occur during keyboard input
   });
@@ -329,27 +300,33 @@ test.describe('wxWidgets WASM - Mouse Drawing', () => {
   test('mouse drag creates drawing stroke', async ({ page, testLogger }) => {
     const events = captureEvents(page);
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     // First, switch to the Drawing tab (Tab 3)
     // Use element registry to click the tab reliably
     await clickTab(page, 'Drawing');
-    await page.waitForTimeout(500);
 
-    // Check if we're on the Drawing tab
-    const onDrawingTab = events.some(e => e.includes('Tab changed to: Drawing'));
+    // Deterministically confirm we're on the Drawing tab before drawing
+    // (replaces the blind 500ms sleep + the defensive `if (onDrawingTab)`
+    // guard that used to silently skip the assertion).
+    await expect
+      .poll(() => events.some(e => e.includes('Tab changed to: Drawing')), {
+        message: 'Should switch to the Drawing tab'
+      })
+      .toBe(true);
 
-    if (onDrawingTab) {
-      // Now do a mouse drag in the drawing area
-      await dragCanvas(page, 100, 150, 300, 250);
-      await page.waitForTimeout(300);
+    // Now do a mouse drag in the drawing area
+    await dragCanvas(page, 100, 150, 300, 250);
 
-      // Should have mouse down and mouse up events
-      const hasMouseDown = events.some(e => e.includes('Mouse down'));
-      const hasMouseUp = events.some(e => e.includes('Mouse up'));
-
-      expect(hasMouseDown || hasMouseUp).toBe(true);
-    }
+    // Should have mouse down and mouse up events
+    await expect
+      .poll(
+        () =>
+          events.some(e => e.includes('Mouse down')) ||
+          events.some(e => e.includes('Mouse up')),
+        { message: 'Drag should produce a mouse down or mouse up event' }
+      )
+      .toBe(true);
   });
 });
 
@@ -357,40 +334,38 @@ test.describe('wxWidgets WASM - Event Logging', () => {
   test('events are logged to console with [EVENT] prefix', async ({ page, testLogger }) => {
     const events = captureEvents(page);
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
-
-    // Wait for startup
-    await page.waitForTimeout(500);
+    await waitForWxApp(page);
 
     // Should have at least the startup event
-    expect(events.length).toBeGreaterThan(0);
+    await expect
+      .poll(() => events.length, { message: 'Startup event should be logged' })
+      .toBeGreaterThan(0);
     expect(events[0]).toContain('Application started');
   });
 
   test('multiple interactions produce multiple log entries', async ({ page, testLogger }) => {
     const events = captureEvents(page);
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     const initialCount = events.length;
 
     // Perform multiple clicks
     await clickCanvas(page, 100, 100);
-    await page.waitForTimeout(200);
     await clickCanvas(page, 200, 100);
-    await page.waitForTimeout(200);
     await clickCanvas(page, 300, 100);
-    await page.waitForTimeout(200);
 
     // Should have more events now
-    expect(events.length).toBeGreaterThanOrEqual(initialCount);
+    await expect
+      .poll(() => events.length, { message: 'Interactions should not lose log entries' })
+      .toBeGreaterThanOrEqual(initialCount);
   });
 });
 
 test.describe('wxWidgets WASM - Visual Rendering', () => {
   test('frame renders with visible content', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     // Take a screenshot for visual verification
     const screenshot = await page.screenshot();
@@ -406,7 +381,7 @@ test.describe('wxWidgets WASM - Visual Rendering', () => {
 
   test('window has reasonable dimensions', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     const canvas = page.locator(MAIN_CANVAS);
     const box = await canvas.boundingBox();
@@ -421,12 +396,11 @@ test.describe('wxWidgets WASM - Visual Rendering', () => {
 test.describe('wxWidgets WASM - Stability', () => {
   test('app remains stable after multiple interactions', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     // Perform many rapid interactions
     for (let i = 0; i < 20; i++) {
       await clickCanvas(page, 100 + i * 20, 100 + i * 10);
-      await page.waitForTimeout(50);
     }
 
     // App should still be responsive
@@ -444,7 +418,7 @@ test.describe('wxWidgets WASM - Stability', () => {
 
   test('app handles rapid mouse movements', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     const canvas = page.locator(MAIN_CANVAS);
     const box = await canvas.boundingBox();

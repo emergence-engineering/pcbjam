@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { clickByTooltip } from "../e2e/utils/element-tracker";
+import { clickByTooltip, findByTooltip } from "../e2e/utils/element-tracker";
 
 /**
  * Eeschema core-UI regressions found 2026-06-04 (both wasm-specific, both fixed):
@@ -56,7 +56,9 @@ async function bootAndOpen(page: Page): Promise<void> {
     w.FS.writeFile(p, content);
     w.Module.kicadOpenFile(p);
   }, SAMPLE_SCH);
-  await page.waitForTimeout(2000);
+  // Wait for the async open to land the 2 fixture wires (deterministic — replaces a
+  // fixed "let OpenProjectFiles settle" sleep).
+  await expect.poll(() => count(page), { timeout: 90000, intervals: [300] }).toBe(2);
 }
 
 function count(page: Page): Promise<number> {
@@ -65,8 +67,11 @@ function count(page: Page): Promise<number> {
 
 async function focusCanvas(page: Page): Promise<void> {
   const box = await page.locator("#canvas").boundingBox();
-  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(300);
+  expect(box, "#canvas has a bounding box").not.toBeNull();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  // Small settle so the focus click is processed before the next keystroke — no
+  // JS-observable "canvas focused" signal to poll (documented interaction wait).
+  await page.waitForTimeout(300); // eslint-disable-line -- see comment above
 }
 
 test.describe("eeschema core UI (wasm)", () => {
@@ -77,7 +82,9 @@ test.describe("eeschema core UI (wasm)", () => {
 
       await focusCanvas(page);
       await page.keyboard.press("Control+a");
-      await page.waitForTimeout(500);
+      // Let the select-all register before the delete key — selection state isn't
+      // reflected in the item count, so there's no condition to poll (documented wait).
+      await page.waitForTimeout(500); // eslint-disable-line -- see comment above
       await page.keyboard.press(key);
 
       await expect.poll(() => count(page), { timeout: 8000, intervals: [300] }).toBe(0);
@@ -89,11 +96,15 @@ test.describe("eeschema core UI (wasm)", () => {
     await bootAndOpen(page);
 
     expect(await clickByTooltip(page, "Draw Text")).toBe(true);
-    await page.waitForTimeout(600);
+    // Wait for the tool to latch selected (replaces a fixed 600ms).
+    await expect.poll(async () => {
+      const t = await findByTooltip(page, "Draw Text", { elementType: "tool" });
+      return (t?.label ?? "").includes("[checked]");
+    }, { timeout: 5000, intervals: [200] }).toBe(true);
 
     const box = await page.locator("#canvas").boundingBox();
-    if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForTimeout(1500);
+    expect(box, "#canvas has a bounding box").not.toBeNull();
+    await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
 
     const dialogsOpen = () =>
       page.evaluate(() =>
@@ -101,7 +112,8 @@ test.describe("eeschema core UI (wasm)", () => {
       );
 
     // The quasi-modal dialog must appear (previously the nested event loop threw "unwind").
-    expect(await dialogsOpen(), "text properties dialog should open").toBeGreaterThan(0);
+    // Poll for it instead of a fixed 1500ms "let the dialog open" sleep.
+    await expect.poll(dialogsOpen, { timeout: 8000, intervals: [300] }).toBeGreaterThan(0);
     // App must stay responsive while it's up (Asyncify suspend, not a frozen main thread).
     expect(await page.evaluate(() => 1 + 1).then(() => true).catch(() => false)).toBe(true);
 

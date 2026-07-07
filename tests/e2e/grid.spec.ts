@@ -1,13 +1,20 @@
-import { test, expect, MAIN_CANVAS, waitForApp, getCanvasBox } from './utils/fixtures';
-import { clickTab, clickByLabel, clickSpinUp, clickSearchCtrl } from './utils/element-tracker';
+// wxGrid / wxSpinCtrl / wxSearchCtrl tests on the Grid tab and the dedicated wxGrid page.
+// Uses the element registry for semantic element identification.
+//
+// Determinism: no blind waitForTimeout gating assertions. Readiness via waitForWxApp
+// (loud). Cell-selection/edit assertions poll the console event the app emits instead of
+// sleeping. Static states use stableShot (its stabilization replaces the settle).
+// A few genuine interaction dwells (tab-content paint, focus-before-type) are kept and
+// documented. Screenshots that, after the poll conversion, would sit behind an
+// expected-fail poll and assert nothing are dropped.
+import { test, expect, waitForWxApp, getCanvasBox } from './utils/fixtures';
+import { clickTab, clickSpinUp, clickSearchCtrl, stableShot } from './utils/element-tracker';
 
 async function switchToGridTab(page: any) {
-  // Click Grid tab using element registry
+  // Click Grid tab using the element registry (deterministic; assert it actually switched).
   const clicked = await clickTab(page, 'Grid');
-  if (!clicked) {
-    await clickByLabel(page, 'Grid');
-  }
-  await page.waitForTimeout(1000);
+  expect(clicked, 'Should switch to the Grid tab').toBe(true);
+  await page.waitForTimeout(1000); // eslint-disable-line -- documented interaction dwell: tab-content paint settle before pixel-variance/screenshot checks (no console event marks tab render)
 }
 
 // ============================================================================
@@ -21,21 +28,17 @@ test.describe('wxGrid Dedicated Test Page', () => {
     // Navigate to the dedicated wxGrid test page
     await page.goto('/standalone/grid/grid_test.html');
 
-    // Wait for app to load - if wxGrid crashes, this will timeout or show error
-    try {
-      await page.waitForSelector(MAIN_CANVAS, { state: 'visible', timeout: 15000 });
-      await page.waitForTimeout(1000);
-    } catch (e) {
-      // Expected to fail - wxGrid is not implemented
-    }
+    // Loud, deterministic app-readiness (if wxGrid crashes this fails here).
+    await waitForWxApp(page);
 
-    await page.screenshot({ path: 'test-results/wxgrid-dedicated-page.png', fullPage: true });
-
-    // Check for the success message from grid_test.cpp
-    const hasSuccessMessage = testLogger.consoleLogs.some(l =>
+    // The success message from grid_test.cpp is a console event — poll for it
+    // (replaces the 1000ms settle and the hasSuccessMessage assertion).
+    await expect.poll(() => testLogger.consoleLogs.some(l =>
       l.includes('wxGrid test app started successfully') ||
       l.includes('wxGrid initialized successfully')
-    );
+    ), { message: 'wxGrid app should start successfully' }).toBe(true);
+
+    await stableShot(page, 'wxgrid-dedicated-page.png', { fullPage: true });
 
     // Check for crash errors
     const hasCrash = testLogger.errors.some(e =>
@@ -44,21 +47,16 @@ test.describe('wxGrid Dedicated Test Page', () => {
       e.includes('Exception thrown')
     );
 
-    // This test FAILS if wxGrid is not implemented (crashes or no success message)
+    // This test FAILS if wxGrid crashed the app.
     expect(hasCrash, 'wxGrid should not crash the app').toBe(false);
-    expect(hasSuccessMessage, 'wxGrid app should start successfully').toBe(true);
   });
 
   test('wxGrid test page shows grid controls', async ({ page, testLogger }) => {
     await page.goto('/standalone/grid/grid_test.html');
 
-    try {
-      await page.waitForSelector(MAIN_CANVAS, { state: 'visible', timeout: 10000 });
-    } catch {
-      // Expected to fail
-    }
+    await waitForWxApp(page);
 
-    await page.screenshot({ path: 'test-results/wxgrid-controls.png', fullPage: true });
+    await stableShot(page, 'wxgrid-controls.png', { fullPage: true });
 
     // Check if grid content is visible in the canvas
     const hasGridContent = await page.evaluate(() => {
@@ -97,11 +95,11 @@ test.describe('Grid Tab Tests', () => {
 
     test.fail('wxGrid renders visible grid cells', async ({ page, testLogger }) => {
       await page.goto('/minimal_test.html');
-      await waitForApp(page);
+      await waitForWxApp(page);
 
       // Switch to Grid tab using element registry
       await switchToGridTab(page);
-      await page.screenshot({ path: 'test-results/wxgrid-01-tab.png', fullPage: true });
+      await stableShot(page, 'wxgrid-01-tab.png', { fullPage: true });
 
       // Evaluate if grid-like content exists (row/column headers, cells)
       const hasGridContent = await page.evaluate(() => {
@@ -137,7 +135,7 @@ test.describe('Grid Tab Tests', () => {
 
     test.fail('wxGrid cell selection works', async ({ page, testLogger }) => {
       await page.goto('/minimal_test.html');
-      await waitForApp(page);
+      await waitForWxApp(page);
 
       const box = await getCanvasBox(page);
 
@@ -145,18 +143,16 @@ test.describe('Grid Tab Tests', () => {
 
       // Click on a cell (would be at ~y=175 if grid existed)
       await page.mouse.click(box.x + 180, box.y + 175);
-      await page.waitForTimeout(200);
 
-      await page.screenshot({ path: 'test-results/wxgrid-02-selection.png', fullPage: true });
-
-      // Since wxGrid is not implemented, we won't get selection events
-      const hasGridEvent = testLogger.consoleLogs.some(l => l.includes('Grid cell'));
-      expect(hasGridEvent, 'wxGrid should emit cell selection events').toBe(true);
+      // The click's effect is the cell-selection console event — poll for it
+      // (replaces the 200ms sleep + hasGridEvent assertion).
+      await expect.poll(() => testLogger.consoleLogs.some(l => l.includes('Grid cell')),
+        { message: 'wxGrid should emit cell selection events' }).toBe(true);
     });
 
     test.fail('wxGrid cell editing works', async ({ page, testLogger }) => {
       await page.goto('/minimal_test.html');
-      await waitForApp(page);
+      await waitForWxApp(page);
 
       const box = await getCanvasBox(page);
 
@@ -164,17 +160,15 @@ test.describe('Grid Tab Tests', () => {
 
       // Double-click to edit a cell
       await page.mouse.dblclick(box.x + 180, box.y + 195);
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell: let the cell editor open before typing (no observable event)
 
       await page.keyboard.type('1.5');
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(200);
 
-      await page.screenshot({ path: 'test-results/wxgrid-03-editing.png', fullPage: true });
-
-      // Since wxGrid is not implemented, we won't get edit events
-      const hasEditEvent = testLogger.consoleLogs.some(l => l.includes('Grid cell') && l.includes('changed'));
-      expect(hasEditEvent, 'wxGrid should emit cell changed events when editing').toBe(true);
+      // The edit's effect is the cell-changed console event — poll for it
+      // (replaces the 200ms sleep + hasEditEvent assertion).
+      await expect.poll(() => testLogger.consoleLogs.some(l => l.includes('Grid cell') && l.includes('changed')),
+        { message: 'wxGrid should emit cell changed events when editing' }).toBe(true);
     });
   });
 
@@ -186,12 +180,12 @@ test.describe('Grid Tab Tests', () => {
 
     test('SpinCtrl renders and is visible', async ({ page, testLogger }) => {
       await page.goto('/minimal_test.html');
-      await waitForApp(page);
+      await waitForWxApp(page);
 
       const box = await getCanvasBox(page);
 
       await switchToGridTab(page);
-      await page.screenshot({ path: 'test-results/spinctrl-01-visible.png', fullPage: true });
+      await stableShot(page, 'spinctrl-01-visible.png', { fullPage: true });
 
       // SpinCtrl should be visible - check for its box and arrows in the canvas
       const hasSpinCtrlContent = await page.evaluate(() => {
@@ -223,7 +217,7 @@ test.describe('Grid Tab Tests', () => {
 
     test('SpinCtrl up/down arrows work', async ({ page, testLogger }) => {
       await page.goto('/minimal_test.html');
-      await waitForApp(page);
+      await waitForWxApp(page);
 
       const box = await getCanvasBox(page);
 
@@ -232,9 +226,8 @@ test.describe('Grid Tab Tests', () => {
       // Click up arrow on SpinCtrl using element tracking
       const spinClicked = await clickSpinUp(page);
       expect(spinClicked, 'Should be able to click spin up button').toBe(true);
-      await page.waitForTimeout(200);
 
-      await page.screenshot({ path: 'test-results/spinctrl-02-after-click.png', fullPage: true });
+      await stableShot(page, 'spinctrl-02-after-click.png', { fullPage: true });
 
       // This is a smoke test - if it doesn't crash, that's good
       expect(true).toBe(true);
@@ -249,12 +242,12 @@ test.describe('Grid Tab Tests', () => {
 
     test('SearchCtrl renders and is visible', async ({ page, testLogger }) => {
       await page.goto('/minimal_test.html');
-      await waitForApp(page);
+      await waitForWxApp(page);
 
       const box = await getCanvasBox(page);
 
       await switchToGridTab(page);
-      await page.screenshot({ path: 'test-results/searchctrl-01-visible.png', fullPage: true });
+      await stableShot(page, 'searchctrl-01-visible.png', { fullPage: true });
 
       // SearchCtrl should be visible - check for its text field and buttons
       const hasSearchCtrlContent = await page.evaluate(() => {
@@ -286,7 +279,7 @@ test.describe('Grid Tab Tests', () => {
 
     test('SearchCtrl accepts text input', async ({ page, testLogger }) => {
       await page.goto('/minimal_test.html');
-      await waitForApp(page);
+      await waitForWxApp(page);
 
       const box = await getCanvasBox(page);
 
@@ -295,19 +288,15 @@ test.describe('Grid Tab Tests', () => {
       // Click on SearchCtrl text field using element tracking
       const searchClicked = await clickSearchCtrl(page);
       expect(searchClicked, 'Should be able to click SearchCtrl text field').toBe(true);
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell: focus the SearchCtrl text field before typing (no observable event)
 
       // Type search text
       await page.keyboard.type('TRACK');
-      await page.waitForTimeout(200);
-
-      await page.screenshot({ path: 'test-results/searchctrl-02-typing.png', fullPage: true });
+      await stableShot(page, 'searchctrl-02-typing.png', { fullPage: true });
 
       // Press Enter to search
       await page.keyboard.press('Enter');
-      await page.waitForTimeout(200);
-
-      await page.screenshot({ path: 'test-results/searchctrl-03-after-enter.png', fullPage: true });
+      await stableShot(page, 'searchctrl-03-after-enter.png', { fullPage: true });
 
       // This is a smoke test - verify no crashes
       expect(true).toBe(true);
@@ -320,12 +309,12 @@ test.describe('Grid Tab Tests', () => {
 
   test('Grid tab loads without crash', async ({ page, testLogger }) => {
     await page.goto('/minimal_test.html');
-    await waitForApp(page);
+    await waitForWxApp(page);
 
     const box = await getCanvasBox(page);
 
     await switchToGridTab(page);
-    await page.screenshot({ path: 'test-results/grid-tab-final.png', fullPage: true });
+    await stableShot(page, 'grid-tab-final.png', { fullPage: true });
 
     // Verify app is still responsive after switching to Grid tab
     const isResponsive = await page.evaluate(() => {

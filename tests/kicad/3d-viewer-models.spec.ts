@@ -1,10 +1,22 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickMenuBarItem, clickMenuItem } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItem, clickMenuItemByText, waitForEditorReady, waitUntil } from '../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './utils/fs-inject';
 import { waitForBoardLoaded } from './utils/board-ready';
-import { waitForPcbnew } from './utils/pcbnew-ready';
 import { logThreeDDiag, waitForThreeDRender } from './utils/threed-viewer';
+
+/** Wait for a rendered popup menu to have its items (replaces a fixed post-menu-click sleep). */
+async function waitForMenuItems(page: Page): Promise<void> {
+    await waitUntil(
+        page,
+        () => {
+            const r = window.wxElementRegistry;
+            if (!r?.findAllRendered) return false;
+            return r.findAllRendered({ elementType: 'menuitem' }).length > 3;
+        },
+        'popup menu items rendered',
+    );
+}
 
 /**
  * 3D viewer COMPONENT MODELS e2e (docs/features/3d-models): load pic_programmer,
@@ -103,7 +115,7 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
         `${PROJECT_DIR_MEMFS}/libs/3d_shapes/adjustable_rx2v4.wrl`);
 
     expect(await clickMenuBarItem(page, 'File'), 'File menu should be findable').toBe(true);
-    await page.waitForTimeout(400);
+    await waitForMenuItems(page);
     expect(await clickMenuItem(page, 'Open...'), 'Open… menu item should be findable').toBe(true);
 
     await page.waitForFunction(() => {
@@ -111,7 +123,11 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
         return !!registry && registry.findAll({ visible: true })
             .some((el) => el.typeName === 'wxFileDialog');
     }, null, { timeout: 15000 });
-    await page.waitForTimeout(1000);
+    // Wait for the filename text input to paint (replaces a fixed 1000ms).
+    await waitUntil(page, () => {
+        const r = window.wxElementRegistry;
+        return !!r && r.findAll({ visible: true }).some((el) => el.typeName === 'wxTextCtrl' && el.name === 'text');
+    }, 'file dialog filename input');
 
     const filenameInput = await page.evaluate(() => {
         const registry = window.wxElementRegistry;
@@ -124,11 +140,11 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
     if (!filenameInput) throw new Error('filename text input not found');
 
     await page.mouse.click(filenameInput.x, filenameInput.y);
-    await page.waitForTimeout(200);
+    // Documented interaction dwells: focus + typed-text registration have no observable signal.
+    await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell
     await page.keyboard.type(pcbFilename);
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell
     await page.keyboard.press('Enter');
-    await page.waitForTimeout(1000);
 
     const result = await waitForBoardLoaded(page, testLogger, 60000);
     console.log(`[TEST] ${DEMO.name} board-ready result: ${result}`);
@@ -139,17 +155,10 @@ function countGlCanvases(page: Page): Promise<number> {
 }
 
 async function openThreeDViewer(page: Page, glBefore: number): Promise<number> {
-    let opened = false;
-    if (await clickMenuBarItem(page, 'View')) {
-        await page.waitForTimeout(400);
-        opened = await clickMenuItem(page, '3D Viewer');
-    }
-    if (!opened) {
-        console.log('[TEST] View → 3D Viewer not found via menu; trying Alt+3');
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(200);
-        await page.keyboard.press('Alt+3');
-    }
+    // Open View → 3D Viewer deterministically; assert the menu path (an Alt+3 fallback
+    // would mask a real menu regression).
+    expect(await clickMenuBarItem(page, 'View'), 'View menu should be findable').toBe(true);
+    await clickMenuItemByText(page, '3D Viewer');
 
     // 180s (not 60s): CI headroom for the scene build + first raytrace on software WebGL
     // (real GPU ~2s). See threed-viewer.ts openThreeDViewer for the rationale.
@@ -174,7 +183,7 @@ test.describe('3D viewer component models', () => {
 
     test('resolves project models, lazy-fetches lib models via the bridge, renders', async ({ page, testLogger }) => {
         await page.goto('/kicad/pcbnew.html');
-        await waitForPcbnew(page);
+        await waitForEditorReady(page);
 
         // Stash the STEP fixture bytes + install the provider stub BEFORE the
         // viewer can issue any ensure request.
@@ -201,7 +210,9 @@ test.describe('3D viewer component models', () => {
         await page.waitForFunction(
             (ref: string) => (window.__modelEnsures ?? []).some((e) => e.arg === ref),
             SERVED_REF, { timeout: 120000 });
-        await page.waitForTimeout(3000);
+        // Let the rest of the model-enumeration ensures flush after the served ref lands —
+        // the total count isn't known up front, so this is a documented settle interval.
+        await page.waitForTimeout(3000); // eslint-disable-line -- documented interaction dwell
 
         // --- bridge assertions (run on CI too) ---------------------------------
         const ensures = await page.evaluate(() => window.__modelEnsures ?? []);

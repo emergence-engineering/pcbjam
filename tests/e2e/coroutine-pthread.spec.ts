@@ -7,7 +7,7 @@ import { test, expect, tryLoadApp } from './utils/fixtures';
 test.describe('Coroutine pthread main() reproduction', () => {
   test('fiber-in-main + pthreads reaches DONE without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/main_repro.html');
-    await tryLoadApp(page, 20000).catch(() => {});
+    await tryLoadApp(page, 20000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
@@ -26,7 +26,7 @@ test.describe('Coroutine pthread main() reproduction', () => {
   // Probe #2: coroutine activated through nested JS<->wasm dynCall boundaries (KiCad's shape).
   test('nested dynCall-boundary fiber reaches DONE without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/nested_repro_ex.html');
-    await tryLoadApp(page, 20000).catch(() => {});
+    await tryLoadApp(page, 20000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
@@ -44,7 +44,7 @@ test.describe('Coroutine pthread main() reproduction', () => {
   // Probe #3: the full 13-scenario wx-event-loop harness, built WITH pthreads.
   test('wx event loop + pthreads coroutine suite completes without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/coroutine_test_wxpt.html');
-    await tryLoadApp(page, 30000).catch(() => {});
+    await tryLoadApp(page, 30000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.find((l) => l.includes('[COROUTINE_TEST] SUMMARY')) ?? null, {
@@ -65,7 +65,7 @@ test.describe('Coroutine pthread main() reproduction', () => {
   // rewind through the embind dispatch is fixed.
   test.fail('embind-activated fiber reaches DONE without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/embind_repro.html');
-    await tryLoadApp(page, 20000).catch(() => {});
+    await tryLoadApp(page, 20000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
@@ -84,7 +84,7 @@ test.describe('Coroutine pthread main() reproduction', () => {
   // (the single JS->wasm boundary KiCad uses; matches "main-refresh" in the crash trace).
   test('main-loop(rAF)-activated fiber reaches DONE without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/mainloop_repro.html');
-    await tryLoadApp(page, 20000).catch(() => {});
+    await tryLoadApp(page, 20000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
@@ -102,7 +102,7 @@ test.describe('Coroutine pthread main() reproduction', () => {
   // Probe #6: WebGL 2.0 + coroutine activated mid-render-frame (KiCad's GAL render path).
   test('WebGL2 + mid-frame fiber reaches DONE without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/gl_repro.html');
-    await tryLoadApp(page, 20000).catch(() => {});
+    await tryLoadApp(page, 20000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
@@ -120,7 +120,7 @@ test.describe('Coroutine pthread main() reproduction', () => {
   // Probe #7: WebGL2 + coroutine mid-frame + PTHREADS (the GL x pthreads combo KiCad uses).
   test('WebGL2 + pthreads mid-frame fiber reaches DONE without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/gl_repro_pt.html');
-    await tryLoadApp(page, 25000).catch(() => {});
+    await tryLoadApp(page, 25000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {
@@ -136,7 +136,7 @@ test.describe('Coroutine pthread main() reproduction', () => {
   // setupUIConditions() after InvokeTool's first coroutine unwinds/rewinds the ctor stack.
   test('post-coroutine virtual call (invoke_vi->dynCall_vi) reaches DONE without renderer crash', async ({ page, testLogger }) => {
     await page.goto('/standalone/coroutine-pthread/vcall_repro.html');
-    await tryLoadApp(page, 25000).catch(() => {});
+    await tryLoadApp(page, 25000).catch(() => {});  // eslint-disable-line -- best-effort load in a pthread/coroutine runtime probe
 
     await expect
       .poll(() => testLogger.consoleLogs.some((l) => l.includes('[REPRO] DONE')), {

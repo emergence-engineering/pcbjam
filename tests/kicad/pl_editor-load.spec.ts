@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * pl_editor (drawing-sheet editor) programmatic-open regression.
@@ -97,8 +98,7 @@ test.describe('pl_editor drawing-sheet load', () => {
             })
             .toMatch(/load-test/i);
 
-        await page.waitForTimeout(1000);
-        await page.screenshot({ path: 'test-results/pl_editor-load-rendered.png', scale: 'css' });
+        await stableShot(page, 'pl_editor-load-rendered.png');
 
         expect(hasAbort(testLogger), 'no WASM abort during open').toBe(false);
     });

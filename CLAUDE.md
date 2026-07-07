@@ -4,6 +4,7 @@ README.md details how to run the project
 A lot of native module have to be compiled to wasm, the most complex is wxwidgets
 /kicad and /wxwidgets are git submodules from our own forks
 The e2e tests are in /tests, with a README and WHATWORKS md files
+Test determinism rules (no blind sleeps/ifs, `stableShot` screenshots, retries:0) are in tests/TESTING.md, enforced by `npm run lint:determinism`.
 The e2e tests are separated per feature
 Wxwidgets wasm port has hooks for finding positions of UI elements, tests use that
 The test screenshots are tracked with git; CI's Linux render is the source of truth (tooling: tests/tools/screenshots/, see its README).

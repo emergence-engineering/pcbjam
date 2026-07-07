@@ -1,10 +1,10 @@
-import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import {
-    clickByLabel,
     clickMenuBarItem,
     clickMenuItem,
-} from '../e2e/utils/element-tracker';
+    waitForEditorReady,
+    waitForRenderedByLabel,
+    waitUntil, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * pl_editor (drawing-sheet editor) WASM E2E Tests
@@ -13,41 +13,13 @@ import {
  * regression we fixed at the wxWidgets level (filedlgg.cpp). The widget-level
  * coverage lives in tests/e2e/filedialog-folder-nav.spec.ts; this file proves
  * the fix also works through pl_editor's own File menu.
+ *
+ * Determinism: no waitForTimeout, no "if element exists" branches, no retries.
+ * Screenshots use stableShot(page, name): it re-captures until the frame stops
+ * changing, then writes the PNG for the offline compare gate — that is what makes
+ * e.g. the Save As dialog shot reliable (it used to catch the file list mid-paint
+ * as a black rectangle behind a fixed 600ms sleep).
  */
-
-async function completeWizard(page: Page): Promise<void> {
-    await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-    await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-    await page.waitForTimeout(2000);
-
-    await page.screenshot({ path: 'test-results/pl_editor-wizard-00-initial.png', scale: 'css' });
-
-    for (let i = 1; i <= 10; i++) {
-        let clicked = await clickByLabel(page, 'Next >');
-
-        if (!clicked) {
-            clicked = await clickByLabel(page, 'Finish');
-
-            if (clicked) {
-                await page.waitForTimeout(500);
-                await page.screenshot({
-                    path: `test-results/pl_editor-wizard-${String(i).padStart(2, '0')}-finish.png`,
-                    scale: 'css'
-                });
-            }
-
-            break;
-        }
-
-        await page.waitForTimeout(500);
-        await page.screenshot({
-            path: `test-results/pl_editor-wizard-${String(i).padStart(2, '0')}.png`,
-            scale: 'css'
-        });
-    }
-
-    await page.waitForTimeout(2000);
-}
 
 function hasAbort(testLogger: { consoleLogs: string[]; errors: string[] }): boolean {
     return [...testLogger.consoleLogs, ...testLogger.errors].some(line => line.includes('Aborted('));
@@ -59,10 +31,8 @@ test.describe('pl_editor WASM', () => {
     });
 
     test('app loads, canvas visible, no WASM abort', async ({ page, testLogger }) => {
-        await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-        await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-        await page.waitForTimeout(1500);
-        await page.screenshot({ path: 'test-results/pl_editor-01-loaded.png', scale: 'css' });
+        await waitForEditorReady(page);
+        await stableShot(page, '01-loaded.png');
 
         expect(hasAbort(testLogger), 'no WASM abort during load').toBe(false);
 
@@ -73,44 +43,49 @@ test.describe('pl_editor WASM', () => {
     test('first-run wizard is skipped by the seeded config (none appears)', async ({ page, testLogger }) => {
         // The harness seeds a default KiCad config in preRun (like the web app's
         // boot.ts), so STARTWIZARD::CheckAndRun() finds NeedsUserInput()==false and
-        // never opens the modal wizard. completeWizard() therefore finds nothing to
-        // click and the editor comes straight up. Assert no wizard/dialog is ever
-        // visible — the inverse of the old "click through the wizard" flow.
-        await completeWizard(page);
+        // never opens the modal wizard. The editor therefore comes straight up —
+        // assert no wizard/dialog is ever visible.
+        await waitForEditorReady(page);
 
         const blockingDialogs = await page.evaluate(() => {
-            const registry = window.wxElementRegistry;
-            if (!registry) return -1;
+            const registry = window.wxElementRegistry!;
             return registry.findAll({ visible: true })
-                .filter((el: { typeName: string }) =>
-                    /^wxDialog|Wizard/.test(el.typeName))
+                .filter((el) => /^wxDialog|Wizard/.test(el.typeName))
                 .length;
         });
         expect(blockingDialogs, 'no setup wizard/dialog should be visible (seed skipped it)').toBe(0);
         expect(hasAbort(testLogger), 'no WASM abort during launch').toBe(false);
 
-        await page.screenshot({ path: 'test-results/pl_editor-02-no-wizard.png', scale: 'css' });
+        await stableShot(page, '02-no-wizard.png');
     });
 
     test('File menu exposes Open... and Save As...', async ({ page, testLogger }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
 
         const fileMenuClicked = await clickMenuBarItem(page, 'File');
         expect(fileMenuClicked, 'File menubar item should be clickable').toBe(true);
-        await page.waitForTimeout(400);
 
-        await page.screenshot({ path: 'test-results/pl_editor-03-file-menu.png', scale: 'css' });
+        // Wait for the popup menu to actually render its items (replaces waitForTimeout(400)).
+        await waitUntil(
+            page,
+            () => {
+                const r = window.wxElementRegistry;
+                if (!r || !r.findAllRendered) return false;
+                return r.findAllRendered({})
+                    .filter((el) => el.elementType === 'menuitem')
+                    .length > 3;
+            },
+            'File menu items rendered',
+        );
 
-        // Menu items are tracked in the "rendered" half of the registry (popup
-        // widgets), not the regular findAll({visible:true}) set. Use findAllRendered
-        // and filter to menuitem elementType — same pattern as load-pcb-probe.spec.ts.
+        await stableShot(page, '03-file-menu.png');
+
         const menuLabels = await page.evaluate(() => {
-            const registry = window.wxElementRegistry;
-            if (!registry || !registry.findAllRendered) return [];
-            return registry.findAllRendered({})
-                .filter((r: { elementType: string }) => r.elementType === 'menuitem')
-                .map((r: { label?: string }) => r.label || '')
-                .filter((l: string) => l.length > 0);
+            const registry = window.wxElementRegistry!;
+            return registry.findAllRendered!({})
+                .filter((r) => r.elementType === 'menuitem')
+                .map((r) => r.label || '')
+                .filter((l) => l.length > 0);
         });
 
         // wxWidgets labels typically end with "..." (three ASCII dots) but some
@@ -120,54 +95,54 @@ test.describe('pl_editor WASM', () => {
         expect(hasOpen, `menu should contain "Open..." (saw labels: ${menuLabels.slice(0, 30).join(', ')})`).toBe(true);
         expect(hasSaveAs, `menu should contain "Save As..." (saw labels: ${menuLabels.slice(0, 30).join(', ')})`).toBe(true);
 
-        // Dismiss the menu so we don't leak state into the next test.
+        // Dismiss the menu. beforeEach re-navigates to a fresh page, so there's no
+        // cross-test leak to wait on — and menu closure isn't what this test asserts.
         await page.keyboard.press('Escape');
-        await page.waitForTimeout(200);
 
         expect(hasAbort(testLogger)).toBe(false);
     });
 
     test('Save As file dialog: typing a folder + Enter navigates into it (regression)', async ({ page, testLogger }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
 
         // Open File > Save As
         await clickMenuBarItem(page, 'File');
-        await page.waitForTimeout(300);
+        await waitForRenderedByLabel(page, 'Save As...', { elementType: 'menuitem' });
         const savedAsClicked = await clickMenuItem(page, 'Save As...');
         expect(savedAsClicked, 'Save As... menu item should be clickable').toBe(true);
 
         // Wait for the wxFileDialog to appear in the registry.
-        await page.waitForFunction(() => {
-            const registry = window.wxElementRegistry;
-            if (!registry) return false;
-            return registry.findAll({ visible: true })
-                .some((el: { typeName: string }) => el.typeName === 'wxFileDialog');
-        }, null, { timeout: 15000 });
+        await waitUntil(
+            page,
+            () => {
+                const r = window.wxElementRegistry;
+                if (!r) return false;
+                return r.findAll({ visible: true })
+                    .some((el) => el.typeName === 'wxFileDialog');
+            },
+            'wxFileDialog visible',
+        );
 
-        // The dialog object exists in the registry as soon as C++ constructs it,
-        // but the directory enumeration (MEMFS readdir → asyncify suspend) hasn't
-        // returned yet so the inner file list isn't painted. Without this wait the
-        // screenshot catches the dialog as a black rectangle.
-        await page.waitForTimeout(600);
-
-        await page.screenshot({ path: 'test-results/pl_editor-04-save-as-dialog.png', scale: 'css' });
+        // The dialog object exists in the registry as soon as C++ constructs it, but the
+        // directory enumeration (MEMFS readdir → asyncify suspend) hasn't returned yet so
+        // the inner file list isn't painted. stableShot's stabilization waits for the
+        // list to finish painting — deterministically replacing the old waitForTimeout(600)
+        // that used to catch the dialog as a black rectangle.
+        await stableShot(page, '04-save-as-dialog.png');
 
         // The bug: pressing Enter on a folder name treated it as a file and surfaced
         // "Unable to load /dev file". After the OnOk fix, the dialog should navigate
         // into the folder instead.
         await page.keyboard.type('/dev');
-        await page.waitForTimeout(200);
         await page.keyboard.press('Enter');
-        await page.waitForTimeout(900);
 
-        await page.screenshot({ path: 'test-results/pl_editor-04b-after-enter.png', scale: 'css' });
+        await stableShot(page, '04b-after-enter.png');
 
         // The wxFileDialog should still be visible — we navigated into /dev, didn't close it.
         const dialogStillOpen = await page.evaluate(() => {
-            const registry = window.wxElementRegistry;
-            if (!registry) return false;
+            const registry = window.wxElementRegistry!;
             return registry.findAll({ visible: true })
-                .some((el: { typeName: string }) => el.typeName === 'wxFileDialog');
+                .some((el) => el.typeName === 'wxFileDialog');
         });
         expect(dialogStillOpen, 'wxFileDialog should remain open after Enter on a folder').toBe(true);
 
@@ -178,18 +153,17 @@ test.describe('pl_editor WASM', () => {
 
         // Close the dialog cleanly so it doesn't leak to a subsequent step.
         await page.keyboard.press('Escape');
-        await page.waitForTimeout(300);
 
         expect(hasAbort(testLogger)).toBe(false);
     });
 
     test('canvas + toolbar metrics look sane', async ({ page, testLogger }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
 
         const metrics = await page.evaluate(() => {
-            const registry = window.wxElementRegistry;
-            const all = registry ? registry.findAll({ visible: true }) : [];
-            const toolbars = all.filter((el: { typeName: string }) => /ToolBar/.test(el.typeName));
+            const registry = window.wxElementRegistry!;
+            const all = registry.findAll({ visible: true });
+            const toolbars = all.filter((el) => /ToolBar/.test(el.typeName));
             const glCanvas = document.querySelector('canvas[id*="gl"]') as HTMLCanvasElement | null;
 
             return {

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByLabel, clickMenuItem, findRenderedByType } from '../e2e/utils/element-tracker';
+import { clickMenuItem, findRenderedByType, waitForEditorReady, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * Secondary in-app proof on pcbnew (the user's explicit ask): the right-side
@@ -11,22 +11,6 @@ import { clickByLabel, clickMenuItem, findRenderedByType } from '../e2e/utils/el
  *
  * Screenshots: test-results/pcbnew-sidebar-scrollbar.png, pcbnew-context-menu.png.
  */
-
-async function waitForEditor(page: Page): Promise<void> {
-  await expect(page.locator('#canvas')).toBeVisible({ timeout: 120000 });
-  await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 120000 });
-  await page.waitForTimeout(2000);
-  // Dismiss the first-run setup wizard (pcbnew shows one).
-  for (let i = 0; i < 12; i++) {
-    const next = await clickByLabel(page, 'Next >');
-    if (!next) {
-      await clickByLabel(page, 'Finish');
-      break;
-    }
-    await page.waitForTimeout(400);
-  }
-  await page.waitForTimeout(2000);
-}
 
 async function getGlBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
   const id = await page.evaluate(() => {
@@ -50,14 +34,14 @@ test.describe('pcbnew: DOM-port scrollbar + context menu', () => {
   });
 
   test('the appearance/layers panel shows a draggable scrollbar gutter', async ({ page }) => {
-    await waitForEditor(page);
+    await waitForEditorReady(page);
 
     await expect.poll(async () => (await findRenderedByType(page, 'slidertrack')).length, {
       timeout: 15000,
       message: 'the overflowing layers panel should show a built-in scrollbar gutter',
     }).toBeGreaterThan(0);
 
-    await page.screenshot({ path: 'test-results/pcbnew-sidebar-scrollbar.png', fullPage: true });
+    await stableShot(page, 'pcbnew-sidebar-scrollbar.png', { fullPage: true });
 
     const tracks = await findRenderedByType(page, 'slidertrack');
     const sliders = await findRenderedByType(page, 'slider');
@@ -69,8 +53,7 @@ test.describe('pcbnew: DOM-port scrollbar + context menu', () => {
     await page.mouse.down();
     await page.mouse.move(vTrack.centerX, vTrack.screenY + vTrack.height * 0.7, { steps: 6 });
     await page.mouse.up();
-    await page.waitForTimeout(400);
-    await page.screenshot({ path: 'test-results/pcbnew-sidebar-scrollbar-dragged.png', fullPage: true });
+    await stableShot(page, 'pcbnew-sidebar-scrollbar-dragged.png', { fullPage: true });
   });
 
   // Labels of the items in the currently-open DOM context-menu popup.
@@ -83,7 +66,7 @@ test.describe('pcbnew: DOM-port scrollbar + context menu', () => {
     page,
     testLogger,
   }) => {
-    await waitForEditor(page);
+    await waitForEditorReady(page);
 
     // Right-click the drawing canvas. pcbnew's selection tool builds its menu
     // (common/tool/tool_manager.cpp) and calls frame->PopupMenu() from inside
@@ -93,7 +76,9 @@ test.describe('pcbnew: DOM-port scrollbar + context menu', () => {
     const x = Math.round(box.x + box.width * 0.5);
     const y = Math.round(box.y + box.height * 0.5);
     await page.mouse.click(x, y); // activate the selection tool
-    await page.waitForTimeout(400);
+    // Small settle so the activation click is processed before the right-click — no
+    // JS-observable "selection tool active" signal to poll (documented interaction wait).
+    await page.waitForTimeout(400); // eslint-disable-line -- see comment above
     await page.mouse.click(x, y, { button: 'right' });
 
     // The popup items register in the e2e registry under parentId 'popupmenu'.
@@ -113,7 +98,7 @@ test.describe('pcbnew: DOM-port scrollbar + context menu', () => {
     const items = await findRenderedByType(page, 'menuitem', { parentId: 'popupmenu' });
     expect(items.every((i) => i.enabled)).toBe(true);
 
-    await page.screenshot({ path: 'test-results/pcbnew-context-menu.png', fullPage: true });
+    await stableShot(page, 'pcbnew-context-menu.png', { fullPage: true });
 
     // The menu is interactive: opening the "Zoom" submenu replaces the popup
     // with the submenu's items (so the top-level "Grid" entry disappears).
@@ -124,7 +109,7 @@ test.describe('pcbnew: DOM-port scrollbar + context menu', () => {
     }).toBe(false);
     const subLabels = await popupLabels(page);
     expect(subLabels.length, `submenu was: ${JSON.stringify(subLabels)}`).toBeGreaterThan(0);
-    await page.screenshot({ path: 'test-results/pcbnew-context-submenu.png', fullPage: true });
+    await stableShot(page, 'pcbnew-context-submenu.png', { fullPage: true });
 
     // Escape dismisses the popup without firing a command (registry clears).
     await page.keyboard.press('Escape');

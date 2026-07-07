@@ -1655,3 +1655,350 @@ export async function clickStyledTextCtrl(
 export async function findAllStyledTextCtrls(page: Page): Promise<WxRenderedElement[]> {
   return findRenderedByType(page, 'styledtext');
 }
+
+// ============================================================================
+// Deterministic waits — the "hard" (throw-on-miss) primitives that replace
+// waitForTimeout sleeps and `if (element exists)` branches in the specs.
+// ============================================================================
+
+/**
+ * Poll a page-side predicate until it returns truthy, or throw a readable error.
+ *
+ * This is the general "loop until something actually happens" utility: it replaces
+ * `await page.waitForTimeout(n)` (a blind timer) with a wait on a real condition, and
+ * fails LOUDLY with `desc` instead of a bare Playwright timeout — so a test that no
+ * longer reaches its expected state reports *what* it was waiting for.
+ *
+ *   await waitUntil(page, () => !!window.wxElementRegistry, 'registry defined');
+ *   await waitUntil(page, (t) => document.title === t, 'title set', { arg: 'KiCad' });
+ */
+export async function waitUntil<Arg = undefined>(
+  page: Page,
+  pageFunction: (arg: Arg) => unknown,
+  desc: string,
+  options: { timeout?: number; arg?: Arg; polling?: number | 'raf' } = {}
+): Promise<void> {
+  const timeout = options.timeout ?? 15000;
+  try {
+    await page.waitForFunction(pageFunction, options.arg as Arg, {
+      timeout,
+      polling: options.polling ?? 'raf',
+    });
+  } catch {
+    throw new Error(`waitUntil: timed out after ${timeout}ms waiting for: ${desc}`);
+  }
+}
+
+/**
+ * Wait until a KiCad/wx editor app is interactive: the emscripten canvas is visible,
+ * the element registry is populated, and at least one toolbar has been laid out.
+ *
+ * App-agnostic (no app-specific frame name) so it can gate every editor spec. Replaces
+ * the per-spec `completeWizard()` copies and their fixed 1500–2500ms "let it settle"
+ * sleeps — the seeded config already skips the first-run wizard, so readiness is purely
+ * "is the editor painted and registered".
+ */
+export async function waitForEditorReady(
+  page: Page,
+  options: { timeout?: number } = {}
+): Promise<void> {
+  const timeout = options.timeout ?? 90000;
+
+  await page.locator('#canvas').waitFor({ state: 'visible', timeout });
+
+  await waitUntil(
+    page,
+    () => {
+      const r = window.wxElementRegistry;
+      if (!r) return false;
+      const visible = r.findAll({ visible: true });
+      const hasToolbar = visible.some((el) => /ToolBar/.test(el.typeName));
+      return visible.length > 10 && hasToolbar;
+    },
+    'editor registry populated + a toolbar laid out',
+    { timeout }
+  );
+}
+
+/**
+ * Wait for a rendered element (menu item, toolbar tool, …) to appear, then return it;
+ * throw if it never appears. The throwing counterpart to findRenderedByLabel — use it to
+ * replace `await page.waitForTimeout(n)` before reading/clicking a popup that renders async.
+ */
+export async function waitForRenderedByLabel(
+  page: Page,
+  label: string,
+  options: RenderedFindOptions & { timeout?: number } = {}
+): Promise<WxRenderedElement> {
+  const timeout = options.timeout ?? 15000;
+  const { timeout: _t, ...find } = options;
+  await waitUntil(
+    page,
+    ([label, opts]: [string, RenderedFindOptions]) => {
+      const r = window.wxElementRegistry;
+      if (!r || !r.findRenderedByLabel) return false;
+      return r.findRenderedByLabel(label, opts).length > 0;
+    },
+    `rendered element "${label}"`,
+    { timeout, arg: [label, find] as [string, RenderedFindOptions] }
+  );
+  const el = await findRenderedByLabel(page, label, find);
+  if (!el) throw new Error(`waitForRenderedByLabel: "${label}" vanished after appearing`);
+  return el;
+}
+
+/**
+ * Wait until a canvas's pixels stop changing across consecutive animation frames —
+ * a deterministic "the drawing has settled" signal for interaction specs (drawing a
+ * wire, dragging an item) where the visual effect must land before it can be asserted.
+ * Replaces fixed post-action sleeps. Works on WebGL canvases: KiCad's GAL sets
+ * preserveDrawingBuffer=true, so drawImage() can read the buffer back.
+ */
+export async function waitForCanvasStable(
+  page: Page,
+  selector: string,
+  options: { stableFrames?: number; timeout?: number; sampleSize?: number } = {}
+): Promise<void> {
+  const stableFrames = options.stableFrames ?? 3;
+  const timeout = options.timeout ?? 15000;
+  const sampleSize = options.sampleSize ?? 48;
+
+  // Clear any accumulator left by a previous wait on this selector.
+  await page.evaluate((sel) => {
+    const w = window as unknown as { __canvasStable?: Record<string, unknown> };
+    if (w.__canvasStable) delete w.__canvasStable[sel];
+  }, selector);
+
+  await waitUntil(
+    page,
+    ([sel, need, size]: [string, number, number]) => {
+      const w = window as unknown as { __canvasStable?: Record<string, { sig: number; count: number }> };
+      const el = document.querySelector(sel) as HTMLCanvasElement | null;
+      if (!el) return false;
+      const off = document.createElement('canvas');
+      off.width = size;
+      off.height = size;
+      const ctx = off.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return false;
+      try {
+        ctx.drawImage(el, 0, 0, size, size);
+      } catch {
+        return false; // canvas not yet readable
+      }
+      const data = ctx.getImageData(0, 0, size, size).data;
+      let sig = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sig = (sig * 31 + data[i] + data[i + 1] * 7 + data[i + 2] * 13) | 0;
+      }
+      const store = (w.__canvasStable ??= {});
+      const prev = store[sel];
+      if (prev && prev.sig === sig) prev.count += 1;
+      else store[sel] = { sig, count: 1 };
+      return store[sel].count >= need;
+    },
+    `canvas "${selector}" stable for ${stableFrames} frames`,
+    { timeout, arg: [selector, stableFrames, sampleSize] as [string, number, number], polling: 'raf' }
+  );
+}
+
+// ============================================================================
+// Render-settle + capture — feeds the offline tools/screenshots gate
+// ============================================================================
+
+/**
+ * page.screenshot options we forward, plus stabilization knobs. Every capture is taken at
+ * scale:'css' (1:1 CSS pixels, hardcoded below — see SHOT_OPTS), uniformly across both suites, to
+ * match the DPR-1 CI Linux baselines and avoid the past device-scale mismatch bug. So there's no
+ * per-call `scale`: it's always 'css'.
+ */
+type StableShotOptions = {
+  fullPage?: boolean;
+  /** Stabilization budget (ms). Animating states never settle: we proceed and capture anyway. */
+  timeout?: number;
+  /** Consecutive identical animation frames required before the render is "settled". */
+  stableFrames?: number;
+  /** Canvas whose pixels signal render activity (the wx main surface). Default '#canvas'. */
+  canvas?: string;
+};
+
+/** Screenshot params for the final capture — pinned scale keeps every shot at 1:1 CSS pixels. */
+const SHOT_OPTS = { scale: 'css', animations: 'disabled', caret: 'hide' } as const;
+
+/**
+ * Wait until the render has SETTLED, then let the caller capture. The "wait" half of
+ * toHaveScreenshot, decoupled so pixel COMPARISON stays in the offline tools/screenshots gate
+ * (which diffs test-results/ against tests/baseline-screenshots/ on CI's deterministic Linux render).
+ *
+ * Stabilization runs entirely IN-PAGE (one page.evaluate): it hashes a 64px downscale of the wx
+ * canvas once per animation frame and resolves after `stableFrames` consecutive identical frames,
+ * or when `timeout` elapses. There are NO repeated CDP screenshots — an earlier screenshot-probe
+ * version saturated CDP on the heavy kicad canvases and timed the whole suite out. Genuinely-
+ * animating states (timers, mid-slide) never converge: we resolve at the deadline and capture the
+ * current frame, exactly as the old raw screenshots did. With no canvas we just wait `stableFrames`
+ * paint frames — the spec's deterministic waits have already reached the target state.
+ */
+export async function waitForRenderStable(page: Page, options: StableShotOptions = {}): Promise<void> {
+  await page.evaluate(
+    ({ sel, need, timeout }: { sel: string; need: number; timeout: number }) =>
+      new Promise<void>((resolve) => {
+        const el = document.querySelector(sel) as HTMLCanvasElement | null;
+        if (!el || typeof el.getContext !== 'function') {
+          let i = 0;
+          const paint = () => (++i >= need ? resolve() : requestAnimationFrame(paint));
+          requestAnimationFrame(paint);
+          return;
+        }
+        const size = 64;
+        const off = document.createElement('canvas');
+        off.width = size;
+        off.height = size;
+        const ctx = off.getContext('2d', { willReadFrequently: true });
+        const start = performance.now();
+        let prev = NaN;
+        let stable = 0;
+        const tick = () => {
+          let sig = prev;
+          try {
+            ctx!.drawImage(el, 0, 0, size, size);
+            const d = ctx!.getImageData(0, 0, size, size).data;
+            sig = 0;
+            for (let i = 0; i < d.length; i += 4) sig = (sig * 31 + d[i] + d[i + 1] * 7 + d[i + 2] * 13) | 0;
+          } catch {
+            /* canvas not yet readable — treat as unchanged */
+          }
+          if (sig === prev) stable += 1;
+          else {
+            prev = sig;
+            stable = 1;
+          }
+          if (stable >= need || performance.now() - start > timeout) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    { sel: options.canvas ?? '#canvas', need: options.stableFrames ?? 3, timeout: options.timeout ?? 3000 }
+  );
+}
+
+/**
+ * Stabilize the render, then write a raw PNG to test-results/<name> for the offline screenshot gate
+ * (tools/screenshots/compare.ts vs tests/baseline-screenshots/). Drop-in replacement for
+ * `expect(page).toHaveScreenshot(name, opts)`: keeps toHaveScreenshot's render-settle but NOT its
+ * inline comparison (that's the calibrated offline pipeline's job) nor its per-platform baseline
+ * files. Non-asserting — a render regression is caught by `npm run screenshots:check`, not the test.
+ */
+export async function stableShot(page: Page, name: string, options: StableShotOptions = {}): Promise<void> {
+  await waitForRenderStable(page, options);
+  await page.screenshot({
+    path: name.includes('/') ? name : `test-results/${name}`,
+    fullPage: options.fullPage ?? false,
+    ...SHOT_OPTS,
+  });
+}
+
+// ============================================================================
+// Label normalization + app-readiness (shared by the kicad and e2e/widget suites)
+// ============================================================================
+
+/**
+ * Normalize a wx label / menu item / tooltip for matching: drop the '&' accelerator
+ * marker and any trailing "..." / "…" / whitespace, so "Open", "Open...", "Open…" and
+ * "&Open..." all compare equal. Lets a spec name the ONE canonical label and match it
+ * regardless of the build's ellipsis rendering — replacing "try A, else A…, else A"
+ * fallback chains (which silently mask a real label regression).
+ */
+export function labelBase(s: string | undefined | null): string {
+  return (s ?? '').replace(/&/g, '').replace(/[.…\s]+$/u, '').trim();
+}
+
+/**
+ * Wait until a wx widget-harness app is interactive: the emscripten canvas is visible and
+ * the element registry has registered its widgets. The e2e counterpart to
+ * waitForEditorReady (no toolbar requirement — widget demos have no toolbar). Replaces the
+ * `tryLoadApp()` + fixed 500ms settle + `waitForRegistry()` trio with one deterministic
+ * wait that FAILS LOUDLY (not a swallowed boolean). Only for registry-backed harnesses.
+ */
+export async function waitForWxApp(
+  page: Page,
+  options: { timeout?: number; selector?: string } = {}
+): Promise<void> {
+  const timeout = options.timeout ?? 30000;
+  const selector = options.selector ?? '#canvas';
+  await page.locator(selector).waitFor({ state: 'visible', timeout });
+  await waitUntil(
+    page,
+    () => {
+      const r = window.wxElementRegistry;
+      return !!r && typeof r.findAll === 'function' && r.findAll({}).length > 0;
+    },
+    'wx element registry populated',
+    { timeout }
+  );
+}
+
+/**
+ * Wait until a registry-LESS wx canvas app (e.g. the drag-drop / GAL harnesses that draw to
+ * #canvas but register no widgets) is interactive: the canvas is visible and its pixels have
+ * settled. The deterministic counterpart to waitForWxApp for apps whose wxElementRegistry
+ * never populates — replaces `tryLoadApp` + a fixed 500ms settle with a real paint-settle.
+ */
+export async function waitForCanvasApp(
+  page: Page,
+  options: { timeout?: number; selector?: string } = {}
+): Promise<void> {
+  const timeout = options.timeout ?? 30000;
+  const selector = options.selector ?? '#canvas';
+  await page.locator(selector).waitFor({ state: 'visible', timeout });
+  await waitForCanvasStable(page, selector, { timeout });
+}
+
+/**
+ * Wait for a rendered menu item whose text matches `base` (ignoring '&' and a trailing
+ * "..."/"…"), then click it; throw if it never appears. Collapses the
+ * `clickMenuItem('Open...') || clickMenuItem('Open…') || clickMenuItem('Open')` fallback
+ * chains AND the fixed post-menu-open sleep into one deterministic, loud call.
+ */
+export async function clickMenuItemByText(
+  page: Page,
+  base: string,
+  options: { timeout?: number } = {}
+): Promise<void> {
+  const timeout = options.timeout ?? 15000;
+  const want = labelBase(base);
+  // Match an ENABLED menu item (mirrors the old clickMenuItem, which returned false for a
+  // present-but-disabled item — so a disabled target still fails loudly).
+  await waitUntil(
+    page,
+    (w: string) => {
+      const norm = (s: string) => (s || '').replace(/&/g, '').replace(/[.…\s]+$/u, '').trim();
+      const r = window.wxElementRegistry;
+      if (!r || !r.findAllRendered) return false;
+      return r.findAllRendered({ elementType: 'menuitem' })
+        .some((m) => norm(m.label || '') === w && m.enabled !== false);
+    },
+    `enabled menu item "${base}"`,
+    { timeout, arg: want }
+  );
+  const pos = await page.evaluate((w: string) => {
+    const norm = (s: string) => (s || '').replace(/&/g, '').replace(/[.…\s]+$/u, '').trim();
+    const r = window.wxElementRegistry!;
+    const hit = r.findAllRendered!({ elementType: 'menuitem' })
+      .find((m) => norm(m.label || '') === w && m.enabled !== false);
+    return hit ? { x: hit.centerX, y: hit.centerY } : null;
+  }, want);
+  if (!pos) throw new Error(`clickMenuItemByText: "${base}" vanished after appearing`);
+  await page.mouse.click(pos.x, pos.y);
+}
+
+/**
+ * Focus the emscripten canvas by clicking its centre; asserts the canvas is visible and
+ * has a layout box (throws loudly) instead of the `if (box) click` defensive skip that was
+ * copy-pasted across specs.
+ */
+export async function focusCanvas(page: Page, selector = '#canvas'): Promise<void> {
+  const loc = page.locator(selector);
+  await loc.waitFor({ state: 'visible', timeout: 30000 });
+  const box = await loc.boundingBox();
+  if (!box) throw new Error(`focusCanvas: ${selector} has no bounding box`);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}

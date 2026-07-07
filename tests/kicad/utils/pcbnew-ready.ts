@@ -23,25 +23,17 @@ export async function dismissWizardIfPresent(page: Page): Promise<void> {
 }
 
 /**
- * Wait for pcbnew to boot: 2D canvas visible, element registry populated, the
- * first-run wizard dismissed, and the main PcbFrame registered & visible.
+ * Wait for pcbnew to boot: 2D canvas visible and the main PcbFrame registered &
+ * visible. pcbnew.html seeds the config so the first-run wizard never opens —
+ * PcbFrame becoming visible is the single deterministic "editor is up" signal, so
+ * no wizard dismissal and no fixed settle sleeps are needed.
  */
 export async function waitForPcbnew(page: Page): Promise<void> {
     await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-    await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-    // Registry object ≠ app booted: wait for real UI entries (wizard or main
-    // frame) before dismissing — CI boots slower and the dismiss loop is bounded.
-    await page.waitForFunction(() => {
-        const registry = window.wxElementRegistry;
-        return !!registry && registry.findAll({}).length > 0;
-    }, null, { timeout: 150000 });
-    await page.waitForTimeout(2500);
-    await dismissWizardIfPresent(page);
     await page.waitForFunction(() => {
         const registry = window.wxElementRegistry;
         if (!registry) return false;
         return registry.findAll({ visible: true })
             .some((el) => el.name === 'PcbFrame');
-    }, null, { timeout: 90000 });
-    await page.waitForTimeout(1500);
+    }, null, { timeout: 150000 });
 }

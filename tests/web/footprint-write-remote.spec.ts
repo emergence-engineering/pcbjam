@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitForRegistry, clickByTooltip } from '../e2e/utils/element-tracker';
+import { clickByTooltip, waitForWxApp, focusCanvas, stableShot } from '../e2e/utils/element-tracker';
 
 // Mirrors @pcbjam/shared USER_HEADER (tests/ doesn't depend on the shared pkg).
 const USER_HEADER = 'x-pcbjam-user';
@@ -18,14 +18,7 @@ const SCOPE = 'default';
  */
 
 const BACKEND = process.env.BACKEND_URL ?? 'http://localhost:3060';
-const SHOT = (n: string) => `test-results/fpremote-${n}.png`;
 const USER_LIB = 'my-symbols'; // slug of the boot-ensured "My Symbols" container
-
-async function focusCanvas(page: Page): Promise<void> {
-  const box = await page.locator('#canvas').boundingBox();
-  if (box) await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-  await page.waitForTimeout(300);
-}
 
 /** Click a LIB_TREE row by label, correcting the constant dataviewitem Y offset. */
 async function clickTreeRow(page: Page, label: string): Promise<boolean> {
@@ -43,7 +36,7 @@ async function clickTreeRow(page: Page, label: string): Promise<boolean> {
   }, label);
   if (!hit) return false;
   await page.mouse.click(hit.x, hit.y);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell
   return true;
 }
 
@@ -54,37 +47,37 @@ test('footprint editor save persists to the backend (remote write round-trip)', 
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 
   await page.goto(`/default/projects/demo/-/footprint_editor?libowner=${owner}`);
-  await expect(page.locator('#canvas')).toBeVisible({ timeout: 180000 });
-  await waitForRegistry(page, 180000);
-  await page.waitForFunction(
-    () => !!window.wxElementRegistry && window.wxElementRegistry.findAll({}).length > 5,
-    null,
-    { timeout: 180000 },
-  );
+  await waitForWxApp(page, { timeout: 180000 });
   await page.waitForFunction(() => !!(window as any).kicadLibs, null, { timeout: 60000 });
-  await page.waitForTimeout(2000);
-  await page.screenshot({ path: SHOT('01-boot'), scale: 'css' });
+  await stableShot(page, 'fpremote-01-boot.png');
 
   // Boot's ensure-user-lib created the writable container for this owner.
   const ownerHeaders = { [USER_HEADER]: owner };
-  const libsRes = await fetch(`${BACKEND}/api/scopes/${SCOPE}/libs?kind=footprint`, { headers: ownerHeaders });
-  const libsBody = (await libsRes.json()) as { id: string; type: string }[];
+  let libsBody: { id: string; type: string }[] = [];
+  await expect
+    .poll(
+      async () => {
+        const libsRes = await fetch(`${BACKEND}/api/scopes/${SCOPE}/libs?kind=footprint`, { headers: ownerHeaders });
+        libsBody = libsRes.ok ? ((await libsRes.json()) as { id: string; type: string }[]) : [];
+        return libsBody.some((l) => l.type === 'user' && l.id === USER_LIB);
+      },
+      { message: 'user lib created at boot', timeout: 30000, intervals: [500] },
+    )
+    .toBe(true);
   logs.push(`[spec] libs: ${JSON.stringify(libsBody)}`);
-  expect(libsBody.some((l) => l.type === 'user' && l.id === USER_LIB), 'user lib created at boot').toBe(true);
 
   // Select the writable USER lib (NOT an origin — origins would mirror, which the
   // example backend doesn't implement) so New Footprint targets it.
   expect(await clickTreeRow(page, 'My Symbols'), 'selected the user lib row').toBe(true);
-  await page.waitForTimeout(400);
-  await page.screenshot({ path: SHOT('02-lib-selected'), scale: 'css' });
+  await stableShot(page, 'fpremote-02-lib-selected.png');
 
   // New Footprint → auto-saves into the writable lib (tryToSaveFootprintInLibrary).
   expect(await clickByTooltip(page, 'New Footprint'), 'New Footprint clicked').toBe(true);
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(1500); // eslint-disable-line -- documented interaction dwell
   // Belt-and-braces explicit save.
   await focusCanvas(page);
   await page.keyboard.press('Control+s');
-  await page.screenshot({ path: SHOT('03-created'), scale: 'css' });
+  await stableShot(page, 'fpremote-03-created.png');
 
   // Poll the backend until a footprint item lands.
   let items: { kind: string; name: string }[] = [];
@@ -98,7 +91,7 @@ test('footprint editor save persists to the backend (remote write round-trip)', 
       { timeout: 30000, intervals: [500] },
     )
     .toBeGreaterThan(0);
-  await page.screenshot({ path: SHOT('04-saved'), scale: 'css' });
+  await stableShot(page, 'fpremote-04-saved.png');
 
   const saved = items.find((i) => i.kind === 'footprint')!;
   logs.push(`[spec] backend footprint item: ${JSON.stringify(saved)}`);

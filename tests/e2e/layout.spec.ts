@@ -1,37 +1,35 @@
 // wxSplitterWindow and wxScrolledWindow Tests - Layout controls KiCad uses
-import { test, expect, MAIN_CANVAS, tryLoadApp, getCanvasBox } from './utils/fixtures';
-import { getSplitterSash, findRenderedByType } from './utils/element-tracker';
+import { test, expect, MAIN_CANVAS, getCanvasBox } from './utils/fixtures';
+import { getSplitterSash, findRenderedByType, waitForWxApp, stableShot } from './utils/element-tracker';
 
 test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
 
   test('Layout test app loads successfully', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
-    const loaded = await tryLoadApp(page);
+    await waitForWxApp(page);
 
-    await page.screenshot({ path: 'test-results/layout-01-loaded.png', fullPage: true });
+    await stableShot(page, 'layout-01-loaded.png', { fullPage: true });
 
     const hasStartup = testLogger.consoleLogs.some(l => l.includes('Layout test app started'));
 
-    expect(loaded, 'Layout app should load').toBe(true);
     expect(testLogger.errors.filter(e => !e.includes('favicon'))).toHaveLength(0);
   });
 
   test('Splitter is visible with two panes', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForWxApp(page);
 
-    await page.screenshot({ path: 'test-results/layout-02-splitter.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('Splitter position')),
+      { message: 'Splitter position should be logged' }
+    ).toBe(true);
 
-    const hasSplitterLog = testLogger.consoleLogs.some(l => l.includes('Splitter position'));
-
-    expect(hasSplitterLog).toBe(true);
+    await stableShot(page, 'layout-02-splitter.png', { fullPage: true });
   });
 
   test('Splitter sash can be dragged', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForWxApp(page);
 
     // Get splitter sash from element registry
     const sash = await getSplitterSash(page);
@@ -42,9 +40,8 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
     await page.mouse.down();
     await page.mouse.move(sash!.centerX + 100, sash!.centerY, { steps: 10 });
     await page.mouse.up();
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/layout-03-sash-dragged.png', fullPage: true });
+    await stableShot(page, 'layout-03-sash-dragged.png', { fullPage: true });
 
     // Verify sash position updated
     const sashAfter = await getSplitterSash(page);
@@ -53,32 +50,28 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
 
   test('Scrolled windows show content', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForWxApp(page);
 
     const box = await getCanvasBox(page);
 
     // Scroll in left pane
     await page.mouse.move(box.x + 150, box.y + 200);
     await page.mouse.wheel(0, 100);
-    await page.waitForTimeout(300);
 
-    await page.screenshot({ path: 'test-results/layout-04-scrolled-left.png', fullPage: true });
+    await stableShot(page, 'layout-04-scrolled-left.png', { fullPage: true });
 
     // Scroll in right pane
     await page.mouse.move(box.x + 500, box.y + 200);
     await page.mouse.wheel(0, 100);
-    await page.waitForTimeout(300);
 
-    await page.screenshot({ path: 'test-results/layout-05-scrolled-right.png', fullPage: true });
+    await stableShot(page, 'layout-05-scrolled-right.png', { fullPage: true });
 
     expect(true).toBe(true);
   });
 
   test('Layout controls work together', async ({ page, testLogger }) => {
     await page.goto('/standalone/layout/layout_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
+    await waitForWxApp(page);
 
     // Get splitter sash from element registry
     const sash = await getSplitterSash(page);
@@ -89,7 +82,7 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
     await page.mouse.down();
     await page.mouse.move(sash!.centerX + 100, sash!.centerY, { steps: 5 });
     await page.mouse.up();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell (splitter drag commit before re-reading sash from registry)
 
     // Get updated sash position after drag
     const sashAfter = await getSplitterSash(page);
@@ -98,14 +91,13 @@ test.describe('wxSplitterWindow & wxScrolledWindow Tests', () => {
     // Scroll left pane (use position left of sash)
     await page.mouse.move(sashAfter!.centerX - 100, sashAfter!.centerY);
     await page.mouse.wheel(0, 50);
-    await page.waitForTimeout(200);
+    await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell (scroll commit between the two pane scrolls)
 
     // Scroll right pane (use position right of sash)
     await page.mouse.move(sashAfter!.centerX + 100, sashAfter!.centerY);
     await page.mouse.wheel(0, 50);
-    await page.waitForTimeout(200);
 
-    await page.screenshot({ path: 'test-results/layout-06-combined.png', fullPage: true });
+    await stableShot(page, 'layout-06-combined.png', { fullPage: true });
 
     expect(testLogger.errors.filter(e => !e.includes('favicon'))).toHaveLength(0);
   });

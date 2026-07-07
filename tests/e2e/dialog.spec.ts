@@ -1,92 +1,75 @@
 // wxDialog/wxMessageBox Tests - Modal dialogs for KiCad confirmations, errors, properties
 // Uses element registry for semantic element identification
-import { test, expect, tryLoadApp, waitForRegistry, clickByLabel } from './utils/fixtures';
+import { test, expect, waitForWxApp, clickByLabel } from './utils/fixtures';
+import { stableShot } from './utils/element-tracker';
 
 test.describe('wxDialog/wxMessageBox Tests', () => {
   test('Dialog test app loads successfully', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
-    const loaded = await tryLoadApp(page);
+    await waitForWxApp(page);
 
-    await page.screenshot({ path: 'test-results/dialog-01-loaded.png', fullPage: true });
+    await stableShot(page, 'dialog-01-loaded.png', { fullPage: true });
 
     const hasStartupLog = testLogger.consoleLogs.some(log =>
       log.includes('DIALOG_TEST') && log.includes('started successfully')
     );
 
-    expect(loaded, 'Canvas should be visible').toBe(true);
     expect(testLogger.errors.filter(e => !e.includes('favicon'))).toHaveLength(0);
   });
 
   test('Info dialog button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
-
-    await waitForRegistry(page);
+    await waitForWxApp(page);
 
     // Click "Info Dialog" button
     await clickByLabel(page, 'Info Dialog');
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/dialog-02-info-clicked.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('Opening Info dialog')),
+      { message: 'Info dialog should open' }
+    ).toBe(true);
 
-    const hasInfoEvent = testLogger.consoleLogs.some(log =>
-      log.includes('Opening Info dialog')
-    );
-
-    expect(hasInfoEvent, 'Info dialog should open').toBe(true);
+    await stableShot(page, 'dialog-02-info-clicked.png', { fullPage: true });
   });
 
   test('Yes/No dialog button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
-
-    await waitForRegistry(page);
+    await waitForWxApp(page);
 
     // Click "Yes/No Dialog" button
     await clickByLabel(page, 'Yes/No Dialog');
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/dialog-03-yesno-clicked.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('Opening Yes/No dialog')),
+      { message: 'Yes/No dialog should open' }
+    ).toBe(true);
 
-    const hasYesNoEvent = testLogger.consoleLogs.some(log =>
-      log.includes('Opening Yes/No dialog')
-    );
-    expect(hasYesNoEvent, 'Yes/No dialog should open').toBe(true);
+    await stableShot(page, 'dialog-03-yesno-clicked.png', { fullPage: true });
   });
 
   test('Error dialog button can be clicked', async ({ page, testLogger }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
-
-    await waitForRegistry(page);
+    await waitForWxApp(page);
 
     // Click "Error Dialog" button
     await clickByLabel(page, 'Error Dialog');
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/dialog-04-error-clicked.png', fullPage: true });
+    await expect.poll(
+      () => testLogger.consoleLogs.some(l => l.includes('Opening Error dialog')),
+      { message: 'Error dialog should open' }
+    ).toBe(true);
 
-    const hasErrorEvent = testLogger.consoleLogs.some(log =>
-      log.includes('Opening Error dialog')
-    );
-    expect(hasErrorEvent, 'Error dialog should open').toBe(true);
+    await stableShot(page, 'dialog-04-error-clicked.png', { fullPage: true });
   });
 
-  test('Custom dialog button can be clicked', async ({ page, testLogger }) => {
+  test('Custom dialog button can be clicked', async ({ page }) => {
     await page.goto('/standalone/dialog/dialog_test.html');
-    const loaded = await tryLoadApp(page);
-    expect(loaded, 'App should load').toBe(true);
-
-    await waitForRegistry(page);
+    await waitForWxApp(page);
 
     // Click "Custom Dialog" button
     await clickByLabel(page, 'Custom Dialog');
-    await page.waitForTimeout(500);
 
-    await page.screenshot({ path: 'test-results/dialog-05-custom-clicked.png', fullPage: true });
+    await stableShot(page, 'dialog-05-custom-clicked.png', { fullPage: true });
 
     expect(true).toBe(true);
   });

@@ -2,14 +2,13 @@
 // C++ (wxEVT_SCROLL for the standalone wxScrollBar; wxEVT_SCROLLWIN for the
 // wxScrolledWindow gutter, which scrolls the content). The thumb registers as
 // 'slider' + 'slidertrack' so Playwright can drag it.
-import { test, expect, tryLoadApp } from './utils/fixtures';
-import { findRenderedByType } from './utils/element-tracker';
+import { test, expect, waitForWxApp } from './utils/fixtures';
+import { findRenderedByType, stableShot } from './utils/element-tracker';
 
 test.describe('DOM-port scrollbars', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/standalone/scrollbar/scrollbar_test.html');
-    expect(await tryLoadApp(page, 30000), 'scrollbar app should load').toBe(true);
-    await page.waitForTimeout(500);
+    await waitForWxApp(page);
   });
 
   test('scrollbars render draggable thumbs', async ({ page, testLogger }) => {
@@ -18,7 +17,7 @@ test.describe('DOM-port scrollbars', () => {
       { timeout: 8000, message: 'scrollbar thumbs should register' },
     ).toBeGreaterThanOrEqual(2);
 
-    await page.screenshot({ path: 'test-results/scrollbar-01-loaded.png', fullPage: true });
+    await stableShot(page, 'scrollbar-01-loaded.png', { fullPage: true });
     expect(testLogger.errors.filter((e) => !e.includes('favicon'))).toHaveLength(0);
   });
 
@@ -49,15 +48,15 @@ test.describe('DOM-port scrollbars', () => {
       await page.mouse.down();
       await page.mouse.move(tx, ty, { steps: 6 });
       await page.mouse.up();
-      await page.waitForTimeout(150);
+      await page.waitForTimeout(150); // eslint-disable-line -- documented interaction dwell
     }
-
-    await page.screenshot({ path: 'test-results/scrollbar-02-dragged.png', fullPage: true });
 
     // At least one standalone scrollbar must have reported a non-zero position.
     await expect.poll(
       () => testLogger.consoleLogs.some((l) => /\[SCROLLBAR_EVENT\] scrollbar pos [1-9]/.test(l)),
       { timeout: 8000, message: 'a standalone scrollbar drag should report a non-zero position' },
     ).toBe(true);
+
+    await stableShot(page, 'scrollbar-02-dragged.png', { fullPage: true });
   });
 });

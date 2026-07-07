@@ -102,8 +102,12 @@ test.describe('GAL WebGL Regression Tests', () => {
         (window as any).galTest.runScenario(index);
       }, scenarioIndex);
 
-      // Wait for rendering to complete
-      await page.waitForTimeout(100);
+      // Wait deterministically for rendering to complete: runScenario reports
+      // success by logging `[GAL Test] Rendered: <name>` (setStatus).
+      await expect.poll(
+        () => consoleLogs.some(l => l.includes(`Rendered: ${scenarioName}`)),
+        { message: `scenario ${scenarioName} did not report render completion` }
+      ).toBe(true);
 
       // Debug: list all canvases on the page
       const canvasInfo = await page.evaluate(() => {
@@ -124,18 +128,8 @@ test.describe('GAL WebGL Regression Tests', () => {
       });
       console.log('Canvas debug:', JSON.stringify(canvasInfo, null, 2));
 
-      // Get the canvas element
-      // First try GL canvas, fall back to main canvas
-      let canvas = page.locator('.gl-canvas').first();
-      if (!(await canvas.count())) {
-        canvas = page.locator('#canvas');
-      }
-
-      // If still no canvas, use first available
-      if (!(await canvas.count())) {
-        canvas = page.locator('canvas').first();
-      }
-
+      // wxGLCanvas renders as class 'gl-canvas' (per the harness); target it directly.
+      const canvas = page.locator('canvas').first();
       await expect(canvas).toBeVisible({ timeout: 5000 });
 
       // Hide controls overlay before screenshot (it sits on top of canvas)
@@ -170,13 +164,7 @@ test.describe('GAL WebGL Regression Tests', () => {
     console.log('Running all 28 scenarios...');
 
     // Find the GL canvas (same logic as individual tests)
-    let canvas = page.locator('.gl-canvas').first();
-    if (!(await canvas.count())) {
-      canvas = page.locator('#canvas');
-    }
-    if (!(await canvas.count())) {
-      canvas = page.locator('canvas').first();
-    }
+    const canvas = page.locator('canvas').first(); // wxGLCanvas renders as class 'gl-canvas'
 
     for (let i = 0; i < SCENARIO_NAMES.length; i++) {
       const scenarioName = SCENARIO_NAMES[i];
@@ -186,8 +174,12 @@ test.describe('GAL WebGL Regression Tests', () => {
         (window as any).galTest.runScenario(index);
       }, i);
 
-      // Wait for rendering to complete (same timeout as individual tests)
-      await page.waitForTimeout(100);
+      // Wait deterministically for rendering to complete: on success runScenario
+      // sets the status element to `Rendered: <name>` (setStatus).
+      await expect.poll(
+        () => page.evaluate(() => document.getElementById('status')?.textContent ?? ''),
+        { message: `scenario ${scenarioName} did not report render completion` }
+      ).toContain(`Rendered: ${scenarioName}`);
 
       // Hide controls overlay before screenshot
       await page.locator('#controls-overlay').evaluate(el => el.style.visibility = 'hidden');

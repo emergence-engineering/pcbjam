@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByLabel, clickMenuBarItem, clickMenuItem } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItem, waitForEditorReady } from '../e2e/utils/element-tracker';
 
 /**
  * Probe spec: drives the wizard, opens File menu, clicks Open, then dumps
@@ -17,32 +17,6 @@ import { clickByLabel, clickMenuBarItem, clickMenuItem } from '../e2e/utils/elem
  * This is a one-shot investigation, not a regression test. It always passes;
  * the value is the captured state.
  */
-
-async function completeWizard(page: Page): Promise<void> {
-    await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-    await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-    // Registry object ≠ app booted: wait for real UI entries (the wizard is the
-    // first window) so the bounded click loop below doesn't start too early.
-    // CI boots slower (baseline-JIT wasm + software GL under xvfb).
-    await page.waitForFunction(() => {
-        const registry = window.wxElementRegistry;
-        return !!registry && registry.findAll({}).length > 0;
-    }, null, { timeout: 150000 });
-    await page.waitForTimeout(2000);
-
-    for (let i = 1; i <= 10; i++) {
-        let clicked = await clickByLabel(page, 'Next >');
-
-        if (!clicked) {
-            clicked = await clickByLabel(page, 'Finish');
-            break;
-        }
-
-        await page.waitForTimeout(500);
-    }
-
-    await page.waitForTimeout(2000);
-}
 
 async function dumpRegistry(page: Page, label: string): Promise<void> {
     const summary = await page.evaluate((tag: string) => {
@@ -190,8 +164,12 @@ test.describe('PCB load probe', () => {
         await page.goto('/kicad/pcbnew.html');
     });
 
+    // NOTE: This is a one-shot DIAGNOSTIC probe (always green; its value is the logged
+    // state dumps + screenshots). The fixed waits below are intentional "let state evolve,
+    // then capture it" intervals, not readiness races — they are exempt from the no-sleep
+    // guard on purpose. Regression specs (load-pcb, occ-export, …) use deterministic waits.
     test('inspect File→Open dialog state', async ({ page }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
 
         await page.screenshot({ path: 'test-results/probe-00-after-wizard.png', scale: 'css' });
 
@@ -212,7 +190,7 @@ test.describe('PCB load probe', () => {
         // Click File menu
         const fileClicked = await clickMenuBarItem(page, 'File');
         console.log(`[PROBE] File menu clicked: ${fileClicked}`);
-        await page.waitForTimeout(500);
+        await page.waitForTimeout(500);  // eslint-disable-line -- diagnostic one-shot; intentional state-capture interval
 
         await page.screenshot({ path: 'test-results/probe-01-file-menu-open.png', scale: 'css' });
         await dumpRegistry(page, 'file-menu-open');
@@ -226,13 +204,13 @@ test.describe('PCB load probe', () => {
         // Give the file dialog generous time to render — wxGenericFileDialog
         // populates its file list by scanning the directory, which on MEMFS
         // is fast but goes through the Asyncify loop.
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(3000);  // eslint-disable-line -- diagnostic one-shot; intentional state-capture interval
 
         await page.screenshot({ path: 'test-results/probe-02-after-open-click.png', scale: 'css' });
         await dumpRegistry(page, 'after-open-click');
 
         // Wait a bit longer and dump again, in case the dialog paints late
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(3000);  // eslint-disable-line -- diagnostic one-shot; intentional state-capture interval
         await page.screenshot({ path: 'test-results/probe-03-late.png', scale: 'css' });
         await dumpRegistry(page, 'late');
 

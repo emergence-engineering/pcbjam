@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByLabel, findRenderedByType } from '../e2e/utils/element-tracker';
+import { findRenderedByType, waitForEditorReady, stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * In-app proof that the two DOM-port features work inside a real KiCad app.
@@ -16,22 +16,6 @@ import { clickByLabel, findRenderedByType } from '../e2e/utils/element-tracker';
  * Screenshots (test-results/pl_editor-*.png) are the deliverable — always
  * open them to confirm the menu sits at the cursor and the thumb is visible.
  */
-
-async function waitForEditor(page: Page): Promise<void> {
-  await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-  await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-  await page.waitForTimeout(2000);
-  // pl_editor's seeded config skips the wizard; the loop is a harmless no-op.
-  for (let i = 0; i < 10; i++) {
-    const next = await clickByLabel(page, 'Next >');
-    if (!next) {
-      await clickByLabel(page, 'Finish');
-      break;
-    }
-    await page.waitForTimeout(400);
-  }
-  await page.waitForTimeout(1500);
-}
 
 async function getGlBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
   const id = await page.evaluate(() => {
@@ -63,7 +47,7 @@ test.describe('pl_editor: DOM-port context menu + scrollbar', () => {
   });
 
   test('right-click on the canvas opens a context menu', async ({ page, testLogger }) => {
-    await waitForEditor(page);
+    await waitForEditorReady(page);
 
     const box = await getGlBox(page);
     const x = Math.round(box.x + box.width * 0.5);
@@ -71,7 +55,9 @@ test.describe('pl_editor: DOM-port context menu + scrollbar', () => {
 
     // Left-click first so the selection tool is active, then right-click.
     await page.mouse.click(x, y);
-    await page.waitForTimeout(300);
+    // Small settle so the activation click is processed before the right-click — no
+    // JS-observable "selection tool active" signal to poll (documented interaction wait).
+    await page.waitForTimeout(300); // eslint-disable-line -- see comment above
     await page.mouse.click(x, y, { button: 'right' });
 
     await expect.poll(async () => (await popupItems(page)).length, {
@@ -79,7 +65,7 @@ test.describe('pl_editor: DOM-port context menu + scrollbar', () => {
       message: 'the canvas right-click should open a DOM context menu',
     }).toBeGreaterThan(0);
 
-    await page.screenshot({ path: 'test-results/pl_editor-context-menu.png', fullPage: true });
+    await stableShot(page, 'pl_editor-context-menu.png', { fullPage: true });
 
     // Dismiss it; the popup should disappear.
     await page.keyboard.press('Escape');
@@ -108,37 +94,37 @@ test.describe('pl_editor: DOM-port context menu + scrollbar', () => {
   }
 
   test('the properties panel shows a draggable scrollbar gutter', async ({ page }) => {
-    await waitForEditor(page);
+    await waitForEditorReady(page);
 
     // The right-hand properties panel's "General Options" tab is a
     // wxScrolledWindow full of page-setup fields; in a short window it
     // overflows, so its built-in scrollbar gutter renders. Switch to it and
     // shrink the window.
     await page.setViewportSize({ width: 1180, height: 460 });
-    await page.waitForTimeout(500);
+    // Let the viewport resize reflow the panel before clicking the tab — a resize has
+    // no single JS-observable "reflow done" signal (documented interaction wait).
+    await page.waitForTimeout(500); // eslint-disable-line -- see comment above
     // Click the "Gener..." tab (top-right of the properties panel).
     await page.mouse.click(1140, 80);
-    await page.waitForTimeout(900);
 
     await expect.poll(async () => (await visibleGutters(page)).length, {
       timeout: 12000,
       message: 'a built-in scrollbar gutter should render on the overflowing properties panel',
     }).toBeGreaterThan(0);
 
-    await page.screenshot({ path: 'test-results/pl_editor-scrollbar.png', fullPage: true });
+    await stableShot(page, 'pl_editor-scrollbar.png', { fullPage: true });
 
     // Drag the vertical gutter's thumb and screenshot the move.
     const tracks = await findRenderedByType(page, 'slidertrack');
     const sliders = await findRenderedByType(page, 'slider');
-    const vTrack = tracks.find((t) => t.height > t.width && t.height > 0) ?? null;
-    const vThumb = vTrack ? sliders.find((s) => s.parentId === vTrack.parentId) : null;
-    if (vThumb && vTrack) {
-      await page.mouse.move(vThumb.centerX, vThumb.centerY);
-      await page.mouse.down();
-      await page.mouse.move(vTrack.centerX, vTrack.screenY + vTrack.height * 0.7, { steps: 6 });
-      await page.mouse.up();
-      await page.waitForTimeout(300);
-      await page.screenshot({ path: 'test-results/pl_editor-scrollbar-dragged.png', fullPage: true });
-    }
+    const vTrack = tracks.find((t) => t.height > t.width && t.height > 0);
+    expect(vTrack, 'a vertical scrollbar track should exist').toBeTruthy();
+    const vThumb = sliders.find((s) => s.parentId === vTrack!.parentId);
+    expect(vThumb, 'a vertical gutter thumb should exist').toBeTruthy();
+    await page.mouse.move(vThumb!.centerX, vThumb!.centerY);
+    await page.mouse.down();
+    await page.mouse.move(vTrack!.centerX, vTrack!.screenY + vTrack!.height * 0.7, { steps: 6 });
+    await page.mouse.up();
+    await stableShot(page, 'pl_editor-scrollbar-dragged.png', { fullPage: true });
   });
 });

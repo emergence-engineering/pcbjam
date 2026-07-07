@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { stableShot } from '../e2e/utils/element-tracker';
 
 /**
  * Eeschema URL-detection wxRegEx regression (WASM strconv UTF-8 fix).
@@ -104,14 +105,11 @@ test.describe('Eeschema URL-detection regex', () => {
             .poll(async () => page.title(), { timeout: 30000, intervals: [500] })
             .toMatch(/url/i);
 
-        // Let the canvas paint the text_box (this is when IsURL()/LinkifyHTML()
-        // compile the static wxRegEx and would have thrown the modal).
-        await page.waitForTimeout(1500);
-
-        await page.screenshot({
-            path: 'test-results/eeschema-url-regex.png',
-            scale: 'css',
-        });
+        // Capture the painted text_box. Stabilizing the screenshot waits for the paint
+        // to settle — which is when IsURL()/LinkifyHTML() compile the static wxRegEx and
+        // would have thrown the modal — so the error checks below see the real outcome.
+        // (Replaces the old fixed 1500ms "let the canvas paint" sleep.)
+        await stableShot(page, 'eeschema-url-regex.png');
 
         // The wxRegEx compile failure surfaces two ways: a wxLogError logged to
         // the console, and (its default GUI target) a modal error dialog. Assert

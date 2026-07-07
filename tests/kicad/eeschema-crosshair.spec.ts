@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByLabel, findByTooltip } from '../e2e/utils/element-tracker';
+import { findByTooltip, waitForCanvasStable, waitForEditorReady } from '../e2e/utils/element-tracker';
 
 /**
  * Eeschema crosshair-mode toolbar button (pcbjam #24)
@@ -109,30 +109,6 @@ async function compareScreenshots(
     });
 }
 
-// Walk the wxWidgets setup wizard (Next > … Finish) until the editor canvas is live.
-async function completeWizard(page: Page): Promise<void> {
-    await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-    await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-    await page.waitForFunction(() => {
-        const registry = window.wxElementRegistry;
-        return !!registry && registry.findAll({}).length > 0;
-    }, null, { timeout: 150000 });
-    await page.waitForTimeout(2000);
-
-    for (let i = 1; i <= 10; i++) {
-        let clicked = await clickByLabel(page, 'Next >');
-
-        if (!clicked) {
-            await clickByLabel(page, 'Finish');
-            break;
-        }
-
-        await page.waitForTimeout(500);
-    }
-
-    await page.waitForTimeout(2000);
-}
-
 // Hide the native browser cursor so it can't pollute canvas screenshots.
 async function hideCursor(page: Page): Promise<void> {
     await page.evaluate(() => {
@@ -142,7 +118,7 @@ async function hideCursor(page: Page): Promise<void> {
 }
 
 // Bounding box of the visible GL (schematic) canvas.
-async function glCanvasBox(page: Page): Promise<{ x: number; y: number; width: number; height: number }> {
+async function glCanvasBox(page: Page): Promise<{ x: number; y: number; width: number; height: number; sel: string }> {
     const glCanvasId = await page.evaluate(() => {
         const glCanvas =
             Array.from(document.querySelectorAll('[id^="glcanvas-"]'))
@@ -164,7 +140,7 @@ async function glCanvasBox(page: Page): Promise<{ x: number; y: number; width: n
         throw new Error('GL canvas bounding box unavailable');
     }
 
-    return box;
+    return { ...box, sel: `#${glCanvasId}` };
 }
 
 test.describe('Eeschema crosshair modes', () => {
@@ -179,7 +155,7 @@ test.describe('Eeschema crosshair modes', () => {
     // generically by tests/e2e/popup.spec.ts. Each click advances the group's selected action;
     // the tooltip + the rendered crosshair both change.
     test('crosshair toolbar button cycles small -> full -> 45 on click', async ({ page, testLogger }) => {
-        await completeWizard(page);
+        await waitForEditorReady(page);
         await hideCursor(page);
 
         await page.waitForFunction((match: string) => {
@@ -196,10 +172,12 @@ test.describe('Eeschema crosshair modes', () => {
         // Draw Wires guarantees the GAL crosshair cursor is shown; we only MOVE over the canvas
         // (never click it) so no wire is drawn.
         const drawWires = await findByTooltip(page, 'Draw Wires', { elementType: 'tool' });
-        if (drawWires) {
-            await page.mouse.click(drawWires.centerX, drawWires.centerY);
-            await page.waitForTimeout(500);
-        }
+        expect(drawWires, 'Draw Wires tool should exist').not.toBeNull();
+        await page.mouse.click(drawWires!.centerX, drawWires!.centerY);
+        await expect.poll(async () =>
+            ((await findByTooltip(page, 'Draw Wires', { elementType: 'tool' }))?.label ?? '').includes('[checked]'),
+            { timeout: 5000, intervals: [200] },
+        ).toBe(true);
 
         const box = await glCanvasBox(page);
         const probe = { x: Math.round(box.x + box.width * 0.5), y: Math.round(box.y + box.height * 0.5) };
@@ -214,23 +192,27 @@ test.describe('Eeschema crosshair modes', () => {
 
         // A quick click (no long hold) cycles; then re-settle the cursor on the canvas so the
         // crosshair redraws at the probe point in the new mode.
+        // Quick click (no long hold) cycles the mode; then re-settle the cursor on the
+        // canvas so the crosshair redraws at the probe point in the new mode. The caller
+        // confirms the new mode via the tooltip poll, then waits for the canvas to settle
+        // (waitForCanvasStable) before capturing — deterministic, no fixed sleeps.
         const clickAndSettle = async () => {
             await page.mouse.click(btn.x, btn.y);
             await page.mouse.move(probe.x + 1, probe.y + 1);
             await page.mouse.move(probe.x, probe.y);
-            await page.waitForTimeout(600);
         };
 
         await page.mouse.move(probe.x, probe.y);
-        await page.waitForTimeout(600);
-        const shotSmall = await page.screenshot({ path: 'test-results/eeschema-crosshair-00-small.png', scale: 'css' });
+        await waitForCanvasStable(page, box.sel);
+        const shotSmall = await page.screenshot({ scale: 'css' });
 
         // click 1 -> full-window
         await clickAndSettle();
         await expect.poll(tooltipNow, {
             message: 'one click should advance to Full-Window Crosshairs', timeout: 6000,
         }).toContain('Full-Window Crosshairs');
-        const shotFull = await page.screenshot({ path: 'test-results/eeschema-crosshair-01-full.png', scale: 'css' });
+        await waitForCanvasStable(page, box.sel);
+        const shotFull = await page.screenshot({ scale: 'css' });
         expect((await compareScreenshots(page, shotSmall, shotFull, diffRegion)).diffPixels,
             'full-window crosshair should visibly differ from the small crosshair').toBeGreaterThan(200);
 
@@ -239,7 +221,8 @@ test.describe('Eeschema crosshair modes', () => {
         await expect.poll(tooltipNow, {
             message: 'second click should advance to 45 Degree Crosshairs', timeout: 6000,
         }).toContain('45 Degree Crosshairs');
-        const shot45 = await page.screenshot({ path: 'test-results/eeschema-crosshair-02-45.png', scale: 'css' });
+        await waitForCanvasStable(page, box.sel);
+        const shot45 = await page.screenshot({ scale: 'css' });
         expect((await compareScreenshots(page, shotFull, shot45, diffRegion)).diffPixels,
             '45-degree crosshair should visibly differ from the full-window crosshair').toBeGreaterThan(200);
 
@@ -248,7 +231,6 @@ test.describe('Eeschema crosshair modes', () => {
         await expect.poll(tooltipNow, {
             message: 'third click should cycle back to Small crosshairs', timeout: 6000,
         }).toContain('Small crosshairs');
-        await page.screenshot({ path: 'test-results/eeschema-crosshair-03-small-again.png', scale: 'css' });
 
         const realErrors = testLogger.errors.filter((error: string) => !error.includes('favicon'));
         expect(realErrors).toEqual([]);

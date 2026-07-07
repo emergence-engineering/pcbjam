@@ -1,10 +1,10 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
 import {
-    clickByLabel,
     clickMenuBarItem,
     clickMenuItem,
-} from '../e2e/utils/element-tracker';
+    waitForEditorReady,
+    waitUntil, stableShot } from '../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './utils/fs-inject';
 import { waitForBoardLoaded } from './utils/board-ready';
 
@@ -65,50 +65,14 @@ const DEMOS: DemoCfg[] = [
     },
 ];
 
-async function dismissWizardIfPresent(page: Page): Promise<void> {
-    // KiCad first-run setup wizard. Click Next > until it's gone, then Finish.
-    // If no wizard, both clicks no-op immediately.
-    for (let i = 0; i < 12; i++) {
-        const advanced = await clickByLabel(page, 'Next >');
-        if (!advanced) break;
-        await page.waitForTimeout(400);
-    }
-    await clickByLabel(page, 'Finish');
-    await page.waitForTimeout(800);
-}
-
-async function waitForPcbnew(page: Page): Promise<void> {
-    await expect(page.locator('#canvas')).toBeVisible({ timeout: 90000 });
-    await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
-    // Registry object ≠ app booted: wait for real UI entries (wizard or main
-    // frame) before dismissing — CI boots slower (baseline-JIT wasm + software
-    // GL under xvfb) and the dismiss loop below is bounded.
-    await page.waitForFunction(() => {
-        const registry = window.wxElementRegistry;
-        return !!registry && registry.findAll({}).length > 0;
-    }, null, { timeout: 150000 });
-    await page.waitForTimeout(2500);
-    await dismissWizardIfPresent(page);
-    await page.waitForFunction(() => {
-        const registry = window.wxElementRegistry;
-        if (!registry) return false;
-        return registry.findAll({ visible: true })
-            .some((el) => el.name === 'PcbFrame');
-    }, null, { timeout: 90000 });
-    await page.waitForTimeout(1500);
-}
-
 function runLoadPcbTest(demo: DemoCfg): void {
     const pcbFilename = `${demo.stem}.kicad_pcb`;
     const proFilename = `${demo.stem}.kicad_pro`;
 
     test(`opens ${demo.name} demo from MEMFS through the wxFileDialog`, async ({ page, testLogger }) => {
         await page.goto('/kicad/pcbnew.html');
-        await waitForPcbnew(page);
-        await page.screenshot({
-            path: `test-results/load-pcb-${demo.name}-00-pcbnew-ready.png`,
-            scale: 'css',
-        });
+        await waitForEditorReady(page);
+        await stableShot(page, `load-pcb-${demo.name}-00-pcbnew-ready.png`);
 
         // ── Inject .kicad_pcb + .kicad_pro into the dialog's start dir. ──
         await injectFromSubmodule(
@@ -125,7 +89,15 @@ function runLoadPcbTest(demo: DemoCfg): void {
         // ── Drive the menu. ────────────────────────────────────────────
         const fileClicked = await clickMenuBarItem(page, 'File');
         expect(fileClicked, 'File menu should be findable').toBe(true);
-        await page.waitForTimeout(400);
+        await waitUntil(
+            page,
+            () => {
+                const r = window.wxElementRegistry;
+                if (!r?.findAllRendered) return false;
+                return r.findAllRendered({ elementType: 'menuitem' }).length > 3;
+            },
+            'File menu items rendered',
+        );
 
         const openClicked = await clickMenuItem(page, 'Open...');
         expect(openClicked, 'Open… menu item should be findable').toBe(true);
@@ -137,11 +109,9 @@ function runLoadPcbTest(demo: DemoCfg): void {
             return registry.findAll({ visible: true })
                 .some((el) => el.typeName === 'wxFileDialog');
         }, null, { timeout: 15000 });
-        await page.waitForTimeout(1000);
-        await page.screenshot({
-            path: `test-results/load-pcb-${demo.name}-01-dialog-open.png`,
-            scale: 'css',
-        });
+        // stableShot stabilizes the file-list paint before comparing — deterministically
+        // replacing a fixed 1000ms that used to catch the dialog mid-paint (black rectangle).
+        await stableShot(page, `load-pcb-${demo.name}-01-dialog-open.png`);
 
         // ── Focus the filename text field, type the name, accept. ──────
         //    The Open dialog gives default keyboard focus to the file LIST,
@@ -163,9 +133,11 @@ function runLoadPcbTest(demo: DemoCfg): void {
         if (!filenameInput) throw new Error('filename text input not found');
 
         await page.mouse.click(filenameInput.x, filenameInput.y);
-        await page.waitForTimeout(200);
+        // Small settle so the focus click lands before typing — no JS-observable "input
+        // focused" signal here (documented interaction wait).
+        await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell
         await page.keyboard.type(pcbFilename);
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell
         await page.keyboard.press('Enter');
 
         // ── Wait for the load to complete (no dialogs visible). The
@@ -176,7 +148,6 @@ function runLoadPcbTest(demo: DemoCfg): void {
         //    side-effect lives with the polling loop — calling page.evaluate
         //    from the test driver hangs once the post-load asyncify clipboard
         //    runtime error breaks the wasm event loop. ───────────────────
-        await page.waitForTimeout(1000);
 
         // ── Wait for the load to complete (no dialogs visible). ───────
         const result = await waitForBoardLoaded(page, testLogger, 60000);
