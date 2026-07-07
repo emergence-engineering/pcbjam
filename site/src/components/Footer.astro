@@ -1,4 +1,5 @@
 ---
+import { execSync } from 'node:child_process';
 import Icon from './Icon.astro';
 import EECredit from './EECredit.astro';
 
@@ -6,11 +7,21 @@ const year = new Date().getFullYear();
 // TODO(links): add Roadmap (/roadmap) and dedicated How-it-works/Open pages when they ship.
 const GITHUB_URL = 'https://github.com/emergence-engineering';
 
-// Build provenance. Hardcoded because the site ships as static assets (R2), so
-// there's no build-time git/env to read it from. BUMP THIS to the deployed
-// main-repo (pcbjam) commit on each release — it pins the KiCad + wxWidgets
-// submodule revisions implicitly. See /licenses for the source-code offer.
-const BUILD_SHA = '695a460';
+// Build provenance: the pcbjam commit this site was built from — it pins the
+// KiCad + wxWidgets submodule revisions implicitly and is our GPLv3
+// corresponding-source pointer (see /licenses). Resolved at build time:
+// Vercel sets VERCEL_GIT_COMMIT_SHA; local builds fall back to git.
+function resolveBuildSha(): string {
+  const vercelSha = process.env.VERCEL_GIT_COMMIT_SHA;
+  if (vercelSha) return vercelSha.slice(0, 7);
+  try {
+    return execSync('git rev-parse --short=7 HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    // No git either (e.g. tarball build) — link to the branch head.
+    return 'main';
+  }
+}
+const BUILD_SHA = resolveBuildSha();
 const BUILD_COMMIT_URL = `https://github.com/emergence-engineering/pcbjam/commit/${BUILD_SHA}`;
 ---
 
