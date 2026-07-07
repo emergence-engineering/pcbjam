@@ -30,10 +30,14 @@ async function join(projectId: string, userId: string, tool: string): Promise<Cr
   return h;
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const h of handles) h.destroy();
   handles = [];
   resetPresenceColorClaims();
+  // Drain already-queued BroadcastChannel deliveries before vitest recycles
+  // the module registry — a late message otherwise trips the vite-node module
+  // proxy (flaky unhandled RangeError at the schema getter).
+  await new Promise((r) => setTimeout(r, 20));
 });
 
 describe("startCrossAppPresence", () => {

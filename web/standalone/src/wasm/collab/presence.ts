@@ -31,6 +31,14 @@ export interface PresenceHandle {
    * user in two tabs is one person — keep the freshest state).
    */
   peers(): PresencePeer[];
+  /**
+   * Every OTHER awareness client in the room, validated but NOT deduped by
+   * user — the same user's other tab is its own entry. Soft-locks (0007) key
+   * on clients, not users: your own second tab must lock against you too.
+   */
+  clients(): PresencePeer[];
+  /** This client's identity for tiebreaks: (user.id, awareness clientID). */
+  self(): { userId: string; clientId: number };
   /** Fires with the new roster on every awareness change. Returns unsubscribe. */
   subscribe(cb: (peers: PresencePeer[]) => void): () => void;
   /** 0002: publish the local pointer's world position (null = off canvas). */
@@ -167,7 +175,24 @@ export function createPresence(opts: {
   // holds our color, we yield and re-claim the lowest free slot — exactly one
   // side of any collision yields, so this converges without coordination.
   // Same-user tabs converge the other way: adopt the lower clientID's color.
+  //
+  // Re-entrancy guard: patch() fires the awareness 'change' event
+  // SYNCHRONOUSLY on the local instance, which re-enters this resolver — with
+  // two stale conflicting states in view (e.g. mid-propagation same-user
+  // tabs) the adopt/re-claim branches can ping-pong until the stack blows.
+  // Patches made HERE don't need immediate re-resolution; the next genuine
+  // (async) awareness delivery re-runs the resolver with fresher states.
+  let resolvingCollision = false;
   const resolveCollision = () => {
+    if (resolvingCollision) return;
+    resolvingCollision = true;
+    try {
+      resolveCollisionOnce();
+    } finally {
+      resolvingCollision = false;
+    }
+  };
+  const resolveCollisionOnce = () => {
     for (const [clientId, raw] of awareness.getStates()) {
       if (clientId === awareness.clientID) continue;
       const parsed = presenceStateSchema.safeParse(raw);
@@ -194,13 +219,20 @@ export function createPresence(opts: {
     }
   };
 
-  function peers(): PresencePeer[] {
-    const byUser = new Map<string, PresencePeer>();
+  function clients(): PresencePeer[] {
+    const out: PresencePeer[] = [];
     for (const [clientId, raw] of awareness.getStates()) {
       if (clientId === awareness.clientID) continue;
       const parsed = presenceStateSchema.safeParse(raw);
       if (!parsed.success) continue;
-      const peer: PresencePeer = { ...parsed.data, clientId };
+      out.push({ ...parsed.data, clientId });
+    }
+    return out.sort((a, b) => a.clientId - b.clientId);
+  }
+
+  function peers(): PresencePeer[] {
+    const byUser = new Map<string, PresencePeer>();
+    for (const peer of clients()) {
       // Another tab of the SAME user isn't a peer — the roster shows other people.
       if (peer.user.id === user.id) continue;
       const existing = byUser.get(peer.user.id);
@@ -231,6 +263,10 @@ export function createPresence(opts: {
   let destroyed = false;
   return {
     peers,
+    clients,
+    self() {
+      return { userId: user.id, clientId: awareness.clientID };
+    },
     subscribe(cb) {
       subscribers.add(cb);
       return () => subscribers.delete(cb);

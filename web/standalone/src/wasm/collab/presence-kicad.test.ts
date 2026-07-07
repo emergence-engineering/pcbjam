@@ -27,8 +27,14 @@ function fakeModule() {
 
 function stubPresence(peers: PresencePeer[] = []) {
   const subscribers = new Set<(p: PresencePeer[]) => void>();
-  const handle: PresenceHandle & { firePeers(p: PresencePeer[]): void } = {
+  let clients: PresencePeer[] = peers;
+  const handle: PresenceHandle & {
+    firePeers(p: PresencePeer[]): void;
+    fireClients(c: PresencePeer[]): void;
+  } = {
     peers: () => peers,
+    clients: () => clients,
+    self: () => ({ userId: "local", clientId: 100 }),
     subscribe(cb) {
       subscribers.add(cb);
       return () => subscribers.delete(cb);
@@ -39,7 +45,12 @@ function stubPresence(peers: PresencePeer[] = []) {
     destroy: vi.fn(),
     firePeers(p) {
       peers = p;
+      clients = p;
       for (const cb of subscribers) cb(p);
+    },
+    fireClients(c) {
+      clients = c;
+      for (const cb of subscribers) cb(peers);
     },
   };
   return handle;
@@ -192,6 +203,63 @@ describe("xselFromPeerState", () => {
   it("passes an eeschema peer's symbol uuids through, and skips other tools", () => {
     expect(xselFromPeerState(crossState("eeschema", { selection: ["sym-1"] }))).toEqual(["sym-1"]);
     expect(xselFromPeerState(crossState("pl_editor", { selection: ["u1"] }))).toEqual([]);
+  });
+});
+
+describe("bindKicadPresence × soft-locks (0007)", () => {
+  it("pushes the locks set derived from ALL other clients", async () => {
+    const mod = fakeModule();
+    const presence = stubPresence();
+    bindKicadPresence({ mod, win: {}, presence });
+
+    presence.fireClients([
+      peer("bob", { clientId: 7, selection: ["u1"] }),
+      // Own user's other tab locks too (clients() is not user-deduped).
+      peer("local", { clientId: 8, selection: ["u2"] }),
+    ]);
+    await new Promise((r) => setTimeout(r, 60));
+
+    const snapshot = JSON.parse(mod.kicadCollabSetRemote.mock.calls.at(-1)![0]);
+    expect(snapshot.locks).toEqual([
+      { uuid: "u1", name: "bob" },
+      { uuid: "u2", name: "local" },
+    ]);
+  });
+
+  it("releases contested holds when the local client loses the tiebreak", async () => {
+    const release = vi.fn();
+    const mod = { ...fakeModule(), kicadCollabReleaseSelection: release };
+    const win: PresenceKicadWindow = {};
+    const presence = stubPresence(); // self = (local, 100)
+    bindKicadPresence({ mod, win, presence });
+
+    win.kicadCollab!.onSelection!('["contested","mine"]');
+    // alice (wins: "alice" < "local") also holds "contested".
+    presence.fireClients([peer("alice", { clientId: 3, selection: ["contested"] })]);
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(release).toHaveBeenCalledWith('["contested"]', "alice");
+    // The winner's snapshot keeps "contested" locked for us until we release.
+    const snapshot = JSON.parse(mod.kicadCollabSetRemote.mock.calls.at(-1)![0]);
+    expect(snapshot.locks).toEqual([{ uuid: "contested", name: "alice" }]);
+  });
+
+  it("does NOT release when the local client wins, and unlocks the won uuid", async () => {
+    const release = vi.fn();
+    const mod = { ...fakeModule(), kicadCollabReleaseSelection: release };
+    const win: PresenceKicadWindow = {};
+    const presence = stubPresence(); // self = (local, 100)
+    bindKicadPresence({ mod, win, presence });
+
+    win.kicadCollab!.onSelection!('["contested"]');
+    // zed loses ("local" < "zed") — we keep the item and it must not be
+    // locked against us while zed's release is in flight.
+    presence.fireClients([peer("zed", { clientId: 3, selection: ["contested"] })]);
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(release).not.toHaveBeenCalled();
+    const snapshot = JSON.parse(mod.kicadCollabSetRemote.mock.calls.at(-1)![0]);
+    expect(snapshot.locks).toEqual([]);
   });
 });
 

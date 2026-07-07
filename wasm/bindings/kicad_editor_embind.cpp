@@ -59,6 +59,9 @@ std::string pcbCollabGetSelection();
 std::string pcbCollabGetSelectionFull();
 std::string pcbCollabTestGetCrossMapped();
 std::string pcbCollabTestSelectComponent();
+// Selection soft-locks (collab-presence 0007).
+void        pcbCollabReleaseSelection( std::string aUuidsJson, std::string aHolder );
+std::string pcbCollabTestGetLocked();
 std::string pcbCollabTestSelectFirst();
 bool        pcbCollabTestClearSelection();
 
@@ -85,6 +88,9 @@ std::string schCollabGetSelection();
 std::string schCollabGetSelectionFull();
 std::string schCollabTestGetCrossMapped();
 std::string schCollabTestSelectComponent();
+// Selection soft-locks (collab-presence 0007).
+void        schCollabReleaseSelection( std::string aUuidsJson, std::string aHolder );
+std::string schCollabTestGetLocked();
 std::string schCollabTestSelectFirst();
 bool        schCollabTestClearSelection();
 
@@ -227,6 +233,17 @@ static std::string collabTestSelectComponent()
     return pcbEditorActive() ? pcbCollabTestSelectComponent() : schCollabTestSelectComponent();
 }
 
+static void collabReleaseSelection( std::string aUuidsJson, std::string aHolder )
+{
+    pcbEditorActive() ? pcbCollabReleaseSelection( aUuidsJson, aHolder )
+                      : schCollabReleaseSelection( aUuidsJson, aHolder );
+}
+
+static std::string collabTestGetLocked()
+{
+    return pcbEditorActive() ? pcbCollabTestGetLocked() : schCollabTestGetLocked();
+}
+
 static std::string collabTestSelectFirst()
 {
     return pcbEditorActive() ? pcbCollabTestSelectFirst() : schCollabTestSelectFirst();
@@ -268,6 +285,9 @@ EMSCRIPTEN_BINDINGS(kicad_editor) {
     function("kicadCollabGetSelectionFull", &collabGetSelectionFull);
     function("kicadCollabTestGetCrossMapped", &collabTestGetCrossMapped);
     function("kicadCollabTestSelectComponent", &collabTestSelectComponent);
+    // Selection soft-locks (collab-presence 0007).
+    function("kicadCollabReleaseSelection", &collabReleaseSelection);
+    function("kicadCollabTestGetLocked", &collabTestGetLocked);
     function("kicadCollabTestSelectFirst", &collabTestSelectFirst);
     function("kicadCollabTestClearSelection", &collabTestClearSelection);
 }

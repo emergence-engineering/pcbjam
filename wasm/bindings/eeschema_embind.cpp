@@ -53,7 +53,9 @@
 #include <sch_screen.h>
 #include <sch_sheet_path.h>
 #include <schematic_settings.h>
+#include <tool/actions.h>
 #include <tool/coroutine.h>
+#include <pcbjam_remote_lock.h>
 #include "collab_presence_style.h"
 #include <algorithm>
 
@@ -720,6 +722,8 @@ struct PIN
 
 std::vector<PEER>                    g_peers;
 std::vector<PIN>                     g_pins;
+// Remote soft-locks (collab-presence 0007) — see pcbnew_embind.cpp.
+std::map<KIID, std::string>          g_locks;
 // Every visual knob (shapes, widths, alphas, label placement, color overrides)
 // — see collab_presence_style.h; live-patched by kicadCollabSetStyle (tuner).
 // eeschema ships its own defaults (hairline outline, subtler fill/cursor).
@@ -1573,6 +1577,22 @@ void schCollabPresenceStart()
 
     presence::g_started = true;
 
+    // Remote soft-locks (0007): let the selection/move tools consult the
+    // peers' live selections through the fork's process-global query.
+    PCBJAM_REMOTE_LOCK::SetQuery(
+            []( const KIID& aId, wxString* aHolder ) -> bool
+            {
+                auto it = presence::g_locks.find( aId );
+
+                if( it == presence::g_locks.end() )
+                    return false;
+
+                if( aHolder )
+                    *aHolder = wxString::FromUTF8( it->second.c_str() );
+
+                return true;
+            } );
+
     wxWindow* canvas = fr->GetCanvas();
 
     canvas->Bind( wxEVT_MOTION, []( wxMouseEvent& e ) { presence::onMotion( e ); } );
@@ -1633,7 +1653,19 @@ void schCollabSetRemote( std::string aJson )
         peers.push_back( std::move( peer ) );
     }
 
+    // Remote soft-locks (0007): `locks: [{uuid, name}]` — see pcbnew_embind.cpp.
+    std::map<KIID, std::string> locks;
+
+    for( const json& l : j.value( "locks", json::array() ) )
+    {
+        std::string uuid = l.is_object() ? l.value( "uuid", "" ) : "";
+
+        if( !uuid.empty() )
+            locks[ KIID( wxString::FromUTF8( uuid.c_str() ) ) ] = l.value( "name", "" );
+    }
+
     presence::g_peers = std::move( peers );
+    presence::g_locks = std::move( locks );
     schCollabPresenceStart();
     presence::scheduleRedraw();
 }
@@ -1930,6 +1962,79 @@ std::string schCollabTestSelectComponent()
     return toUtf8( target->m_Uuid.AsString() );
 }
 
+// JS → C++ (0007): tiebreak release — see pcbnew_embind.cpp for the design
+// (cancel-interactive-if-a-tool-holds-them → selective unselect → infobar →
+// forced re-emit).
+void schCollabReleaseSelection( std::string aUuidsJson, std::string aHolder )
+{
+    json j = json::parse( aUuidsJson, nullptr, /*allow_exceptions*/ false );
+
+    if( j.is_discarded() || !j.is_array() )
+        return;
+
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return;
+
+    std::vector<KIID> ids;
+
+    for( const json& u : j )
+    {
+        if( u.is_string() )
+            ids.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
+    }
+
+    if( ids.empty() )
+        return;
+
+    wxString holder = wxString::FromUTF8( aHolder.c_str() );
+
+    fr->CallAfter( [fr, ids, holder]() {
+        if( !fr->ToolStackIsEmpty() )
+            fr->GetToolManager()->RunAction( ACTIONS::cancelInteractive );
+
+        SCH_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
+
+        if( !st )
+            return;
+
+        bool released = false;
+
+        for( const KIID& id : ids )
+        {
+            SCH_ITEM* item = fr->Schematic().ResolveItem( id, nullptr, /*allowNull*/ true );
+
+            if( item && item->IsSelected() )
+            {
+                st->RemoveItemFromSel( item );
+                released = true;
+            }
+        }
+
+        if( released )
+        {
+            fr->ShowInfoBarWarning( wxString::Format( _( "%s is editing this — released from "
+                                                         "your selection." ),
+                                                      holder ),
+                                    true );
+        }
+
+        schedulePresenceSelCheck();
+    } );
+}
+
+// Test probe (0007): the current remote soft-lock set as `[{uuid, name}]`.
+std::string schCollabTestGetLocked()
+{
+    json arr = json::array();
+
+    for( const auto& [id, name] : presence::g_locks )
+        arr.push_back( { { "uuid", toUtf8( id.AsString() ) }, { "name", name } } );
+
+    return arr.dump();
+}
+
 // Test helper: clear the selection through the tool + run the presence check.
 bool schCollabTestClearSelection()
 {
@@ -2024,6 +2129,9 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     // Cross-app selection (0006).
     function("kicadCollabGetSelectionFull", &schCollabGetSelectionFull);
     function("kicadCollabTestGetCrossMapped", &schCollabTestGetCrossMapped);
+    // Selection soft-locks (0007).
+    function("kicadCollabReleaseSelection", &schCollabReleaseSelection);
+    function("kicadCollabTestGetLocked", &schCollabTestGetLocked);
     function("kicadCollabTestSelectFirst", &schCollabTestSelectFirst);
     function("kicadCollabTestSelectComponent", &schCollabTestSelectComponent);
     function("kicadCollabTestClearSelection", &schCollabTestClearSelection);

@@ -40,8 +40,10 @@
 #include <layer_ids.h>
 #include <lset.h>
 #include <math/util.h>
+#include <tool/actions.h>
 #include <tool/coroutine.h>
 #include <tool/tool_manager.h>
+#include <pcbjam_remote_lock.h>
 #include <view/view.h>
 #include <view/view_overlay.h>
 #include <pcb_draw_panel_gal.h>
@@ -1126,6 +1128,12 @@ struct PIN
 
 std::vector<PEER>                    g_peers;
 std::vector<PIN>                     g_pins;
+// Remote soft-locks (collab-presence 0007): uuid → holding peer's display
+// name, derived by the TS side from ALL other clients' live selections (own
+// user's other tabs included). Consulted by the fork's PCBJAM_REMOTE_LOCK
+// query from the selection/move tools. Ephemeral — replaced on every
+// kicadCollabSetRemote snapshot.
+std::map<KIID, std::string>          g_locks;
 // Every visual knob (shapes, widths, alphas, label placement, color overrides)
 // — see collab_presence_style.h; live-patched by kicadCollabSetStyle (tuner).
 pcbjam_presence::STYLE               g_style;
@@ -1709,6 +1717,22 @@ void pcbCollabPresenceStart()
 
     presence::g_started = true;
 
+    // Remote soft-locks (0007): let the selection/move tools consult the
+    // peers' live selections through the fork's process-global query.
+    PCBJAM_REMOTE_LOCK::SetQuery(
+            []( const KIID& aId, wxString* aHolder ) -> bool
+            {
+                auto it = presence::g_locks.find( aId );
+
+                if( it == presence::g_locks.end() )
+                    return false;
+
+                if( aHolder )
+                    *aHolder = wxString::FromUTF8( it->second.c_str() );
+
+                return true;
+            } );
+
     wxWindow* canvas = fr->GetCanvas();
 
     canvas->Bind( wxEVT_MOTION, []( wxMouseEvent& e ) { presence::onMotion( e ); } );
@@ -1770,7 +1794,20 @@ void pcbCollabSetRemote( std::string aJson )
         peers.push_back( std::move( peer ) );
     }
 
+    // Remote soft-locks (0007): `locks: [{uuid, name}]` — every other client's
+    // held uuids with the holder's display name for the infobar.
+    std::map<KIID, std::string> locks;
+
+    for( const json& l : j.value( "locks", json::array() ) )
+    {
+        std::string uuid = l.is_object() ? l.value( "uuid", "" ) : "";
+
+        if( !uuid.empty() )
+            locks[ KIID( wxString::FromUTF8( uuid.c_str() ) ) ] = l.value( "name", "" );
+    }
+
     presence::g_peers = std::move( peers );
+    presence::g_locks = std::move( locks );
     pcbCollabPresenceStart();
     presence::scheduleRedraw();
 }
@@ -2061,6 +2098,82 @@ std::string pcbCollabTestSelectComponent()
     return toUtf8( target->m_Uuid.AsString() );
 }
 
+// JS → C++ (0007): the local client LOST the selection tiebreak — release the
+// contested items (only those) from the live selection. If an interactive
+// tool (move/drag) holds them, cancel it first (ESC semantics — the preview
+// reverts); a bare cancel is NOT sent when idle, since ESC on the base
+// selection tool would clear the whole selection. Ends with a forced
+// selection re-emit (programmatic changes close no canvas event).
+void pcbCollabReleaseSelection( std::string aUuidsJson, std::string aHolder )
+{
+    json j = json::parse( aUuidsJson, nullptr, /*allow_exceptions*/ false );
+
+    if( j.is_discarded() || !j.is_array() )
+        return;
+
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return;
+
+    std::vector<KIID> ids;
+
+    for( const json& u : j )
+    {
+        if( u.is_string() )
+            ids.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
+    }
+
+    if( ids.empty() )
+        return;
+
+    wxString holder = wxString::FromUTF8( aHolder.c_str() );
+
+    fr->CallAfter( [fr, ids, holder]() {
+        if( !fr->ToolStackIsEmpty() )
+            fr->GetToolManager()->RunAction( ACTIONS::cancelInteractive );
+
+        PCB_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>();
+
+        if( !st )
+            return;
+
+        bool released = false;
+
+        for( const KIID& id : ids )
+        {
+            BOARD_ITEM* item = fr->GetBoard()->ResolveItem( id, /*allowNullptr*/ true );
+
+            if( item && item->IsSelected() )
+            {
+                st->RemoveItemFromSel( item );
+                released = true;
+            }
+        }
+
+        if( released )
+        {
+            fr->ShowInfoBarWarning( wxString::Format( _( "%s is editing this — released from "
+                                                         "your selection." ),
+                                                      holder ),
+                                    true );
+        }
+
+        schedulePresenceSelCheck();
+    } );
+}
+
+// Test probe (0007): the current remote soft-lock set as `[{uuid, name}]`.
+std::string pcbCollabTestGetLocked()
+{
+    json arr = json::array();
+
+    for( const auto& [id, name] : presence::g_locks )
+        arr.push_back( { { "uuid", toUtf8( id.AsString() ) }, { "name", name } } );
+
+    return arr.dump();
+}
+
 // Test helper: clear the selection through the tool + run the presence check.
 bool pcbCollabTestClearSelection()
 {
@@ -2338,6 +2451,9 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     // Cross-app selection (0006).
     function("kicadCollabGetSelectionFull", &pcbCollabGetSelectionFull);
     function("kicadCollabTestGetCrossMapped", &pcbCollabTestGetCrossMapped);
+    // Selection soft-locks (0007).
+    function("kicadCollabReleaseSelection", &pcbCollabReleaseSelection);
+    function("kicadCollabTestGetLocked", &pcbCollabTestGetLocked);
     function("kicadCollabTestSelectFirst", &pcbCollabTestSelectFirst);
     function("kicadCollabTestSelectComponent", &pcbCollabTestSelectComponent);
     function("kicadCollabTestClearSelection", &pcbCollabTestClearSelection);

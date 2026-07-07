@@ -2,6 +2,7 @@ import { symbolUuidFromFootprintPath } from "@pcbjam/shared";
 import { clog } from "./debug";
 import type { PresenceHandle, PresencePeer } from "./presence";
 import type { CrossAppHandle } from "./cross-app";
+import { contestedReleases, remoteLocks, type LockClient } from "./lock-tiebreak";
 
 /**
  * Wire the C++ presence bridge (collab-presence 0002) to the awareness layer:
@@ -28,6 +29,9 @@ export interface PresenceKicadModule {
   /** 0006 (pcbnew builds): `{uuids, fpPaths}` — uuids plus the selected
    *  footprints' schematic paths. Absent on older wasm. */
   kicadCollabGetSelectionFull?(): string;
+  /** 0007: tiebreak release — the local client lost an overlapping hold;
+   *  the wasm side cancels an in-flight move and unselects exactly these. */
+  kicadCollabReleaseSelection?(uuidsJson: string, holder: string): void;
 }
 
 export interface PresenceKicadWindow {
@@ -122,12 +126,17 @@ export function bindKicadPresence(opts: {
 }): { destroy(): void } {
   const { mod, win, presence, crossApp } = opts;
 
+  // The local selection as last emitted by C++ — the tiebreak (0007) compares
+  // it against every other client's published selection.
+  let ownSelection: string[] = [];
+
   // C++ → awareness ------------------------------------------------------------
   win.kicadCollab = {
     ...win.kicadCollab,
     onSelection: (uuidsJson) => {
       const parsed = parseSelectionEmit(uuidsJson);
       if (!parsed) return; // malformed emit — keep the last published selection
+      ownSelection = parsed.uuids;
       presence.setSelection(parsed.uuids);
       crossApp?.setSelection(parsed.uuids, parsed.fpPaths);
     },
@@ -146,6 +155,7 @@ export function bindKicadPresence(opts: {
       (mod.kicadCollabGetSelectionFull?.() ?? mod.kicadCollabGetSelection()) || "[]",
     );
     if (seed?.uuids.length) {
+      ownSelection = seed.uuids;
       presence.setSelection(seed.uuids);
       crossApp?.setSelection(seed.uuids, seed.fpPaths);
     }
@@ -165,6 +175,7 @@ export function bindKicadPresence(opts: {
         selection: string[];
         xsel?: string[];
       }>;
+      locks?: Array<{ uuid: string; name: string }>;
     } = {
       peers: peers.map((p: PresencePeer) => ({
         id: p.user.id,
@@ -174,6 +185,22 @@ export function bindKicadPresence(opts: {
         selection: p.selection,
       })),
     };
+    // Soft-locks (0007): every OTHER client's held uuids (own user's other
+    // tabs included — presence.clients(), not the user-deduped peers()),
+    // minus what we hold and win. Losing overlaps trigger a release.
+    const self = { ...presence.self(), selection: ownSelection };
+    const lockClients: LockClient[] = presence.clients().map((c) => ({
+      userId: c.user.id,
+      clientId: c.clientId,
+      name: c.user.name,
+      selection: c.selection,
+    }));
+    snapshot.locks = remoteLocks(self, lockClients);
+    const release = contestedReleases(self, lockClients);
+    if (release && mod.kicadCollabReleaseSelection) {
+      clog("presence-kicad: lost selection tiebreak to", release.holder, "—", release.uuids);
+      mod.kicadCollabReleaseSelection(JSON.stringify(release.uuids), release.holder);
+    }
     // Cross-app peers (0006): rendered as ghost outlines on the mapped items.
     // One entry per awareness CLIENT (own other tabs included — that's the
     // single-user cross-probe), tagged with the source editor.

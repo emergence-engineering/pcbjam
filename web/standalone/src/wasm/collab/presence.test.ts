@@ -48,10 +48,14 @@ function client(channel: string): Client {
   return c;
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const c of clients) c.destroy();
   clients = [];
   resetPresenceColorClaims();
+  // Drain already-queued BroadcastChannel deliveries before vitest recycles
+  // the module registry — a late message otherwise trips the vite-node module
+  // proxy (flaky unhandled RangeError at the schema getter).
+  await new Promise((r) => setTimeout(r, 20));
 });
 
 describe("presence over the BroadcastChannel awareness relay", () => {
@@ -101,6 +105,14 @@ describe("presence over the BroadcastChannel awareness relay", () => {
     // bob sees ONE alice (two tabs, one person); alice's tabs don't see each other.
     expect(b.presence.peers().map((p) => p.user.id)).toEqual(["alice"]);
     expect(a1.presence.peers().map((p) => p.user.id)).toEqual(["bob"]);
+
+    // clients() (0007 soft-locks) is per-CLIENT: no user dedupe, own-user
+    // other tabs included — alice's first tab sees her second tab AND bob.
+    expect(a1.presence!.clients().map((p) => p.user.id).sort()).toEqual(["alice", "bob"]);
+    expect(a1.presence!.self()).toEqual({
+      userId: "alice",
+      clientId: a1.awareness.clientID,
+    });
   });
 
   it("drops malformed peer states instead of crashing the roster", async () => {
