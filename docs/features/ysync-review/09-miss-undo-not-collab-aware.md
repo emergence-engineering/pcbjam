@@ -54,3 +54,9 @@ keystroke, so it deserves an explicit decision rather than the current default.
 
 Recommendation: 3 now (one call at adopt time), 1 as the eventual model, evaluated
 against how invasive pointer-invalidation is in `PICKED_ITEMS_LIST`.
+
+**Update 2026-07-07:** option 1 feasibility researched in
+[19-undo-option1-feasibility.md](19-undo-option1-feasibility.md) — verdict: ~3–5
+days; pcbnew undo already UUID-guards stale pointers, the core work is porting that
+guard to eeschema plus two small `SKIP_UNDO` fork fixes (SCH connectivity gate,
+removed-item leak). Option 3 becomes largely moot under it.

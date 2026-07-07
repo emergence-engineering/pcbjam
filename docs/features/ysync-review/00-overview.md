@@ -94,3 +94,4 @@ sending half emits NOTHING, not the bare removal the doc predicted).
 | 16 | [16-repro-suite-results-and-empirical-findings.md](16-repro-suite-results-and-empirical-findings.md) | Plan 15 executed (2026-07-03): suite map, verified failure sites, empirical findings F1–F4 |
 | 17 | [17-fixes-bugs-01-07.md](17-fixes-bugs-01-07.md) | Bugs 01–07 fixed & verified (2026-07-03); findings F5–F6; remaining follow-ups |
 | 18 | [18-miss08-opts-12-13.md](18-miss08-opts-12-13.md) | Miss 08 (lib_symbols + layout save-sync) + opts 12/13 implemented; opt 14 deferred (2026-07-03) |
+| 19 | [19-undo-option1-feasibility.md](19-undo-option1-feasibility.md) | Miss-09 option 1 (local-ops-only undo) feasibility research (2026-07-07): ~3–5 days, eeschema UUID-guard port is the core |
