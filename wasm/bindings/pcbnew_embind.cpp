@@ -1207,7 +1207,7 @@ void redrawOverlay()
     KIGFX::VIEW* view = fr->GetCanvas()->GetView();
 
     if( !g_overlay )
-        g_overlay = view->MakeOverlay();
+        g_overlay = pcbjam_presence::makePresenceOverlay( view );
 
     g_overlay->Clear();
 

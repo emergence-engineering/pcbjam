@@ -13,14 +13,18 @@
 
 #ifdef __EMSCRIPTEN__
 
+#include <font/text_attributes.h>
 #include <gal/color4d.h>
+#include <gal/graphics_abstraction_layer.h>
 #include <geometry/eda_angle.h>
 #include <geometry/shape_poly_set.h>
 #include <math/util.h>
 #include <math/box2.h>
+#include <view/view.h>
 #include <view/view_overlay.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <vector>
 #include <wx/string.h>
@@ -174,10 +178,38 @@ inline KIGFX::COLOR4D chipTextColor( const KIGFX::COLOR4D& aBg )
                      : KIGFX::COLOR4D( 1.0, 1.0, 1.0, 1.0 );
 }
 
+/**
+ * VIEW_OVERLAY that PINS the GAL text justify before executing its commands.
+ * A plain overlay draws with whatever justify the last painter left in the
+ * GAL (CENTER is only the reset default), so BitmapText anchoring was
+ * nondeterministic — labels wandered around their chips depending on what
+ * rendered before them. This guarantees TOP-LEFT anchoring for every
+ * BitmapText below; the label math is written against that.
+ */
+class PRESENCE_OVERLAY : public KIGFX::VIEW_OVERLAY
+{
+public:
+    void ViewDraw( int aLayer, KIGFX::VIEW* aView ) const override
+    {
+        KIGFX::GAL* gal = aView->GetGAL();
+        gal->SetHorizontalJustify( GR_TEXT_H_ALIGN_LEFT );
+        gal->SetVerticalJustify( GR_TEXT_V_ALIGN_TOP );
+        KIGFX::VIEW_OVERLAY::ViewDraw( aLayer, aView );
+    }
+};
+
+/** VIEW::MakeOverlay's body, for our subclass (make + Add to the view). */
+inline std::shared_ptr<PRESENCE_OVERLAY> makePresenceOverlay( KIGFX::VIEW* aView )
+{
+    auto overlay = std::make_shared<PRESENCE_OVERLAY>();
+    aView->Add( overlay.get() );
+    return overlay;
+}
+
 /** Name tag next to (or inside) a box, per the label placement knobs. `px` is
- *  world-units-per-screen-pixel. GAL BitmapText CENTERS on its position (the
- *  default justify is CENTER/CENTER — GAL::ResetTextAttributes), so the block
- *  math below computes a top-left and hands GAL the block's center. */
+ *  world-units-per-screen-pixel. Text anchoring is TOP-LEFT — guaranteed by
+ *  PRESENCE_OVERLAY pinning the GAL justify (a plain overlay inherits
+ *  whatever the last painter left, which made anchoring nondeterministic). */
 inline void drawLabel( KIGFX::VIEW_OVERLAY* aOv, const BOX2I& aBox, const std::string& aText,
                        const KIGFX::COLOR4D& aColor, double aPx, const STYLE& aS )
 {
@@ -202,6 +234,17 @@ inline void drawLabel( KIGFX::VIEW_OVERLAY* aOv, const BOX2I& aBox, const std::s
     else
         y = aS.labelInside ? aBox.GetEnd().y - off - h : aBox.GetEnd().y + off;
 
+    // The whole overlay draws at ONE depth: same-depth fragments drawn LATER
+    // lose the depth test, so anything covering the text erases it. Draw the
+    // TEXT FIRST and the chip rect AFTER — the rect is rejected exactly on
+    // the glyph pixels, punching the text through the chip.
+    aOv->SetIsStroke( true );
+    aOv->SetIsFill( false );
+    aOv->SetStrokeColor( aS.labelChip ? chipTextColor( aColor ) : aColor );
+    aOv->SetGlyphSize( VECTOR2I( KiROUND( h ), KiROUND( h ) ) );
+    aOv->BitmapText( wxString::FromUTF8( aText.c_str() ), VECTOR2I( KiROUND( x ), KiROUND( y ) ),
+                     ANGLE_0 );
+
     if( aS.labelChip )
     {
         double padX = 3 * aPx, padY = 2 * aPx;
@@ -212,18 +255,7 @@ inline void drawLabel( KIGFX::VIEW_OVERLAY* aOv, const BOX2I& aBox, const std::s
                         VECTOR2D( x + w + padX, y + h + padY ) );
         aOv->SetIsStroke( true );
         aOv->SetIsFill( false );
-        aOv->SetStrokeColor( chipTextColor( aColor ) );
     }
-    else
-    {
-        aOv->SetIsStroke( true );
-        aOv->SetIsFill( false );
-        aOv->SetStrokeColor( aColor );
-    }
-
-    aOv->SetGlyphSize( VECTOR2I( KiROUND( h ), KiROUND( h ) ) );
-    aOv->BitmapText( wxString::FromUTF8( aText.c_str() ),
-                     VECTOR2I( KiROUND( x + w / 2 ), KiROUND( y + h / 2 ) ), ANGLE_0 );
 }
 
 /** Selection highlight for one item, in the chosen shape. `aOutline` is the
@@ -370,10 +402,19 @@ inline void drawCursor( KIGFX::VIEW_OVERLAY* aOv, const VECTOR2D& aPos, const st
     {
         double h = aS.cursorLabelSizePx * aPx;
         double w = textWidth( aName, h );
-        // Top-left of the text block, below-right of the cursor glyph; GAL
-        // centers text on its position, so it gets the block center.
+        // Top-left of the text block, below-right of the cursor glyph
+        // (TOP-LEFT anchoring — PRESENCE_OVERLAY pins the GAL justify).
         VECTOR2D at = aPos + VECTOR2D( ( aS.cursorSizePx + 4 ) * aPx,
                                        ( aS.cursorSizePx + 4 ) * aPx );
+
+        // Text FIRST, chip rect AFTER — see drawLabel (same-depth z rejection
+        // punches the text through the chip).
+        aOv->SetIsStroke( true );
+        aOv->SetIsFill( false );
+        aOv->SetStrokeColor( aS.cursorLabelChip ? chipTextColor( aColor ) : c );
+        aOv->SetGlyphSize( VECTOR2I( KiROUND( h ), KiROUND( h ) ) );
+        aOv->BitmapText( wxString::FromUTF8( aName.c_str() ),
+                         VECTOR2I( KiROUND( at.x ), KiROUND( at.y ) ), ANGLE_0 );
 
         if( aS.cursorLabelChip )
         {
@@ -385,17 +426,7 @@ inline void drawCursor( KIGFX::VIEW_OVERLAY* aOv, const VECTOR2D& aPos, const st
                             at + VECTOR2D( w + padX, h + padY ) );
             aOv->SetIsStroke( true );
             aOv->SetIsFill( false );
-            aOv->SetStrokeColor( chipTextColor( aColor ) );
         }
-        else
-        {
-            aOv->SetStrokeColor( c );
-        }
-
-        aOv->SetGlyphSize( VECTOR2I( KiROUND( h ), KiROUND( h ) ) );
-        aOv->BitmapText( wxString::FromUTF8( aName.c_str() ),
-                         VECTOR2I( KiROUND( at.x + w / 2 ), KiROUND( at.y + h / 2 ) ),
-                         ANGLE_0 );
     }
 }
 
