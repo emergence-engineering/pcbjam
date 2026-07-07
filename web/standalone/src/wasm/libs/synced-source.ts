@@ -95,8 +95,8 @@ async function resolveAndOpen(
   };
   const res = await fetch(
     `${opts.apiBase}/api/scopes/${encodeURIComponent(opts.scope)}/libs/${encodeURIComponent(libId)}/sync-stack`,
-    // credentials: session-cookie auth; the layer descriptors this returns keep
-    // their own bearer-token channel (sync-client transport is cookie-free).
+    // credentials: session-cookie auth, here and on every layer fetch below —
+    // live layers are membership-gated by the API worker per request.
     { method: "POST", headers, credentials: "include" },
   );
   if (!res.ok) throw new Error(`sync-stack resolve failed: HTTP ${res.status}`);
@@ -106,7 +106,12 @@ async function resolveAndOpen(
   };
   log(`[synced] resolved ${body.layers.length} layer(s) for lib ${libId}`);
 
-  const stack = new SyncStack({ layers: body.layers });
+  // The descriptors carry no bearer token — live-layer HTTP ops authenticate
+  // with the session cookie, so the stack's fetch must send credentials. The
+  // realtime WebSocket gets cookies automatically (same-site handshake).
+  const credentialedFetch: typeof fetch = (input, init) =>
+    fetch(input, { ...init, credentials: "include" });
+  const stack = new SyncStack({ layers: body.layers, fetchImpl: credentialedFetch });
   await stack.open();
   return {
     stack,
