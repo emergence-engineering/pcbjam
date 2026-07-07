@@ -19,6 +19,8 @@ export interface TunerModule {
   kicadCollabSetPins(json: string): void;
   kicadCollabGetViewport(): string;
   kicadCollabTestListItems(n: number): string;
+  /** Varied demo groups (small/large footprint, busiest nets) — newer builds. */
+  kicadCollabTestDemoSet?(): string;
 }
 
 export function hasTunerBridge(mod: unknown): mod is TunerModule {
@@ -73,10 +75,25 @@ function loadStored(): Style {
   }
 }
 
-const SEL_SHAPES = ["rectangle", "corner brackets", "underline", "rounded rect", "filled only"];
+const SEL_SHAPES = [
+  "rectangle",
+  "corner brackets",
+  "underline",
+  "rounded rect",
+  "filled only",
+  "exact outline (pcb)",
+];
 const CURSOR_SHAPES = ["cross", "pointer", "circle + dot"];
 const VPOS = ["top", "bottom"];
 const HPOS = ["start", "end", "center"];
+
+/** Preset palettes for quick trials ("palette" color mode). */
+const PALETTE_PRESETS: Record<string, readonly string[]> = {
+  default: PRESENCE_COLORS,
+  pastel: ["#f9a8d4", "#fca5a5", "#fdba74", "#fde047", "#86efac", "#5eead4", "#93c5fd", "#c4b5fd"],
+  vivid: ["#e11d48", "#ea580c", "#ca8a04", "#16a34a", "#0d9488", "#0284c7", "#4f46e5", "#9333ea"],
+  "okabe-ito": ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"],
+};
 
 export function PresenceTuner({ mod }: { mod: TunerModule }) {
   const [open, setOpen] = React.useState(true);
@@ -107,23 +124,44 @@ export function PresenceTuner({ mod }: { mod: TunerModule }) {
       }
       try {
         const vp = JSON.parse(mod.kicadCollabGetViewport());
-        const items = JSON.parse(mod.kicadCollabTestListItems(3)) as string[];
         const spanX = vp.w / vp.scale;
         const spanY = vp.h / vp.scale;
+        // Varied selections (small + large footprint, two busiest nets) from
+        // the demo-set helper; older wasm falls back to "first N items".
+        let bobSel: string[] = [];
+        let carolSel: string[] = [];
+        try {
+          const groups = (
+            JSON.parse(mod.kicadCollabTestDemoSet?.() ?? '{"groups":[]}') as {
+              groups: Array<{ label: string; ids: string[] }>;
+            }
+          ).groups;
+          // bob: small fp + net A · carol: large fp + net B (whatever exists).
+          for (const [i, g] of groups.entries()) {
+            (i % 2 === 0 ? bobSel : carolSel).push(...g.ids);
+          }
+        } catch {
+          /* fall through to the flat list */
+        }
+        if (!bobSel.length && !carolSel.length) {
+          const items = JSON.parse(mod.kicadCollabTestListItems(3)) as string[];
+          bobSel = items.slice(0, 1);
+          carolSel = items.slice(1, 3);
+        }
         const peers = [
           {
             id: "demo-bob",
             name: "bob",
             color: PRESENCE_COLORS[8],
             cursor: { x: vp.cx - spanX * 0.18, y: vp.cy - spanY * 0.12 },
-            selection: items.slice(0, 1),
+            selection: bobSel,
           },
           {
             id: "demo-carol",
             name: "carol",
             color: PRESENCE_COLORS[4],
             cursor: { x: vp.cx + spanX * 0.15, y: vp.cy + spanY * 0.16 },
-            selection: items.slice(1, 3),
+            selection: carolSel,
           },
         ];
         const pins = [
@@ -242,46 +280,7 @@ export function PresenceTuner({ mod }: { mod: TunerModule }) {
           <Check label="label chip" v={style.cursorLabelChip} onChange={(v) => set("cursorLabelChip", v)} />
         </Section>
 
-        <Section title="Colors">
-          <div className="mb-1 flex items-center gap-2">
-            <span className="w-24 text-white/60">fixed color</span>
-            <input
-              type="color"
-              value={style.fixedColor || "#3b82f6"}
-              onChange={(e) => set("fixedColor", e.target.value)}
-              className="h-5 w-8"
-            />
-            <button
-              onClick={() => set("fixedColor", "")}
-              className="rounded px-1.5 ring-1 ring-inset ring-white/25 hover:bg-white/10"
-            >
-              off
-            </button>
-            <span className="text-white/40">{style.fixedColor || "per-user"}</span>
-          </div>
-          <div className="mb-1">
-            <span className="mr-2 text-white/60">palette override (hex, comma-sep)</span>
-            <textarea
-              value={style.palette.join(",")}
-              onChange={(e) =>
-                set(
-                  "palette",
-                  e.target.value
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter((s) => /^#[0-9a-fA-F]{6}$/.test(s)),
-                )
-              }
-              placeholder="#ef4444,#22c55e,…  (empty = shipped palette)"
-              className="mt-1 h-10 w-full resize-none rounded bg-white/10 p-1 text-[10px] text-white outline-none"
-            />
-            <div className="mt-1 flex gap-1">
-              {(style.palette.length ? style.palette : [...PRESENCE_COLORS]).map((c, i) => (
-                <span key={i} className="h-3 w-3 rounded-sm" style={{ background: c }} />
-              ))}
-            </div>
-          </div>
-        </Section>
+        <ColorsSection style={style} set={set} />
 
         <Section title="Comment pins">
           <Range label="radius px" v={style.pinRadiusPx} min={3} max={16} step={0.5} onChange={(v) => set("pinRadiusPx", v)} />
@@ -291,6 +290,125 @@ export function PresenceTuner({ mod }: { mod: TunerModule }) {
         </Section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Color overrides, made explicit: one MODE at a time —
+ *   per-user  · the colors peers publish (shipped behavior; overrides off)
+ *   fixed     · everyone in ONE picked color
+ *   palette   · recolor everyone from a trial palette (by name hash)
+ * Recolors the CANVAS overlay only (boxes/cursors/pins); roster avatars and
+ * comment popovers keep the sender colors. Palette editing is buffered and
+ * applied on demand so typing partial hex values doesn't fight the input.
+ */
+function ColorsSection({
+  style,
+  set,
+}: {
+  style: Style;
+  set: <K extends keyof Style>(k: K, v: Style[K]) => void;
+}) {
+  const mode = style.fixedColor ? "fixed" : style.palette.length ? "palette" : "per-user";
+  const [fixedPick, setFixedPick] = React.useState(style.fixedColor || "#3b82f6");
+  const [paletteText, setPaletteText] = React.useState(
+    (style.palette.length ? style.palette : [...PRESENCE_COLORS]).join(", "),
+  );
+
+  const parsePalette = (text: string) =>
+    text
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter((s) => /^#[0-9a-fA-F]{6}$/.test(s));
+
+  const setMode = (m: "per-user" | "fixed" | "palette") => {
+    if (m === "per-user") {
+      set("fixedColor", "");
+      set("palette", []);
+    } else if (m === "fixed") {
+      set("palette", []);
+      set("fixedColor", fixedPick);
+    } else {
+      set("fixedColor", "");
+      set("palette", parsePalette(paletteText));
+    }
+  };
+
+  const applyPalette = (colors: readonly string[]) => {
+    setPaletteText(colors.join(", "));
+    set("fixedColor", "");
+    set("palette", [...colors]);
+  };
+
+  return (
+    <Section title="Colors">
+      <p className="mb-1 text-[10px] leading-snug text-white/45">
+        Recolors the canvas overlay (boxes, cursors, pins). Roster avatars keep
+        the sender colors.
+      </p>
+      <div className="mb-1 flex gap-2">
+        {(["per-user", "fixed", "palette"] as const).map((m) => (
+          <label key={m} className="flex items-center gap-1">
+            <input type="radio" checked={mode === m} onChange={() => setMode(m)} />
+            <span className={mode === m ? "text-white" : "text-white/60"}>{m}</span>
+          </label>
+        ))}
+      </div>
+
+      {mode === "fixed" && (
+        <div className="mb-1 flex items-center gap-2">
+          <span className="w-24 text-white/60">color</span>
+          <input
+            type="color"
+            value={fixedPick}
+            onChange={(e) => {
+              setFixedPick(e.target.value);
+              set("fixedColor", e.target.value);
+            }}
+            className="h-5 w-8"
+          />
+          <span className="text-white/40">{style.fixedColor}</span>
+        </div>
+      )}
+
+      {mode === "palette" && (
+        <div className="mb-1 space-y-1">
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(PALETTE_PRESETS).map(([name, colors]) => (
+              <button
+                key={name}
+                onClick={() => applyPalette(colors)}
+                className="rounded px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-white/25 hover:bg-white/10"
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={paletteText}
+            onChange={(e) => setPaletteText(e.target.value)}
+            placeholder="#ef4444, #22c55e, …"
+            className="h-12 w-full resize-none rounded bg-white/10 p-1 font-mono text-[10px] text-white outline-none"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => set("palette", parsePalette(paletteText))}
+              className="rounded bg-fuchsia-700 px-2 py-0.5 text-[10px] hover:bg-fuchsia-600"
+            >
+              Apply
+            </button>
+            <span className="text-[10px] text-white/40">
+              {parsePalette(paletteText).length} colors
+            </span>
+          </div>
+          <div className="flex gap-1">
+            {(style.palette.length ? style.palette : parsePalette(paletteText)).map((c, i) => (
+              <span key={i} className="h-3 w-3 rounded-sm" style={{ background: c }} />
+            ))}
+          </div>
+        </div>
+      )}
+    </Section>
   );
 }
 

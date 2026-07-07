@@ -15,6 +15,7 @@
 
 #include <gal/color4d.h>
 #include <geometry/eda_angle.h>
+#include <geometry/shape_poly_set.h>
 #include <math/util.h>
 #include <math/box2.h>
 #include <view/view_overlay.h>
@@ -32,6 +33,7 @@ struct STYLE
 {
     // ── selection box ──────────────────────────────────────────────────────
     // 0 rect · 1 corner brackets · 2 underline · 3 rounded rect · 4 filled only
+    // 5 exact item outline (pcbnew; eeschema falls back to rect)
     int    selShape       = 0;
     double selStrokeWidth = 2.5;   // px
     double selStrokeAlpha = 0.9;
@@ -164,8 +166,9 @@ inline double textWidth( const std::string& aText, double aGlyphH )
 }
 
 /** Name tag next to (or inside) a box, per the label placement knobs. `px` is
- *  world-units-per-screen-pixel. BitmapText anchors near its position's left
- *  edge, vertically centered-ish — offsets are tuned around that. */
+ *  world-units-per-screen-pixel. GAL BitmapText CENTERS on its position (the
+ *  default justify is CENTER/CENTER — GAL::ResetTextAttributes), so the block
+ *  math below computes a top-left and hands GAL the block's center. */
 inline void drawLabel( KIGFX::VIEW_OVERLAY* aOv, const BOX2I& aBox, const std::string& aText,
                        const KIGFX::COLOR4D& aColor, double aPx, const STYLE& aS )
 {
@@ -183,21 +186,21 @@ inline void drawLabel( KIGFX::VIEW_OVERLAY* aOv, const BOX2I& aBox, const std::s
     else if( aS.labelHPos == 2 )
         x = ( aBox.GetOrigin().x + aBox.GetEnd().x ) / 2.0 - w / 2.0;  // center
 
-    double y;
+    double y;   // top of the text block
 
     if( aS.labelVPos == 0 )
-        y = aS.labelInside ? aBox.GetOrigin().y + off : aBox.GetOrigin().y - off;
+        y = aS.labelInside ? aBox.GetOrigin().y + off : aBox.GetOrigin().y - off - h;
     else
-        y = aS.labelInside ? aBox.GetEnd().y - off : aBox.GetEnd().y + off;
+        y = aS.labelInside ? aBox.GetEnd().y - off - h : aBox.GetEnd().y + off;
 
     if( aS.labelChip )
     {
-        double padX = 3 * aPx, padY = 2.5 * aPx;
+        double padX = 3 * aPx, padY = 2 * aPx;
         aOv->SetIsStroke( false );
         aOv->SetIsFill( true );
         aOv->SetFillColor( aColor.WithAlpha( 0.92 ) );
-        aOv->Rectangle( VECTOR2D( x - padX, y - h / 2 - padY ),
-                        VECTOR2D( x + w + padX, y + h / 2 + padY ) );
+        aOv->Rectangle( VECTOR2D( x - padX, y - padY ),
+                        VECTOR2D( x + w + padX, y + h + padY ) );
         aOv->SetIsStroke( true );
         aOv->SetIsFill( false );
         aOv->SetStrokeColor( KIGFX::COLOR4D( 1, 1, 1, 1 ) );
@@ -210,14 +213,32 @@ inline void drawLabel( KIGFX::VIEW_OVERLAY* aOv, const BOX2I& aBox, const std::s
     }
 
     aOv->SetGlyphSize( VECTOR2I( KiROUND( h ), KiROUND( h ) ) );
-    aOv->BitmapText( wxString::FromUTF8( aText.c_str() ), VECTOR2I( KiROUND( x ), KiROUND( y ) ),
-                     ANGLE_0 );
+    aOv->BitmapText( wxString::FromUTF8( aText.c_str() ),
+                     VECTOR2I( KiROUND( x + w / 2 ), KiROUND( y + h / 2 ) ), ANGLE_0 );
 }
 
-/** Selection highlight for one item bbox, in the chosen shape. */
+/** Selection highlight for one item, in the chosen shape. `aOutline` is the
+ *  item's exact geometry for selShape 5 (pcbnew supplies it; eeschema passes
+ *  nullptr and shape 5 falls back to the bbox rectangle). */
 inline void drawSelectionBox( KIGFX::VIEW_OVERLAY* aOv, BOX2I aBox, const std::string& aName,
-                              const KIGFX::COLOR4D& aColor, double aPx, const STYLE& aS )
+                              const KIGFX::COLOR4D& aColor, double aPx, const STYLE& aS,
+                              const SHAPE_POLY_SET* aOutline = nullptr )
 {
+    if( aS.selShape == 5 && aOutline && aOutline->OutlineCount() > 0 )
+    {
+        aOv->SetIsStroke( true );
+        aOv->SetIsFill( aS.selFillAlpha > 0.001 );
+        aOv->SetStrokeColor( aColor.WithAlpha( aS.selStrokeAlpha ) );
+        aOv->SetFillColor( aColor.WithAlpha( aS.selFillAlpha ) );
+        aOv->SetLineWidth( aS.selStrokeWidth * aPx );
+        aOv->Polygon( *aOutline );
+
+        BOX2I labelBox = aOutline->BBox();
+        labelBox.Inflate( KiROUND( aS.selPaddingPx * aPx ) );
+        drawLabel( aOv, labelBox, aName, aColor, aPx, aS );
+        return;
+    }
+
     aBox.Inflate( KiROUND( aS.selPaddingPx * aPx ) );
 
     const VECTOR2D tl = aBox.GetOrigin();
@@ -339,17 +360,20 @@ inline void drawCursor( KIGFX::VIEW_OVERLAY* aOv, const VECTOR2D& aPos, const st
     if( aS.cursorLabel && !aName.empty() )
     {
         double h = aS.cursorLabelSizePx * aPx;
+        double w = textWidth( aName, h );
+        // Top-left of the text block, below-right of the cursor glyph; GAL
+        // centers text on its position, so it gets the block center.
         VECTOR2D at = aPos + VECTOR2D( ( aS.cursorSizePx + 4 ) * aPx,
-                                       ( aS.cursorSizePx + 9 ) * aPx );
+                                       ( aS.cursorSizePx + 4 ) * aPx );
 
         if( aS.cursorLabelChip )
         {
-            double w = textWidth( aName, h ), padX = 3 * aPx, padY = 2.5 * aPx;
+            double padX = 3 * aPx, padY = 2 * aPx;
             aOv->SetIsStroke( false );
             aOv->SetIsFill( true );
             aOv->SetFillColor( aColor.WithAlpha( 0.92 ) );
-            aOv->Rectangle( at + VECTOR2D( -padX, -h / 2 - padY ),
-                            at + VECTOR2D( w + padX, h / 2 + padY ) );
+            aOv->Rectangle( at + VECTOR2D( -padX, -padY ),
+                            at + VECTOR2D( w + padX, h + padY ) );
             aOv->SetIsStroke( true );
             aOv->SetIsFill( false );
             aOv->SetStrokeColor( KIGFX::COLOR4D( 1, 1, 1, 1 ) );
@@ -361,7 +385,8 @@ inline void drawCursor( KIGFX::VIEW_OVERLAY* aOv, const VECTOR2D& aPos, const st
 
         aOv->SetGlyphSize( VECTOR2I( KiROUND( h ), KiROUND( h ) ) );
         aOv->BitmapText( wxString::FromUTF8( aName.c_str() ),
-                         VECTOR2I( KiROUND( at.x ), KiROUND( at.y ) ), ANGLE_0 );
+                         VECTOR2I( KiROUND( at.x + w / 2 ), KiROUND( at.y + h / 2 ) ),
+                         ANGLE_0 );
     }
 }
 

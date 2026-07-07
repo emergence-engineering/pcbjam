@@ -47,6 +47,7 @@
 #include <pcb_draw_panel_gal.h>
 #include <nlohmann/json.hpp>
 #include "collab_presence_style.h"
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <memory>
@@ -1232,8 +1233,40 @@ void redrawOverlay()
             if( !item )
                 continue;   // not on this board (yet) — skip silently
 
+            // Exact-geometry outline (style shape 5): footprints hug their
+            // bounding hull, everything else its transformed shape. Runs on
+            // the coroutine fiber (virtual dispatch), falls back to the bbox
+            // on anything that can't produce a polygon.
+            SHAPE_POLY_SET outline;
+
+            if( g_style.selShape == 5 )
+            {
+                try
+                {
+                    int pad = KiROUND( g_style.selPaddingPx * px );
+                    int err = KiROUND( px ) + 1;
+
+                    if( item->Type() == PCB_FOOTPRINT_T )
+                    {
+                        outline = static_cast<FOOTPRINT*>( item )->GetBoundingHull();
+
+                        if( pad > 0 )
+                            outline.Inflate( pad, CORNER_STRATEGY::ROUND_ALL_CORNERS, err );
+                    }
+                    else
+                    {
+                        item->TransformShapeToPolygon( outline, (PCB_LAYER_ID) itemLayer( item ),
+                                                       pad, err, ERROR_OUTSIDE );
+                    }
+                }
+                catch( ... )
+                {
+                    outline.RemoveAllContours();
+                }
+            }
+
             pcbjam_presence::drawSelectionBox( g_overlay.get(), item->ViewBBox(), peer.name,
-                                               color, px, g_style );
+                                               color, px, g_style, &outline );
         }
 
         if( peer.hasCursor )
@@ -1703,6 +1736,71 @@ void pcbCollabSetStyle( std::string aJson )
     presence::scheduleRedraw();
 }
 
+// Tuner helper: a VARIED demo-selection set — labeled uuid groups (smallest +
+// largest footprint, the two busiest nets' track segments) so the style
+// preview shows the real range of shapes instead of two overlapping items.
+std::string pcbCollabTestDemoSet()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    json groups = json::array();
+
+    if( fr )
+    {
+        BOARD* board = fr->GetBoard();
+
+        // Footprints by bbox area → smallest and largest.
+        FOOTPRINT* smallest = nullptr;
+        FOOTPRINT* largest  = nullptr;
+        double     minA = 0, maxA = 0;
+
+        for( FOOTPRINT* f : board->Footprints() )
+        {
+            BOX2I  bb = f->GetBoundingBox();
+            double a  = (double) bb.GetWidth() * bb.GetHeight();
+
+            if( !smallest || a < minA ) { smallest = f; minA = a; }
+            if( !largest || a > maxA )  { largest = f;  maxA = a; }
+        }
+
+        if( smallest )
+            groups.push_back( { { "label", "fp small (" + toUtf8( smallest->GetReference() ) + ")" },
+                                { "ids", { toUtf8( smallest->m_Uuid.AsString() ) } } } );
+
+        if( largest && largest != smallest )
+            groups.push_back( { { "label", "fp large (" + toUtf8( largest->GetReference() ) + ")" },
+                                { "ids", { toUtf8( largest->m_Uuid.AsString() ) } } } );
+
+        // Tracks grouped by net → the two busiest nets (capped segment lists).
+        std::map<std::string, std::vector<std::string>> nets;
+
+        for( PCB_TRACK* t : board->Tracks() )
+        {
+            std::string net = toUtf8( t->GetNetname() );
+
+            if( !net.empty() )
+                nets[net].push_back( toUtf8( t->m_Uuid.AsString() ) );
+        }
+
+        std::vector<std::pair<std::string, std::vector<std::string>>> byCount( nets.begin(),
+                                                                               nets.end() );
+        std::sort( byCount.begin(), byCount.end(),
+                   []( const auto& a, const auto& b ) { return a.second.size() > b.second.size(); } );
+
+        for( size_t i = 0; i < byCount.size() && i < 2; ++i )
+        {
+            auto ids = byCount[i].second;
+
+            if( ids.size() > 12 )
+                ids.resize( 12 );
+
+            groups.push_back( { { "label", "net " + byCount[i].first }, { "ids", ids } } );
+        }
+    }
+
+    return json{ { "groups", groups } }.dump();
+}
+
 // Test/tuner helper: the first N top-level item uuids — real, resolvable KIIDs
 // for synthetic remote-selection previews (a solo tab has no peer to borrow from).
 std::string pcbCollabTestListItems( int aCount )
@@ -2077,6 +2175,7 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     function("kicadCollabSetViewport", &pcbCollabSetViewport);
     function("kicadCollabSetStyle", &pcbCollabSetStyle);
     function("kicadCollabTestListItems", &pcbCollabTestListItems);
+    function("kicadCollabTestDemoSet", &pcbCollabTestDemoSet);
     function("kicadCollabGetViewport", &pcbCollabGetViewport);
     function("kicadCollabGetSelection", &pcbCollabGetSelection);
     function("kicadCollabTestSelectFirst", &pcbCollabTestSelectFirst);

@@ -55,6 +55,7 @@
 #include <schematic_settings.h>
 #include <tool/coroutine.h>
 #include "collab_presence_style.h"
+#include <algorithm>
 
 using namespace emscripten;
 using json = nlohmann::json;
@@ -1627,6 +1628,66 @@ void schCollabSetStyle( std::string aJson )
     presence::scheduleRedraw();
 }
 
+// Tuner helper: a VARIED demo-selection set for the current sheet — smallest +
+// largest symbol and two bundles of wires (net-ish), mirroring pcbnew's
+// pcbCollabTestDemoSet so the style preview shows the range of shapes.
+std::string schCollabTestDemoSet()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    json groups = json::array();
+
+    if( fr )
+    {
+        if( SCH_SCREEN* screen = currentScreen( fr ) )
+        {
+            SCH_SYMBOL* smallest = nullptr;
+            SCH_SYMBOL* largest  = nullptr;
+            double      minA = 0, maxA = 0;
+            std::vector<std::string> wires;
+
+            for( SCH_ITEM* item : screen->Items() )
+            {
+                if( item->Type() == SCH_SYMBOL_T )
+                {
+                    BOX2I  bb = item->GetBoundingBox();
+                    double a  = (double) bb.GetWidth() * bb.GetHeight();
+
+                    auto* sym = static_cast<SCH_SYMBOL*>( item );
+
+                    if( !smallest || a < minA ) { smallest = sym; minA = a; }
+                    if( !largest || a > maxA )  { largest = sym;  maxA = a; }
+                }
+                else if( item->Type() == SCH_LINE_T && wires.size() < 8 )
+                {
+                    wires.push_back( toUtf8( item->m_Uuid.AsString() ) );
+                }
+            }
+
+            if( smallest )
+                groups.push_back( { { "label", "symbol small" },
+                                    { "ids", { toUtf8( smallest->m_Uuid.AsString() ) } } } );
+
+            if( largest && largest != smallest )
+                groups.push_back( { { "label", "symbol large" },
+                                    { "ids", { toUtf8( largest->m_Uuid.AsString() ) } } } );
+
+            if( wires.size() >= 2 )
+            {
+                size_t half = wires.size() / 2;
+                groups.push_back( { { "label", "wires A" },
+                                    { "ids", std::vector<std::string>( wires.begin(),
+                                                                       wires.begin() + half ) } } );
+                groups.push_back( { { "label", "wires B" },
+                                    { "ids", std::vector<std::string>( wires.begin() + half,
+                                                                       wires.end() ) } } );
+            }
+        }
+    }
+
+    return json{ { "groups", groups } }.dump();
+}
+
 // Test/tuner helper: the first N item uuids of the CURRENT sheet — real,
 // resolvable KIIDs for synthetic remote-selection previews.
 std::string schCollabTestListItems( int aCount )
@@ -1824,6 +1885,7 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     function("kicadCollabSetViewport", &schCollabSetViewport);
     function("kicadCollabSetStyle", &schCollabSetStyle);
     function("kicadCollabTestListItems", &schCollabTestListItems);
+    function("kicadCollabTestDemoSet", &schCollabTestDemoSet);
     function("kicadCollabGetViewport", &schCollabGetViewport);
     function("kicadCollabGetSelection", &schCollabGetSelection);
     function("kicadCollabTestSelectFirst", &schCollabTestSelectFirst);
