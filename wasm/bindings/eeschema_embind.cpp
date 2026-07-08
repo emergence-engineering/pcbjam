@@ -56,6 +56,8 @@
 #include <tool/actions.h>
 #include <tool/coroutine.h>
 #include <pcbjam_remote_lock.h>
+#include "collab_common.h"
+#include "collab_presence_core.h"
 #include "collab_presence_style.h"
 #include <algorithm>
 
@@ -109,7 +111,7 @@ namespace {
 // Guard so SCH_COMMIT::Push's listener callbacks during apply() aren't re-emitted.
 bool s_applyingRemote = false;
 
-std::string toUtf8( const wxString& s ) { return std::string( s.utf8_str() ); }
+using pcbjam_collab::toUtf8;
 
 SCH_EDIT_FRAME* schFrame()
 {
@@ -309,26 +311,9 @@ json snapshotItems( SCH_EDIT_FRAME* aFrame )
     return arr;
 }
 
-void emit( const json& aDelta )
-{
-    std::string s = aDelta.dump();
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onDelta )
-            window.kicadCollab.onDelta( UTF8ToString( $0 ) );
-    }, s.c_str() );
-}
-
-// v2 "items" wire emit (ysync 0008): per-item s-expr blobs instead of decomposed
-// scalars. A JS runtime registers window.kicadCollab.onItems to opt in; both wires
-// are emitted side by side until the scalar path is retired.
-void emitItems( const json& aWire )
-{
-    std::string s = aWire.dump();
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onItems )
-            window.kicadCollab.onItems( UTF8ToString( $0 ) );
-    }, s.c_str() );
-}
+// Wire emitters (legacy scalar delta + v2 items): shared, collab_common.h.
+using pcbjam_collab::emitDelta;
+using pcbjam_collab::emitItemsWire;
 
 // Notify the standalone that the editor switched to a different sheet — a different
 // .kicad_sch == a different collab room (ysync subschemas). The path is the active
@@ -522,10 +507,10 @@ void flushDiff()
     g_baseline = std::move( cur );
 
     if( !added.empty() || !changed.empty() || !removed.empty() )
-        emit( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
+        emitDelta( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
 
     if( !wAdded.empty() || !wChanged.empty() || !removed.empty() )
-        emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", removed } } );
+        emitItemsWire( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", removed } } );
 }
 
 // Coalesce all the listener callbacks of one commit (and any other edits in the same loop
@@ -541,20 +526,9 @@ void scheduleFlush()
     g_flushScheduled = true;
 
     if( SCH_EDIT_FRAME* fr = schFrame() )
-    {
-        fr->CallAfter( []() {
-            COROUTINE<int, int> cor( []( int ) -> int
-                                     {
-                                         flushDiff();
-                                         return 0;
-                                     } );
-            cor.Call( 0 );
-        } );
-    }
+        pcbjam_collab::runOnFiber( fr, []() { flushDiff(); } );
     else
-    {
         flushDiff();
-    }
 }
 
 // A hierarchical sheet was just created locally ("Add Sheet"): write its new child screen
@@ -579,33 +553,28 @@ void scheduleSheetSave( SCH_SHEET* aSheet )
     std::string childAbs = toUtf8( childFn.GetFullPath() );
     std::string uuid = toUtf8( aSheet->m_Uuid.AsString() );
 
-    fr->CallAfter( [fr, childAbs, uuid]() {
-        COROUTINE<int, int> cor( [fr, childAbs, uuid]( int ) -> int
+    pcbjam_collab::runOnFiber( fr, [fr, childAbs, uuid]() {
+        KIID      kid( wxString::FromUTF8( uuid.c_str() ) );
+        SCH_ITEM* item = fr->Schematic().ResolveItem( kid, nullptr, /*allowNull*/ true );
+
+        if( !item || item->Type() != SCH_SHEET_T )
+            return;
+
+        try
         {
-            KIID      kid( wxString::FromUTF8( uuid.c_str() ) );
-            SCH_ITEM* item = fr->Schematic().ResolveItem( kid, nullptr, /*allowNull*/ true );
+            SCH_IO_KICAD_SEXPR io;
+            io.SaveSchematicFile( wxString::FromUTF8( childAbs.c_str() ),
+                                  static_cast<SCH_SHEET*>( item ), &fr->Schematic() );
+        }
+        catch( ... )
+        {
+            return; // a write failure must not abort the runtime
+        }
 
-            if( !item || item->Type() != SCH_SHEET_T )
-                return 0;
-
-            try
-            {
-                SCH_IO_KICAD_SEXPR io;
-                io.SaveSchematicFile( wxString::FromUTF8( childAbs.c_str() ),
-                                      static_cast<SCH_SHEET*>( item ), &fr->Schematic() );
-            }
-            catch( ... )
-            {
-                return 0; // a write failure must not abort the runtime
-            }
-
-            EM_ASM( {
-                if( window.kicadCollab && window.kicadCollab.onSheetCreated )
-                    window.kicadCollab.onSheetCreated( UTF8ToString( $0 ) );
-            }, childAbs.c_str() );
-            return 0;
-        } );
-        cor.Call( 0 );
+        EM_ASM( {
+            if( window.kicadCollab && window.kicadCollab.onSheetCreated )
+                window.kicadCollab.onSheetCreated( UTF8ToString( $0 ) );
+        }, childAbs.c_str() );
     } );
 }
 
@@ -686,311 +655,112 @@ SCHEMATIC* ensureBridge()
 // ───────────────────────── collab presence (collab-presence 0003) ─────────────────────────
 //
 // eeschema port of pcbnew's presence layer (0002 — see pcbnew_embind.cpp for the full
-// design rationale): emit THIS tab's selection + cursor to JS, render REMOTE peers'
-// cursors + selection outlines into a per-user-colored VIEW_OVERLAY. Zero kicad-fork
-// changes: wx-layer Bind() triggers on the GAL canvas + the COLLAB_LISTENER piggyback,
-// selection read post-settle from SCH_SELECTION_TOOL, KIIDs resolved via
-// SCHEMATIC::ResolveItem. Rooms are per-sheet (warm pool), so peers publishing
-// cursor/selection in the bound room are BY CONSTRUCTION on this same sheet file —
-// no sheet filtering is needed here; the JS side rebinds the whole presence layer on
-// sheet navigation (onSheetChanged) and clears the overlay in between.
-namespace presence {
+// design rationale). The state + event/scheduling machinery live in the shared
+// pcbjam_presence::CORE (collab_presence_core.h); this TU supplies only the
+// eeschema-specific hooks: frame/tool lookup, KIID resolution via
+// SCHEMATIC::ResolveItem, the bare-uuid selection payload, and the per-peer draw
+// (cross-app ghosts gated to the CURRENT sheet). Zero kicad-fork changes: wx-layer
+// Bind() triggers on the GAL canvas + the COLLAB_LISTENER piggyback, selection read
+// post-settle from SCH_SELECTION_TOOL. Rooms are per-sheet (warm pool), so peers
+// publishing cursor/selection in the bound room are BY CONSTRUCTION on this same
+// sheet file — no sheet filtering is needed for same-room selections; the JS side
+// rebinds the whole presence layer on sheet navigation (onSheetChanged) and clears
+// the overlay in between.
 
-struct PEER
+// Cross-app selection (0006): the schematic items a peer's xsel (symbol uuids
+// from a pcbnew peer) resolves to on the CURRENT sheet. Unlike same-room
+// selections (per-sheet rooms scope those by construction) xsel arrives
+// project-wide, so only items that resolve onto the sheet THIS canvas is
+// showing count — a bbox from another sheet's screen would land at meaningless
+// coordinates. ONE resolver shared by the ghost render and the test probe
+// (kicadCollabTestGetCrossMapped), so the assertion can't drift from the pixels.
+std::vector<SCH_ITEM*> resolveXsel( SCH_EDIT_FRAME* aFrame, const pcbjam_presence::PEER& aPeer )
 {
-    std::string       name;
-    KIGFX::COLOR4D    color;
-    bool              hasCursor = false;
-    VECTOR2D          cursor;            // world coords (IU)
-    std::vector<KIID> selection;
-    // Cross-app selection (0006): SYMBOL uuids derived from a pcbnew peer's
-    // footprint paths (the TS side strips the KIID_PATH down to its tail).
-    // Ghost-rendered when the symbol resolves onto the CURRENT sheet.
-    std::vector<KIID> xsel;
-};
+    std::vector<SCH_ITEM*> items;
 
-// Comment pin dot (collab-presence 0005): the GAL half of the hybrid pin —
-// zero pan/zoom lag; the clickable hit target + thread popover are DOM.
-struct PIN
-{
-    std::string    id;
-    std::string    name;                 // author (palette-override rehash key)
-    VECTOR2D       pos;                  // world coords (IU)
-    KIGFX::COLOR4D color;
-    bool           resolved = false;
-};
-
-std::vector<PEER>                    g_peers;
-std::vector<PIN>                     g_pins;
-// Remote soft-locks (collab-presence 0007) — see pcbnew_embind.cpp.
-std::map<KIID, std::string>          g_locks;
-// Every visual knob (shapes, widths, alphas, label placement, color overrides)
-// — see collab_presence_style.h; live-patched by kicadCollabSetStyle (tuner).
-// eeschema ships its own defaults (hairline outline, subtler fill/cursor).
-pcbjam_presence::STYLE               g_style = pcbjam_presence::eeschemaDefaultStyle();
-std::shared_ptr<KIGFX::VIEW_OVERLAY> g_overlay;
-// Labels render from their own overlay at the nearest depth (chip rects
-// would otherwise erase same-depth text) — see PRESENCE_TEXT_OVERLAY.
-std::shared_ptr<KIGFX::VIEW_OVERLAY> g_textOverlay;
-bool        g_started           = false;
-bool        g_redrawScheduled   = false;
-bool        g_selCheckScheduled = false;
-std::string g_lastSelectionJson;   // dedupe: emit only when the uuid set changed
-long long   g_lastCursorEmitMs = 0;
-double      g_lastVpScale  = 0.0;
-VECTOR2D    g_lastVpCenter;
-
-long long nowMs()
-{
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-                   std::chrono::steady_clock::now().time_since_epoch() )
-            .count();
-}
-
-KIGFX::COLOR4D parseColor( const std::string& aHex )
-{
-    if( aHex.size() == 7 && aHex[0] == '#' )
+    for( const KIID& id : aPeer.xsel )
     {
-        long v = strtol( aHex.c_str() + 1, nullptr, 16 );
-        return KIGFX::COLOR4D( ( ( v >> 16 ) & 0xff ) / 255.0, ( ( v >> 8 ) & 0xff ) / 255.0,
-                               ( v & 0xff ) / 255.0, 0.9 );
+        SCH_SHEET_PATH path;
+        SCH_ITEM*      item = aFrame->Schematic().ResolveItem( id, &path, /*allowNull*/ true );
+
+        if( item && path.LastScreen() == aFrame->GetScreen() )
+            items.push_back( item );
     }
 
-    return KIGFX::COLOR4D( 0.23, 0.51, 0.96, 0.9 ); // palette blue fallback
+    return items;
 }
 
-json selectionUuids( SCH_EDIT_FRAME* aFrame )
+pcbjam_presence::CORE& presenceCore()
 {
-    json uuids = json::array();
-
-    SCH_SELECTION_TOOL* selTool = aFrame->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
-
-    if( !selTool )
-        return uuids;
-
-    for( EDA_ITEM* item : selTool->GetSelection() )
-        uuids.push_back( toUtf8( item->m_Uuid.AsString() ) );
-
-    return uuids;
-}
-
-// Post-settle selection emit (see pcbnew): dedupe against the last emitted set.
-void checkSelection()
-{
-    g_selCheckScheduled = false;
-
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    std::string s = selectionUuids( fr ).dump();
-
-    if( s == g_lastSelectionJson )
-        return;
-
-    g_lastSelectionJson = s;
-
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onSelection )
-            window.kicadCollab.onSelection( UTF8ToString( $0 ) );
-    }, s.c_str() );
-}
-
-// Repaint the remote-peers overlay (CallAfter + COROUTINE — MakeOverlay's view->Add
-// and the items' virtual ViewBBox() need the fiber stack).
-void redrawOverlay()
-{
-    g_redrawScheduled = false;
-
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    KIGFX::VIEW* view = fr->GetCanvas()->GetView();
-
-    if( !g_overlay )
+    static pcbjam_presence::CORE core = []()
     {
-        g_overlay = view->MakeOverlay();
-        // Shapes sit one depth unit BELOW the text overlay (fork
-        // SetDepthOffset) so labels always render on top of chips/boxes.
-        g_overlay->SetDepthOffset( pcbjam_presence::PRESENCE_SHAPES_DEPTH_OFFSET );
-    }
+        pcbjam_presence::CORE c;
 
-    if( !g_textOverlay )
-        g_textOverlay = pcbjam_presence::makePresenceTextOverlay( view );
+        // eeschema ships its own defaults (hairline outline, subtler fill/cursor).
+        c.style = pcbjam_presence::eeschemaDefaultStyle();
 
-    g_overlay->Clear();
-    g_textOverlay->Clear();
+        c.frame = []() -> EDA_DRAW_FRAME* { return schFrame(); };
 
-    // Screen-constant sizing via the GAL matrix (GetScale() is the zoom, not px/IU).
-    double px = view->ToWorld( 1.0 );
-
-    // All shapes/sizes/placements come from g_style (collab_presence_style.h);
-    // the drawing itself is shared with pcbnew's TU so the editors never
-    // diverge visually.
-    for( const PEER& peer : g_peers )
-    {
-        KIGFX::COLOR4D color = pcbjam_presence::peerColor( g_style, peer.name, peer.color );
-
-        for( const KIID& id : peer.selection )
+        c.selectionTool = []( EDA_DRAW_FRAME* fr ) -> SELECTION_TOOL*
         {
-            SCH_SHEET_PATH path;
-            SCH_ITEM*      item = fr->Schematic().ResolveItem( id, &path, /*allowNull*/ true );
+            return fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
+        };
 
-            if( !item )
-                continue;   // not in this schematic (yet) — skip silently
-
-            pcbjam_presence::drawSelectionBox( g_overlay.get(), g_textOverlay.get(),
-                                               item->ViewBBox(), peer.name, color, px,
-                                               g_style );
-        }
-
-        // Cross-app ghosts (0006): a pcbnew peer's selection, as symbol uuids.
-        // Unlike same-room selections (per-sheet rooms scope those by
-        // construction) these arrive project-wide, so only draw items that
-        // resolve onto the sheet THIS canvas is showing — a bbox from another
-        // sheet's screen would land at meaningless coordinates here.
-        if( !peer.xsel.empty() )
+        // Selection emit = the bare uuid array (0006: eeschema uuids ARE the
+        // symbol uuids; pcbnew's counterpart adds fpPaths).
+        c.selectionEmitPayload = []( EDA_DRAW_FRAME* fr ) -> json
         {
-            pcbjam_presence::STYLE ghost = pcbjam_presence::ghostStyle( g_style );
+            return presenceCore().selectionUuids( fr );
+        };
 
-            for( const KIID& id : peer.xsel )
+        c.resolveItem = []( EDA_DRAW_FRAME* fr, const KIID& id ) -> EDA_ITEM*
+        {
+            return static_cast<SCH_EDIT_FRAME*>( fr )->Schematic()
+                    .ResolveItem( id, nullptr, /*allowNull*/ true );
+        };
+
+        c.drawPeerShapes = []( pcbjam_presence::CORE& aCore, EDA_DRAW_FRAME* aFrame,
+                               const pcbjam_presence::PEER& peer, const KIGFX::COLOR4D& color,
+                               double px )
+        {
+            SCH_EDIT_FRAME* fr = static_cast<SCH_EDIT_FRAME*>( aFrame );
+
+            for( const KIID& id : peer.selection )
             {
                 SCH_SHEET_PATH path;
                 SCH_ITEM*      item = fr->Schematic().ResolveItem( id, &path, /*allowNull*/ true );
 
-                if( !item || path.LastScreen() != fr->GetScreen() )
-                    continue;
+                if( !item )
+                    continue;   // not in this schematic (yet) — skip silently
 
-                pcbjam_presence::drawSelectionBox( g_overlay.get(), g_textOverlay.get(),
+                pcbjam_presence::drawSelectionBox( aCore.overlay.get(), aCore.textOverlay.get(),
                                                    item->ViewBBox(), peer.name, color, px,
-                                                   ghost );
+                                                   aCore.style );
             }
-        }
 
-        if( peer.hasCursor )
-            pcbjam_presence::drawCursor( g_overlay.get(), g_textOverlay.get(), peer.cursor,
-                                         peer.name, color, px, g_style );
-    }
+            // Cross-app ghosts (0006) — see resolveXsel for the sheet gating.
+            if( !peer.xsel.empty() )
+            {
+                pcbjam_presence::STYLE ghost = pcbjam_presence::ghostStyle( aCore.style );
 
-    // Comment pin dots (0005), drawn last so they sit above selection outlines.
-    for( const PIN& pin : g_pins )
-    {
-        KIGFX::COLOR4D color = pcbjam_presence::peerColor( g_style, pin.name, pin.color );
-        pcbjam_presence::drawPin( g_overlay.get(), pin.pos, color, pin.resolved, px, g_style );
-    }
+                for( SCH_ITEM* item : resolveXsel( fr, peer ) )
+                {
+                    pcbjam_presence::drawSelectionBox( aCore.overlay.get(), aCore.textOverlay.get(),
+                                                       item->ViewBBox(), peer.name, color, px,
+                                                       ghost );
+                }
+            }
+        };
 
-    view->Update( g_overlay.get() );
-    view->Update( g_textOverlay.get() );
-    fr->GetCanvas()->ForceRefresh();
+        return c;
+    }();
+
+    return core;
 }
-
-void scheduleRedraw()
-{
-    if( g_redrawScheduled )
-        return;
-
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    g_redrawScheduled = true;
-
-    fr->CallAfter( []() {
-        COROUTINE<int, int> cor( []( int ) -> int
-                                 {
-                                     redrawOverlay();
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
-}
-
-// Viewport push/pull (world↔screen mapping for the DOM layers, 0005).
-void emitViewportIfChanged()
-{
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    KIGFX::VIEW* view  = fr->GetCanvas()->GetView();
-    double       scale = view->GetScale();   // zoom — cheap change detector only
-    VECTOR2D     c     = view->GetCenter();
-
-    if( scale == g_lastVpScale && c == g_lastVpCenter )
-        return;
-
-    g_lastVpScale  = scale;
-    g_lastVpCenter = c;
-
-    const VECTOR2I& sz = view->GetScreenPixelSize();
-    // px per IU via the GAL matrix — GetScale() is the zoom, not px/IU.
-    double pxPerIu = view->ToScreen( 1.0 );
-
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onViewport )
-            window.kicadCollab.onViewport( $0, $1, $2, $3, $4 );
-    }, c.x, c.y, pxPerIu, sz.x, sz.y );
-
-    if( !g_peers.empty() )
-        scheduleRedraw();
-}
-
-void emitCursor( double aX, double aY, bool aActive )
-{
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onCursor )
-            window.kicadCollab.onCursor( $0, $1, $2 );
-    }, aX, aY, aActive ? 1 : 0 );
-}
-
-void onMotion( wxMouseEvent& aEvt )
-{
-    aEvt.Skip();
-
-    long long now = nowMs();
-
-    if( now - g_lastCursorEmitMs < 50 )     // ≤20 emits/s, event-driven (no timers)
-        return;
-
-    g_lastCursorEmitMs = now;
-
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    wxPoint  p     = aEvt.GetPosition();
-    VECTOR2D world = fr->GetCanvas()->GetView()->ToWorld( VECTOR2D( p.x, p.y ), true );
-
-    emitCursor( world.x, world.y, true );
-    emitViewportIfChanged();                // catches drag-pan while moving
-}
-
-void onLeave( wxMouseEvent& aEvt )
-{
-    aEvt.Skip();
-    emitCursor( 0, 0, false );
-}
-
-} // namespace presence
 
 void schedulePresenceSelCheck()
 {
-    if( presence::g_selCheckScheduled )
-        return;
-
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    presence::g_selCheckScheduled = true;
-    fr->CallAfter( []() { presence::checkSelection(); } );
+    presenceCore().scheduleSelCheck();
 }
 
 } // namespace
@@ -1323,22 +1093,12 @@ void schCollabApply( std::string aJson )
     if( !fr )
         return;
 
-    // Defer to the editor's main-loop context so SCH_COMMIT runs like a normal edit, AND run the
-    // mutation inside a COROUTINE so it executes on a libcontext fiber stack — the exact context
-    // KiCad tool actions (native draws/edits) run in. SCH_COMMIT::Push's CHT_ADD of a *new*
-    // SCH_SHAPE/SCH_SYMBOL dispatches GAL virtuals (view->Add → ViewGetLayers) through asyncify-
-    // instrumented invoke_*; off the fiber stack those mis-dispatch and trap inside KiCad core
-    // ("memory access out of bounds" / "table index out of bounds"), which the bridge can't
-    // devirtualize. On the fiber stack they dispatch correctly. CallAfter runs on the app main
-    // stack (ProcessPendingEvents), which is where COROUTINE::Call must be invoked from. (0007.)
-    fr->CallAfter( [fr, delta]() {
-        COROUTINE<int, int> cor( [fr, delta]( int ) -> int
-                                 {
-                                     doApply( fr, delta );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
+    // Defer to the editor's main-loop context + fiber stack (runOnFiber) so SCH_COMMIT runs
+    // like a normal edit: SCH_COMMIT::Push's CHT_ADD of a *new* SCH_SHAPE/SCH_SYMBOL
+    // dispatches GAL virtuals (view->Add → ViewGetLayers) through asyncify-instrumented
+    // invoke_*; off the fiber stack those mis-dispatch and trap inside KiCad core, which the
+    // bridge can't devirtualize. On the fiber stack they dispatch correctly. (0007.)
+    pcbjam_collab::runOnFiber( fr, [fr, delta]() { doApply( fr, delta ); } );
 }
 
 
@@ -1372,14 +1132,7 @@ void schCollabApplyItems( std::string aJson )
     if( !fr )
         return;
 
-    fr->CallAfter( [fr, wire]() {
-        COROUTINE<int, int> cor( [fr, wire]( int ) -> int
-                                 {
-                                     doApplyItems( fr, wire );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
+    pcbjam_collab::runOnFiber( fr, [fr, wire]() { doApplyItems( fr, wire ); } );
 }
 
 
@@ -1485,15 +1238,10 @@ bool schCollabTestRemoveItem( std::string aId )
 
     SCH_SCREEN* screen = path.LastScreen();
 
-    fr->CallAfter( [fr, item, screen]() {
-        COROUTINE<int, int> cor( [fr, item, screen]( int ) -> int
-                                 {
-                                     SCH_COMMIT commit( fr );
-                                     commit.Remove( item, screen );
-                                     commit.Push( wxT( "Collab test remove" ) );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
+    pcbjam_collab::runOnFiber( fr, [fr, item, screen]() {
+        SCH_COMMIT commit( fr );
+        commit.Remove( item, screen );
+        commit.Push( wxT( "Collab test remove" ) );
     } );
 
     return true;
@@ -1519,51 +1267,28 @@ bool schCollabTestRotateItem( std::string aId, double aDeg )
     SCH_SCREEN* screen = path.LastScreen();
     int         steps = ( (int) ( aDeg / 90.0 + ( aDeg >= 0 ? 0.5 : -0.5 ) ) % 4 + 4 ) % 4;
 
-    fr->CallAfter( [fr, item, screen, steps]() {
-        COROUTINE<int, int> cor( [fr, item, screen, steps]( int ) -> int
-                                 {
-                                     SCH_COMMIT commit( fr );
-                                     commit.Modify( item, screen );
+    pcbjam_collab::runOnFiber( fr, [fr, item, screen, steps]() {
+        SCH_COMMIT commit( fr );
+        commit.Modify( item, screen );
 
-                                     for( int i = 0; i < steps; ++i )
-                                         item->Rotate( item->GetPosition(), /*aRotateCCW*/ true );
+        for( int i = 0; i < steps; ++i )
+            item->Rotate( item->GetPosition(), /*aRotateCCW*/ true );
 
-                                     commit.Push( wxT( "Collab test rotate" ) );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
+        commit.Push( wxT( "Collab test rotate" ) );
     } );
 
     return true;
 }
 
-// Run Edit>Undo exactly like the UI would (main-loop + fiber stack) — miss 09:
-// exercises the local-ops-only undo policy and the stale-picker UUID guard.
+// Run Edit>Undo / read the undo depth — miss 09; frame-generic, collab_common.h.
 bool schCollabTestUndo()
 {
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return false;
-
-    fr->CallAfter( [fr]() {
-        COROUTINE<int, int> cor( [fr]( int ) -> int
-                                 {
-                                     fr->GetToolManager()->RunAction( ACTIONS::undo );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
-
-    return true;
+    return pcbjam_collab::testUndo( schFrame() );
 }
 
-// Local undo stack depth — remote applies must not grow it (miss 09).
 int schCollabTestUndoDepth()
 {
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    return fr ? fr->GetUndoCommandCount() : -1;
+    return pcbjam_collab::testUndoDepth( schFrame() );
 }
 
 // Set a symbol's Value field text — bug 04: fields live inside the symbol (not
@@ -1587,16 +1312,11 @@ bool schCollabTestSetFieldText( std::string aId, std::string aText )
     SCH_SCREEN* screen = path.LastScreen();
     wxString    text = wxString::FromUTF8( aText.c_str() );
 
-    fr->CallAfter( [fr, sym, screen, text]() {
-        COROUTINE<int, int> cor( [fr, sym, screen, text]( int ) -> int
-                                 {
-                                     SCH_COMMIT commit( fr );
-                                     commit.Modify( sym, screen );
-                                     sym->SetValueFieldText( text );
-                                     commit.Push( wxT( "Collab test field text" ) );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
+    pcbjam_collab::runOnFiber( fr, [fr, sym, screen, text]() {
+        SCH_COMMIT commit( fr );
+        commit.Modify( sym, screen );
+        sym->SetValueFieldText( text );
+        commit.Push( wxT( "Collab test field text" ) );
     } );
 
     return true;
@@ -1627,51 +1347,12 @@ extern "C" void kicadCollabOnSave( const char* aPath )
 
 // ── presence entry points (collab-presence 0003 — eeschema port of the 0002 set) ────────────
 
-// Install the presence input hooks on the GAL canvas (idempotent). The canvas is the
-// same window across sheet navigation, so one install serves the whole session.
+// Install the presence input hooks on the GAL canvas + the fork's soft-lock
+// query (idempotent) — shared core. The canvas is the same window across
+// sheet navigation, so one install serves the whole session.
 void schCollabPresenceStart()
 {
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr || presence::g_started )
-        return;
-
-    presence::g_started = true;
-
-    // Remote soft-locks (0007): let the selection/move tools consult the
-    // peers' live selections through the fork's process-global query.
-    PCBJAM_REMOTE_LOCK::SetQuery(
-            []( const KIID& aId, wxString* aHolder ) -> bool
-            {
-                auto it = presence::g_locks.find( aId );
-
-                if( it == presence::g_locks.end() )
-                    return false;
-
-                if( aHolder )
-                    *aHolder = wxString::FromUTF8( it->second.c_str() );
-
-                return true;
-            } );
-
-    wxWindow* canvas = fr->GetCanvas();
-
-    canvas->Bind( wxEVT_MOTION, []( wxMouseEvent& e ) { presence::onMotion( e ); } );
-    canvas->Bind( wxEVT_LEAVE_WINDOW, []( wxMouseEvent& e ) { presence::onLeave( e ); } );
-
-    auto selAndViewport = []( wxEvent& e )
-    {
-        e.Skip();
-        schedulePresenceSelCheck();
-
-        if( SCH_EDIT_FRAME* f = schFrame() )
-            f->CallAfter( []() { presence::emitViewportIfChanged(); } );
-    };
-
-    canvas->Bind( wxEVT_LEFT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
-    canvas->Bind( wxEVT_RIGHT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
-    canvas->Bind( wxEVT_KEY_UP, [selAndViewport]( wxKeyEvent& e ) { selAndViewport( e ); } );
-    canvas->Bind( wxEVT_MOUSEWHEEL, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+    presenceCore().start();
 }
 
 // JS → C++: full remote-peers snapshot (same wire as pcbnew's kicadCollabSetRemote).
@@ -1679,95 +1360,20 @@ void schCollabPresenceStart()
 // sheet switch — peers here are always this sheet's.
 void schCollabSetRemote( std::string aJson )
 {
-    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() )
-        return;
-
-    std::vector<presence::PEER> peers;
-
-    for( const json& p : j.value( "peers", json::array() ) )
-    {
-        presence::PEER peer;
-        peer.name  = p.value( "name", "" );
-        peer.color = presence::parseColor( p.value( "color", "" ) );
-
-        if( p.contains( "cursor" ) && p["cursor"].is_object() )
-        {
-            peer.hasCursor = true;
-            peer.cursor    = VECTOR2D( p["cursor"].value( "x", 0.0 ), p["cursor"].value( "y", 0.0 ) );
-        }
-
-        for( const json& u : p.value( "selection", json::array() ) )
-        {
-            if( u.is_string() )
-                peer.selection.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
-        }
-
-        // Cross-app selection (0006): symbol uuids from a pcbnew peer.
-        for( const json& u : p.value( "xsel", json::array() ) )
-        {
-            if( u.is_string() )
-                peer.xsel.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
-        }
-
-        peers.push_back( std::move( peer ) );
-    }
-
-    // Remote soft-locks (0007): `locks: [{uuid, name}]` — see pcbnew_embind.cpp.
-    std::map<KIID, std::string> locks;
-
-    for( const json& l : j.value( "locks", json::array() ) )
-    {
-        std::string uuid = l.is_object() ? l.value( "uuid", "" ) : "";
-
-        if( !uuid.empty() )
-            locks[ KIID( wxString::FromUTF8( uuid.c_str() ) ) ] = l.value( "name", "" );
-    }
-
-    presence::g_peers = std::move( peers );
-    presence::g_locks = std::move( locks );
-    schCollabPresenceStart();
-    presence::scheduleRedraw();
+    presenceCore().setRemote( aJson );
 }
 
 // JS → C++ (collab-presence 0005): comment pin dots (same wire as pcbnew).
 void schCollabSetPins( std::string aJson )
 {
-    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() )
-        return;
-
-    std::vector<presence::PIN> pins;
-
-    for( const json& p : j.value( "pins", json::array() ) )
-    {
-        presence::PIN pin;
-        pin.id       = p.value( "id", "" );
-        pin.name     = p.value( "name", "" );
-        pin.pos      = VECTOR2D( p.value( "x", 0.0 ), p.value( "y", 0.0 ) );
-        pin.color    = presence::parseColor( p.value( "color", "" ) );
-        pin.resolved = p.value( "resolved", false );
-        pins.push_back( std::move( pin ) );
-    }
-
-    presence::g_pins = std::move( pins );
-    schCollabPresenceStart();
-    presence::scheduleRedraw();
+    presenceCore().setPins( aJson );
 }
 
 // JS → C++ (presence tuner): live-patch the overlay STYLE and repaint —
 // see collab_presence_style.h + pcbnew's counterpart.
 void schCollabSetStyle( std::string aJson )
 {
-    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() )
-        return;
-
-    pcbjam_presence::patchStyle( presence::g_style, j );
-    presence::scheduleRedraw();
+    presenceCore().setStyle( aJson );
 }
 
 // Tuner helper: a VARIED demo-selection set for the current sheet — smallest +
@@ -1858,38 +1464,14 @@ std::string schCollabTestListItems( int aCount )
 // JS → C++ (0005): pan the view to a world position (comment panel "jump to pin").
 void schCollabSetViewport( double aCx, double aCy )
 {
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    fr->CallAfter( [fr, aCx, aCy]() {
-        COROUTINE<int, int> cor( [fr, aCx, aCy]( int ) -> int
-                                 {
-                                     fr->GetCanvas()->GetView()->SetCenter( VECTOR2D( aCx, aCy ) );
-                                     fr->GetCanvas()->ForceRefresh();
-                                     presence::emitViewportIfChanged();
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
+    presenceCore().panTo( aCx, aCy );
 }
 
 // JS pull of the current viewport transform: `{cx,cy,scale,w,h}` with scale = px per
 // IU via the GAL matrix (GetScale() is the zoom, not px/IU — pcbnew 0002 lesson).
 std::string schCollabGetViewport()
 {
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return "";
-
-    KIGFX::VIEW*    view = fr->GetCanvas()->GetView();
-    VECTOR2D        c    = view->GetCenter();
-    const VECTOR2I& sz   = view->GetScreenPixelSize();
-
-    return json{ { "cx", c.x }, { "cy", c.y }, { "scale", view->ToScreen( 1.0 ) },
-                 { "w", sz.x }, { "h", sz.y } }.dump();
+    return presenceCore().viewportJson();
 }
 
 // JS pull of the CURRENT selection's uuids (presence seed + e2e no-leak probe).
@@ -1900,7 +1482,7 @@ std::string schCollabGetSelection()
     if( !fr )
         return "[]";
 
-    return presence::selectionUuids( fr ).dump();
+    return presenceCore().selectionUuids( fr ).dump();
 }
 
 // JS pull of the current selection in the 0006 payload shape. eeschema has no
@@ -1914,13 +1496,13 @@ std::string schCollabGetSelectionFull()
         return "{\"uuids\":[],\"fpPaths\":[]}";
 
     json payload;
-    payload["uuids"]   = presence::selectionUuids( fr );
+    payload["uuids"]   = presenceCore().selectionUuids( fr );
     payload["fpPaths"] = json::array();
     return payload.dump();
 }
 
 // Test probe (0006): the schematic-item uuids the current peers' cross-app
-// selections resolve to ON THE CURRENT SHEET (mirrors the redraw's gate).
+// selections resolve to ON THE CURRENT SHEET — same resolveXsel the render uses.
 std::string schCollabTestGetCrossMapped()
 {
     json arr = json::array();
@@ -1930,16 +1512,10 @@ std::string schCollabTestGetCrossMapped()
     if( !fr )
         return arr.dump();
 
-    for( const presence::PEER& peer : presence::g_peers )
+    for( const pcbjam_presence::PEER& peer : presenceCore().peers )
     {
-        for( const KIID& id : peer.xsel )
-        {
-            SCH_SHEET_PATH path;
-            SCH_ITEM*      item = fr->Schematic().ResolveItem( id, &path, /*allowNull*/ true );
-
-            if( item && path.LastScreen() == fr->GetScreen() )
-                arr.push_back( toUtf8( item->m_Uuid.AsString() ) );
-        }
+        for( SCH_ITEM* item : resolveXsel( fr, peer ) )
+            arr.push_back( toUtf8( item->m_Uuid.AsString() ) );
     }
 
     return arr.dump();
@@ -1970,13 +1546,7 @@ std::string schCollabTestSelectFirst()
     if( !target )
         return "";
 
-    fr->CallAfter( [fr, target]() {
-        if( SCH_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>() )
-        {
-            st->AddItemToSel( target );
-            schedulePresenceSelCheck();
-        }
-    } );
+    presenceCore().selectItem( target );
 
     return toUtf8( target->m_Uuid.AsString() );
 }
@@ -2012,13 +1582,7 @@ std::string schCollabTestSelectComponent()
     if( !target )
         return "";
 
-    fr->CallAfter( [fr, target]() {
-        if( SCH_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>() )
-        {
-            st->AddItemToSel( target );
-            schedulePresenceSelCheck();
-        }
-    } );
+    presenceCore().selectItem( target );
 
     return toUtf8( target->m_Uuid.AsString() );
 }
@@ -2028,72 +1592,13 @@ std::string schCollabTestSelectComponent()
 // forced re-emit).
 void schCollabReleaseSelection( std::string aUuidsJson, std::string aHolder )
 {
-    json j = json::parse( aUuidsJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() || !j.is_array() )
-        return;
-
-    SCH_EDIT_FRAME* fr = schFrame();
-
-    if( !fr )
-        return;
-
-    std::vector<KIID> ids;
-
-    for( const json& u : j )
-    {
-        if( u.is_string() )
-            ids.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
-    }
-
-    if( ids.empty() )
-        return;
-
-    wxString holder = wxString::FromUTF8( aHolder.c_str() );
-
-    fr->CallAfter( [fr, ids, holder]() {
-        if( !fr->ToolStackIsEmpty() )
-            fr->GetToolManager()->RunAction( ACTIONS::cancelInteractive );
-
-        SCH_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>();
-
-        if( !st )
-            return;
-
-        bool released = false;
-
-        for( const KIID& id : ids )
-        {
-            SCH_ITEM* item = fr->Schematic().ResolveItem( id, nullptr, /*allowNull*/ true );
-
-            if( item && item->IsSelected() )
-            {
-                st->RemoveItemFromSel( item );
-                released = true;
-            }
-        }
-
-        if( released )
-        {
-            fr->ShowInfoBarWarning( wxString::Format( _( "%s is editing this — released from "
-                                                         "your selection." ),
-                                                      holder ),
-                                    true );
-        }
-
-        schedulePresenceSelCheck();
-    } );
+    presenceCore().releaseSelection( aUuidsJson, aHolder );
 }
 
 // Test probe (0007): the current remote soft-lock set as `[{uuid, name}]`.
 std::string schCollabTestGetLocked()
 {
-    json arr = json::array();
-
-    for( const auto& [id, name] : presence::g_locks )
-        arr.push_back( { { "uuid", toUtf8( id.AsString() ) }, { "name", name } } );
-
-    return arr.dump();
+    return presenceCore().locksJson();
 }
 
 // Test helper: clear the selection through the tool + run the presence check.
@@ -2105,10 +1610,12 @@ bool schCollabTestClearSelection()
         return false;
 
     fr->CallAfter( [fr]() {
+        // ClearSelection is not on the shared SELECTION_TOOL base — the one
+        // presence hook that stays editor-typed.
         if( SCH_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<SCH_SELECTION_TOOL>() )
         {
             st->ClearSelection();
-            schedulePresenceSelCheck();
+            presenceCore().scheduleSelCheck();
         }
     } );
 

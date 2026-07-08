@@ -48,6 +48,8 @@
 #include <view/view_overlay.h>
 #include <pcb_draw_panel_gal.h>
 #include <nlohmann/json.hpp>
+#include "collab_common.h"
+#include "collab_presence_core.h"
 #include "collab_presence_style.h"
 #include <algorithm>
 #include <chrono>
@@ -121,7 +123,7 @@ namespace {
 // Guard so BOARD_COMMIT::Push's listener callbacks during apply() aren't re-emitted.
 bool s_applyingRemote = false;
 
-std::string toUtf8( const wxString& s ) { return std::string( s.utf8_str() ); }
+using pcbjam_collab::toUtf8;
 
 PCB_EDIT_FRAME* pcbFrame()
 {
@@ -554,26 +556,9 @@ void applyChanged( BOARD_ITEM* aItem, const json& j )
     }
 }
 
-void emit( const json& aDelta )
-{
-    std::string s = aDelta.dump();
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onDelta )
-            window.kicadCollab.onDelta( UTF8ToString( $0 ) );
-    }, s.c_str() );
-}
-
-// v2 "items" wire emit (ysync 0008): per-item s-expr blobs instead of decomposed
-// scalars. A JS runtime registers window.kicadCollab.onItems to opt in; both wires
-// are emitted side by side until the scalar path is retired.
-void emitItems( const json& aWire )
-{
-    std::string s = aWire.dump();
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onItems )
-            window.kicadCollab.onItems( UTF8ToString( $0 ) );
-    }, s.c_str() );
-}
+// Wire emitters (legacy scalar delta + v2 items): shared, collab_common.h.
+using pcbjam_collab::emitDelta;
+using pcbjam_collab::emitItemsWire;
 
 // ── Emit via post-settle snapshot diff (mirrors eeschema 0007) ───────────────────────────────
 //
@@ -802,10 +787,10 @@ void flushDiff()
     g_baseline = std::move( cur );
 
     if( !added.empty() || !changed.empty() || !removed.empty() )
-        emit( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
+        emitDelta( json{ { "added", added }, { "changed", changed }, { "removed", removed } } );
 
     if( !wAdded.empty() || !wChanged.empty() || !wRemoved.empty() )
-        emitItems( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", wRemoved } } );
+        emitItemsWire( json{ { "added", wAdded }, { "changed", wChanged }, { "removed", wRemoved } } );
 }
 
 // Coalesce all the listener callbacks of one commit (and any other edits in the same loop
@@ -822,20 +807,9 @@ void scheduleFlush()
     g_flushScheduled = true;
 
     if( PCB_EDIT_FRAME* fr = pcbFrame() )
-    {
-        fr->CallAfter( []() {
-            COROUTINE<int, int> cor( []( int ) -> int
-                                     {
-                                         flushDiff();
-                                         return 0;
-                                     } );
-            cor.Call( 0 );
-        } );
-    }
+        pcbjam_collab::runOnFiber( fr, []() { flushDiff(); } );
     else
-    {
         flushDiff();
-    }
 }
 
 // Presence (collab-presence 0002): board changes often change the selection too
@@ -1124,97 +1098,146 @@ void collabTestMove( PCB_EDIT_FRAME* aFrame, BOARD_ITEM* aItem, int aDx, int aDy
 // already uses. Selection changes with no closing canvas event (Edit→Select All from the
 // menu) are missed until the next input or board change — acceptable for an ephemeral
 // layer that fully resyncs on every emit.
-namespace presence {
-
-struct PEER
-{
-    std::string       name;
-    KIGFX::COLOR4D    color;
-    bool              hasCursor = false;
-    VECTOR2D          cursor;            // world coords (IU/nm)
-    std::vector<KIID> selection;
-    // Cross-app selection (0006): SYMBOL uuids an eeschema peer has selected —
-    // rendered as ghost outlines on every footprint whose GetPath() ends in one
-    // (a reused sheet legitimately maps one symbol to N footprints).
-    std::vector<KIID> xsel;
-};
-
-// Comment pin dot (collab-presence 0005): the GAL half of the hybrid pin —
-// zero pan/zoom lag; the clickable hit target + thread popover are DOM,
-// positioned via the exported viewport transform.
-struct PIN
-{
-    std::string    id;
-    std::string    name;                 // author (palette-override rehash key)
-    VECTOR2D       pos;                  // world coords (IU)
-    KIGFX::COLOR4D color;
-    bool           resolved = false;
-};
-
-std::vector<PEER>                    g_peers;
-std::vector<PIN>                     g_pins;
-// Remote soft-locks (collab-presence 0007): uuid → holding peer's display
-// name, derived by the TS side from ALL other clients' live selections (own
-// user's other tabs included). Consulted by the fork's PCBJAM_REMOTE_LOCK
-// query from the selection/move tools. Ephemeral — replaced on every
-// kicadCollabSetRemote snapshot.
-std::map<KIID, std::string>          g_locks;
-// Every visual knob (shapes, widths, alphas, label placement, color overrides)
-// — see collab_presence_style.h; live-patched by kicadCollabSetStyle (tuner).
-pcbjam_presence::STYLE               g_style;
-std::shared_ptr<KIGFX::VIEW_OVERLAY> g_overlay;
-// Labels render from their own overlay at the nearest depth (chip rects
-// would otherwise erase same-depth text) — see PRESENCE_TEXT_OVERLAY.
-std::shared_ptr<KIGFX::VIEW_OVERLAY> g_textOverlay;
-bool        g_started         = false;
-bool        g_redrawScheduled = false;
-bool        g_selCheckScheduled = false;
-std::string g_lastSelectionJson;   // dedupe: emit only when the uuid set changed
-long long   g_lastCursorEmitMs = 0;
-double      g_lastVpScale  = 0.0;
-VECTOR2D    g_lastVpCenter;
-
-long long nowMs()
-{
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-                   std::chrono::steady_clock::now().time_since_epoch() )
-            .count();
-}
-
-KIGFX::COLOR4D parseColor( const std::string& aHex )
-{
-    if( aHex.size() == 7 && aHex[0] == '#' )
-    {
-        long v = strtol( aHex.c_str() + 1, nullptr, 16 );
-        return KIGFX::COLOR4D( ( ( v >> 16 ) & 0xff ) / 255.0, ( ( v >> 8 ) & 0xff ) / 255.0,
-                               ( v & 0xff ) / 255.0, 0.9 );
-    }
-
-    return KIGFX::COLOR4D( 0.23, 0.51, 0.96, 0.9 ); // palette blue fallback
-}
-
-json selectionUuids( PCB_EDIT_FRAME* aFrame )
-{
-    json uuids = json::array();
-
-    PCB_SELECTION_TOOL* selTool = aFrame->GetToolManager()->GetTool<PCB_SELECTION_TOOL>();
-
-    if( !selTool )
-        return uuids;
-
-    for( EDA_ITEM* item : selTool->GetSelection() )
-        uuids.push_back( toUtf8( item->m_Uuid.AsString() ) );
-
-    return uuids;
-}
+//
+// The state + event/scheduling machinery live in the shared pcbjam_presence::CORE
+// (collab_presence_core.h); this TU supplies only the pcbnew-specific hooks:
+// frame/tool lookup, KIID resolution via BOARD::ResolveItem, the {uuids,fpPaths}
+// selection payload (0006), and the per-peer draw (exact-outline highlight + xsel
+// ghosts matched against footprint GetPath() tails).
 
 // The full selection emit payload (0006): the uuids plus, for every selected
 // FOOTPRINT, its schematic link — the GetPath() KIID_PATH string ending in the
 // symbol uuid. eeschema peers highlight the corresponding symbols from it.
+json selectionPayload( PCB_EDIT_FRAME* aFrame );
+
+// Cross-app selection (0006): the footprints a peer's xsel (eeschema symbol
+// uuids) resolves to on this board — every footprint whose GetPath() ends in
+// the symbol uuid (a reused sheet legitimately maps one symbol to N
+// footprints). The per-call linear scan reflects the live board with no index
+// to invalidate; boards are small relative to the redraw's own draw cost.
+// ONE resolver shared by the ghost render and the test probe
+// (kicadCollabTestGetCrossMapped), so the assertion can't drift from the pixels.
+std::vector<FOOTPRINT*> resolveXsel( PCB_EDIT_FRAME* aFrame, const pcbjam_presence::PEER& aPeer )
+{
+    std::vector<FOOTPRINT*> fps;
+
+    for( const KIID& symId : aPeer.xsel )
+    {
+        for( FOOTPRINT* fp : aFrame->GetBoard()->Footprints() )
+        {
+            const KIID_PATH& path = fp->GetPath();
+
+            if( !path.empty() && path.back() == symId )
+                fps.push_back( fp );
+        }
+    }
+
+    return fps;
+}
+
+pcbjam_presence::CORE& presenceCore()
+{
+    static pcbjam_presence::CORE core = []()
+    {
+        pcbjam_presence::CORE c;
+
+        c.frame = []() -> EDA_DRAW_FRAME* { return pcbFrame(); };
+
+        c.selectionTool = []( EDA_DRAW_FRAME* fr ) -> SELECTION_TOOL*
+        {
+            return fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>();
+        };
+
+        c.selectionEmitPayload = []( EDA_DRAW_FRAME* fr ) -> json
+        {
+            return selectionPayload( static_cast<PCB_EDIT_FRAME*>( fr ) );
+        };
+
+        c.resolveItem = []( EDA_DRAW_FRAME* fr, const KIID& id ) -> EDA_ITEM*
+        {
+            return static_cast<PCB_EDIT_FRAME*>( fr )->GetBoard()
+                    ->ResolveItem( id, /*aAllowNullptrReturn*/ true );
+        };
+
+        c.drawPeerShapes = []( pcbjam_presence::CORE& aCore, EDA_DRAW_FRAME* aFrame,
+                               const pcbjam_presence::PEER& peer, const KIGFX::COLOR4D& color,
+                               double px )
+        {
+            PCB_EDIT_FRAME* fr    = static_cast<PCB_EDIT_FRAME*>( aFrame );
+            BOARD*          board = fr->GetBoard();
+
+            // Draw ONE item's selection box under the given style. Exact-geometry
+            // outline (style shape 5): footprints hug their bounding hull,
+            // everything else its transformed shape. Runs on the coroutine fiber
+            // (virtual dispatch), falls back to the bbox on anything that can't
+            // produce a polygon.
+            auto drawItem = [&]( BOARD_ITEM* item, const std::string& name,
+                                 const KIGFX::COLOR4D& itemColor,
+                                 const pcbjam_presence::STYLE& style )
+            {
+                SHAPE_POLY_SET outline;
+
+                if( style.selShape == 5 )
+                {
+                    try
+                    {
+                        int pad = KiROUND( style.selPaddingPx * px );
+                        int err = KiROUND( px ) + 1;
+
+                        if( item->Type() == PCB_FOOTPRINT_T )
+                        {
+                            outline = static_cast<FOOTPRINT*>( item )->GetBoundingHull();
+
+                            if( pad > 0 )
+                                outline.Inflate( pad, CORNER_STRATEGY::ROUND_ALL_CORNERS, err );
+                        }
+                        else
+                        {
+                            item->TransformShapeToPolygon( outline, (PCB_LAYER_ID) itemLayer( item ),
+                                                           pad, err, ERROR_OUTSIDE );
+                        }
+                    }
+                    catch( ... )
+                    {
+                        outline.RemoveAllContours();
+                    }
+                }
+
+                pcbjam_presence::drawSelectionBox( aCore.overlay.get(), aCore.textOverlay.get(),
+                                                   item->ViewBBox(), name, itemColor, px,
+                                                   style, &outline );
+            };
+
+            for( const KIID& id : peer.selection )
+            {
+                BOARD_ITEM* item = board->ResolveItem( id, /*aAllowNullptrReturn*/ true );
+
+                if( !item )
+                    continue;   // not on this board (yet) — skip silently
+
+                drawItem( item, peer.name, color, aCore.style );
+            }
+
+            // Cross-app ghosts (0006) — see resolveXsel for the path-tail matching.
+            if( !peer.xsel.empty() )
+            {
+                pcbjam_presence::STYLE ghost = pcbjam_presence::ghostStyle( aCore.style );
+
+                for( FOOTPRINT* fp : resolveXsel( fr, peer ) )
+                    drawItem( fp, peer.name, color, ghost );
+            }
+        };
+
+        return c;
+    }();
+
+    return core;
+}
+
 json selectionPayload( PCB_EDIT_FRAME* aFrame )
 {
     json payload;
-    payload["uuids"]   = selectionUuids( aFrame );
+    payload["uuids"]   = presenceCore().selectionUuids( aFrame );
     payload["fpPaths"] = json::array();
 
     PCB_SELECTION_TOOL* selTool = aFrame->GetToolManager()->GetTool<PCB_SELECTION_TOOL>();
@@ -1236,272 +1259,9 @@ json selectionPayload( PCB_EDIT_FRAME* aFrame )
     return payload;
 }
 
-// Post-settle selection emit: read the selection AFTER the triggering event finished
-// (CallAfter), dedupe against the last emitted set, hand the payload to JS.
-void checkSelection()
-{
-    g_selCheckScheduled = false;
-
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    std::string s = selectionPayload( fr ).dump();
-
-    if( s == g_lastSelectionJson )
-        return;
-
-    g_lastSelectionJson = s;
-
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onSelection )
-            window.kicadCollab.onSelection( UTF8ToString( $0 ) );
-    }, s.c_str() );
-}
-
-// Repaint the remote-peers overlay. Runs in CallAfter + COROUTINE: the first
-// MakeOverlay() view->Add and each item's virtual ViewBBox() need the fiber stack
-// (asyncify virtual dispatch — same constraint as doApply above).
-void redrawOverlay()
-{
-    g_redrawScheduled = false;
-
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    KIGFX::VIEW* view = fr->GetCanvas()->GetView();
-
-    if( !g_overlay )
-    {
-        g_overlay = view->MakeOverlay();
-        // Shapes sit one depth unit BELOW the text overlay (fork
-        // SetDepthOffset) so labels always render on top of chips/boxes.
-        g_overlay->SetDepthOffset( pcbjam_presence::PRESENCE_SHAPES_DEPTH_OFFSET );
-    }
-
-    if( !g_textOverlay )
-        g_textOverlay = pcbjam_presence::makePresenceTextOverlay( view );
-
-    g_overlay->Clear();
-    g_textOverlay->Clear();
-
-    BOARD* board = fr->GetBoard();
-    // Screen-constant sizing: px → world units, so cursors/outline widths don't
-    // scale with zoom. MUST go through the GAL matrix (ToWorld(double)) — the
-    // naive 1/GetScale() is the ZOOM factor, not px-per-IU (the GAL world-unit
-    // scale is folded into the matrix only), and it under-sizes the drawing by
-    // ~7 orders of magnitude (invisible cursors).
-    double px = view->ToWorld( 1.0 );
-
-    // All shapes/sizes/placements come from g_style (collab_presence_style.h);
-    // the drawing itself is shared with eeschema's TU so the editors never
-    // diverge visually.
-    // Draw ONE item's selection box under the given style. Exact-geometry
-    // outline (style shape 5): footprints hug their bounding hull, everything
-    // else its transformed shape. Runs on the coroutine fiber (virtual
-    // dispatch), falls back to the bbox on anything that can't produce a
-    // polygon.
-    auto drawItem = [&]( BOARD_ITEM* item, const std::string& name,
-                         const KIGFX::COLOR4D& color, const pcbjam_presence::STYLE& style )
-    {
-        SHAPE_POLY_SET outline;
-
-        if( style.selShape == 5 )
-        {
-            try
-            {
-                int pad = KiROUND( style.selPaddingPx * px );
-                int err = KiROUND( px ) + 1;
-
-                if( item->Type() == PCB_FOOTPRINT_T )
-                {
-                    outline = static_cast<FOOTPRINT*>( item )->GetBoundingHull();
-
-                    if( pad > 0 )
-                        outline.Inflate( pad, CORNER_STRATEGY::ROUND_ALL_CORNERS, err );
-                }
-                else
-                {
-                    item->TransformShapeToPolygon( outline, (PCB_LAYER_ID) itemLayer( item ),
-                                                   pad, err, ERROR_OUTSIDE );
-                }
-            }
-            catch( ... )
-            {
-                outline.RemoveAllContours();
-            }
-        }
-
-        pcbjam_presence::drawSelectionBox( g_overlay.get(), g_textOverlay.get(),
-                                           item->ViewBBox(), name, color, px,
-                                           style, &outline );
-    };
-
-    for( const PEER& peer : g_peers )
-    {
-        KIGFX::COLOR4D color = pcbjam_presence::peerColor( g_style, peer.name, peer.color );
-
-        for( const KIID& id : peer.selection )
-        {
-            BOARD_ITEM* item = board->ResolveItem( id, /*aAllowNullptrReturn*/ true );
-
-            if( !item )
-                continue;   // not on this board (yet) — skip silently
-
-            drawItem( item, peer.name, color, g_style );
-        }
-
-        // Cross-app ghosts (0006): the peer's eeschema symbol uuids, matched
-        // against every footprint's GetPath() tail. The per-redraw linear scan
-        // reflects the live board with no index to invalidate; boards are small
-        // relative to the redraw's own draw cost.
-        if( !peer.xsel.empty() )
-        {
-            pcbjam_presence::STYLE ghost = pcbjam_presence::ghostStyle( g_style );
-
-            for( const KIID& symId : peer.xsel )
-            {
-                for( FOOTPRINT* fp : board->Footprints() )
-                {
-                    const KIID_PATH& path = fp->GetPath();
-
-                    if( !path.empty() && path.back() == symId )
-                        drawItem( fp, peer.name, color, ghost );
-                }
-            }
-        }
-
-        if( peer.hasCursor )
-            pcbjam_presence::drawCursor( g_overlay.get(), g_textOverlay.get(), peer.cursor,
-                                         peer.name, color, px, g_style );
-    }
-
-    // Comment pin dots (0005), drawn last so they sit above selection outlines.
-    for( const PIN& pin : g_pins )
-    {
-        KIGFX::COLOR4D color = pcbjam_presence::peerColor( g_style, pin.name, pin.color );
-        pcbjam_presence::drawPin( g_overlay.get(), pin.pos, color, pin.resolved, px, g_style );
-    }
-
-    view->Update( g_overlay.get() );
-    view->Update( g_textOverlay.get() );
-    // The canvas repaints on its own only with focus/input — force it, exactly as
-    // the cross-probe flash does.
-    fr->GetCanvas()->ForceRefresh();
-}
-
-void scheduleRedraw()
-{
-    if( g_redrawScheduled )
-        return;
-
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    g_redrawScheduled = true;
-
-    fr->CallAfter( []() {
-        COROUTINE<int, int> cor( []( int ) -> int
-                                 {
-                                     redrawOverlay();
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
-}
-
-// Viewport emit (world→screen mapping for the React comment/DOM layer, 0005): pushed
-// when the view center/scale changed (checked from the input handlers below), pulled
-// any time via kicadCollabGetViewport. Zoom also invalidates the overlay's
-// screen-constant sizes, so a change schedules a redraw too.
-void emitViewportIfChanged()
-{
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    KIGFX::VIEW* view  = fr->GetCanvas()->GetView();
-    double       scale = view->GetScale();   // zoom — cheap change detector only
-    VECTOR2D     c     = view->GetCenter();
-
-    if( scale == g_lastVpScale && c == g_lastVpCenter )
-        return;
-
-    g_lastVpScale  = scale;
-    g_lastVpCenter = c;
-
-    const VECTOR2I& sz = view->GetScreenPixelSize();
-    // px per IU via the GAL matrix — GetScale() is the zoom, not px/IU.
-    double pxPerIu = view->ToScreen( 1.0 );
-
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onViewport )
-            window.kicadCollab.onViewport( $0, $1, $2, $3, $4 );
-    }, c.x, c.y, pxPerIu, sz.x, sz.y );
-
-    if( !g_peers.empty() )
-        scheduleRedraw();
-}
-
-void emitCursor( double aX, double aY, bool aActive )
-{
-    EM_ASM( {
-        if( window.kicadCollab && window.kicadCollab.onCursor )
-            window.kicadCollab.onCursor( $0, $1, $2 );
-    }, aX, aY, aActive ? 1 : 0 );
-}
-
-void onMotion( wxMouseEvent& aEvt )
-{
-    aEvt.Skip();
-
-    long long now = nowMs();
-
-    if( now - g_lastCursorEmitMs < 50 )     // ≤20 emits/s, event-driven (no timers)
-        return;
-
-    g_lastCursorEmitMs = now;
-
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    // Screen→world via the non-virtual VIEW::ToWorld (the virtual
-    // VIEW_CONTROLS::GetMousePosition is an asyncify dispatch risk here).
-    wxPoint  p     = aEvt.GetPosition();
-    VECTOR2D world = fr->GetCanvas()->GetView()->ToWorld( VECTOR2D( p.x, p.y ), true );
-
-    emitCursor( world.x, world.y, true );
-    emitViewportIfChanged();                // catches drag-pan while moving
-}
-
-void onLeave( wxMouseEvent& aEvt )
-{
-    aEvt.Skip();
-    emitCursor( 0, 0, false );
-}
-
-} // namespace presence
-
 void schedulePresenceSelCheck()
 {
-    if( presence::g_selCheckScheduled )
-        return;
-
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    presence::g_selCheckScheduled = true;
-    fr->CallAfter( []() { presence::checkSelection(); } );
+    presenceCore().scheduleSelCheck();
 }
 
 } // namespace
@@ -1530,14 +1290,7 @@ void pcbCollabApply( std::string aJson )
     if( !fr )
         return;
 
-    fr->CallAfter( [fr, delta]() {
-        COROUTINE<int, int> cor( [fr, delta]( int ) -> int
-                                 {
-                                     doApply( fr, delta );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
+    pcbjam_collab::runOnFiber( fr, [fr, delta]() { doApply( fr, delta ); } );
 }
 
 
@@ -1555,14 +1308,7 @@ void pcbCollabApplyItems( std::string aJson )
     if( !fr )
         return;
 
-    fr->CallAfter( [fr, wire]() {
-        COROUTINE<int, int> cor( [fr, wire]( int ) -> int
-                                 {
-                                     doApplyItems( fr, wire );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
+    pcbjam_collab::runOnFiber( fr, [fr, wire]() { doApplyItems( fr, wire ); } );
 }
 
 
@@ -1690,16 +1436,10 @@ std::string pcbCollabTestMoveFirst( int aDx, int aDy )
                             return;
 
                         movedId = toUtf8( item->m_Uuid.AsString() );
-                        // Run on the app main stack (CallAfter) AND inside a COROUTINE fiber, so
-                        // the virtual Move() dispatches instead of no-opping — same wrapping as
-                        // kicadCollabApply's doApply.
-                        fr->CallAfter( [fr, item, aDx, aDy]() {
-                            COROUTINE<int, int> cor( [fr, item, aDx, aDy]( int ) -> int
-                                                     {
-                                                         collabTestMove( fr, item, aDx, aDy );
-                                                         return 0;
-                                                     } );
-                            cor.Call( 0 );
+                        // Main stack + fiber (runOnFiber), so the virtual Move()
+                        // dispatches instead of no-opping — same wrapping as doApply.
+                        pcbjam_collab::runOnFiber( fr, [fr, item, aDx, aDy]() {
+                            collabTestMove( fr, item, aDx, aDy );
                         } );
                     } );
 
@@ -1735,47 +1475,7 @@ std::string pcbCollabGetPos( std::string aId )
 // run POST-event via CallAfter (the selection tool acts on the same event after us).
 void pcbCollabPresenceStart()
 {
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr || presence::g_started )
-        return;
-
-    presence::g_started = true;
-
-    // Remote soft-locks (0007): let the selection/move tools consult the
-    // peers' live selections through the fork's process-global query.
-    PCBJAM_REMOTE_LOCK::SetQuery(
-            []( const KIID& aId, wxString* aHolder ) -> bool
-            {
-                auto it = presence::g_locks.find( aId );
-
-                if( it == presence::g_locks.end() )
-                    return false;
-
-                if( aHolder )
-                    *aHolder = wxString::FromUTF8( it->second.c_str() );
-
-                return true;
-            } );
-
-    wxWindow* canvas = fr->GetCanvas();
-
-    canvas->Bind( wxEVT_MOTION, []( wxMouseEvent& e ) { presence::onMotion( e ); } );
-    canvas->Bind( wxEVT_LEAVE_WINDOW, []( wxMouseEvent& e ) { presence::onLeave( e ); } );
-
-    auto selAndViewport = []( wxEvent& e )
-    {
-        e.Skip();
-        schedulePresenceSelCheck();
-
-        if( PCB_EDIT_FRAME* f = pcbFrame() )
-            f->CallAfter( []() { presence::emitViewportIfChanged(); } );
-    };
-
-    canvas->Bind( wxEVT_LEFT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
-    canvas->Bind( wxEVT_RIGHT_UP, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
-    canvas->Bind( wxEVT_KEY_UP, [selAndViewport]( wxKeyEvent& e ) { selAndViewport( e ); } );
-    canvas->Bind( wxEVT_MOUSEWHEEL, [selAndViewport]( wxMouseEvent& e ) { selAndViewport( e ); } );
+    presenceCore().start();
 }
 
 // JS → C++: full remote-peers snapshot — `{peers:[{id,name,color,cursor:{x,y}|null,
@@ -1783,58 +1483,7 @@ void pcbCollabPresenceStart()
 // (the overlay is cleared + fully redrawn). An empty peers list clears the overlay.
 void pcbCollabSetRemote( std::string aJson )
 {
-    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() )
-        return;
-
-    std::vector<presence::PEER> peers;
-
-    for( const json& p : j.value( "peers", json::array() ) )
-    {
-        presence::PEER peer;
-        peer.name  = p.value( "name", "" );
-        peer.color = presence::parseColor( p.value( "color", "" ) );
-
-        if( p.contains( "cursor" ) && p["cursor"].is_object() )
-        {
-            peer.hasCursor = true;
-            peer.cursor    = VECTOR2D( p["cursor"].value( "x", 0.0 ), p["cursor"].value( "y", 0.0 ) );
-        }
-
-        for( const json& u : p.value( "selection", json::array() ) )
-        {
-            if( u.is_string() )
-                peer.selection.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
-        }
-
-        // Cross-app selection (0006): symbol uuids from an eeschema peer,
-        // ghost-rendered on the matching footprints.
-        for( const json& u : p.value( "xsel", json::array() ) )
-        {
-            if( u.is_string() )
-                peer.xsel.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
-        }
-
-        peers.push_back( std::move( peer ) );
-    }
-
-    // Remote soft-locks (0007): `locks: [{uuid, name}]` — every other client's
-    // held uuids with the holder's display name for the infobar.
-    std::map<KIID, std::string> locks;
-
-    for( const json& l : j.value( "locks", json::array() ) )
-    {
-        std::string uuid = l.is_object() ? l.value( "uuid", "" ) : "";
-
-        if( !uuid.empty() )
-            locks[ KIID( wxString::FromUTF8( uuid.c_str() ) ) ] = l.value( "name", "" );
-    }
-
-    presence::g_peers = std::move( peers );
-    presence::g_locks = std::move( locks );
-    pcbCollabPresenceStart();
-    presence::scheduleRedraw();
+    presenceCore().setRemote( aJson );
 }
 
 // JS → C++ (collab-presence 0005): comment pin dots — `{pins:[{id,x,y,color,
@@ -1842,27 +1491,7 @@ void pcbCollabSetRemote( std::string aJson )
 // Snapshot semantics like SetRemote: cleared + fully redrawn each push.
 void pcbCollabSetPins( std::string aJson )
 {
-    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() )
-        return;
-
-    std::vector<presence::PIN> pins;
-
-    for( const json& p : j.value( "pins", json::array() ) )
-    {
-        presence::PIN pin;
-        pin.id       = p.value( "id", "" );
-        pin.name     = p.value( "name", "" );
-        pin.pos      = VECTOR2D( p.value( "x", 0.0 ), p.value( "y", 0.0 ) );
-        pin.color    = presence::parseColor( p.value( "color", "" ) );
-        pin.resolved = p.value( "resolved", false );
-        pins.push_back( std::move( pin ) );
-    }
-
-    presence::g_pins = std::move( pins );
-    pcbCollabPresenceStart();
-    presence::scheduleRedraw();
+    presenceCore().setPins( aJson );
 }
 
 // JS → C++ (presence tuner): live-patch the overlay STYLE (partial JSON —
@@ -1870,13 +1499,7 @@ void pcbCollabSetPins( std::string aJson )
 // harmless in production (nothing calls it without VITE_PRESENCE_TUNER).
 void pcbCollabSetStyle( std::string aJson )
 {
-    json j = json::parse( aJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() )
-        return;
-
-    pcbjam_presence::patchStyle( presence::g_style, j );
-    presence::scheduleRedraw();
+    presenceCore().setStyle( aJson );
 }
 
 // Tuner helper: a VARIED demo-selection set — labeled uuid groups (smallest +
@@ -1968,39 +1591,14 @@ std::string pcbCollabTestListItems( int aCount )
 // pin"). CallAfter + COROUTINE like every other view mutation from JS.
 void pcbCollabSetViewport( double aCx, double aCy )
 {
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    fr->CallAfter( [fr, aCx, aCy]() {
-        COROUTINE<int, int> cor( [fr, aCx, aCy]( int ) -> int
-                                 {
-                                     fr->GetCanvas()->GetView()->SetCenter( VECTOR2D( aCx, aCy ) );
-                                     fr->GetCanvas()->ForceRefresh();
-                                     presence::emitViewportIfChanged();
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
+    presenceCore().panTo( aCx, aCy );
 }
 
 // JS pull of the current viewport transform (world↔screen mapping for the DOM layer):
 // `{cx,cy,scale,w,h}` — world center, pixels-per-IU scale, canvas size in px.
 std::string pcbCollabGetViewport()
 {
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return "";
-
-    KIGFX::VIEW*    view = fr->GetCanvas()->GetView();
-    VECTOR2D        c    = view->GetCenter();
-    const VECTOR2I& sz   = view->GetScreenPixelSize();
-
-    // scale = px per IU via the GAL matrix (GetScale() is the zoom, not px/IU).
-    return json{ { "cx", c.x }, { "cy", c.y }, { "scale", view->ToScreen( 1.0 ) },
-                 { "w", sz.x }, { "h", sz.y } }.dump();
+    return presenceCore().viewportJson();
 }
 
 // JS pull of the CURRENT selection's uuids (presence seed at attach + the e2e's
@@ -2012,7 +1610,7 @@ std::string pcbCollabGetSelection()
     if( !fr )
         return "[]";
 
-    return presence::selectionUuids( fr ).dump();
+    return presenceCore().selectionUuids( fr ).dump();
 }
 
 // JS pull of the current selection WITH the footprints' schematic paths (0006):
@@ -2026,12 +1624,12 @@ std::string pcbCollabGetSelectionFull()
     if( !fr )
         return "{\"uuids\":[],\"fpPaths\":[]}";
 
-    return presence::selectionPayload( fr ).dump();
+    return selectionPayload( fr ).dump();
 }
 
 // Test probe (0006): the board-item uuids the current peers' cross-app
-// selections (xsel symbol uuids) resolve to on THIS board — a deterministic
-// assertion target next to the pixel diff.
+// selections (xsel symbol uuids) resolve to on THIS board — same resolveXsel
+// the render uses, so the assertion target can't drift from the pixels.
 std::string pcbCollabTestGetCrossMapped()
 {
     json arr = json::array();
@@ -2041,18 +1639,10 @@ std::string pcbCollabTestGetCrossMapped()
     if( !fr )
         return arr.dump();
 
-    for( const presence::PEER& peer : presence::g_peers )
+    for( const pcbjam_presence::PEER& peer : presenceCore().peers )
     {
-        for( const KIID& symId : peer.xsel )
-        {
-            for( FOOTPRINT* fp : fr->GetBoard()->Footprints() )
-            {
-                const KIID_PATH& path = fp->GetPath();
-
-                if( !path.empty() && path.back() == symId )
-                    arr.push_back( toUtf8( fp->m_Uuid.AsString() ) );
-            }
-        }
+        for( FOOTPRINT* fp : resolveXsel( fr, peer ) )
+            arr.push_back( toUtf8( fp->m_Uuid.AsString() ) );
     }
 
     return arr.dump();
@@ -2079,13 +1669,7 @@ std::string pcbCollabTestSelectFirst()
     if( !target )
         return "";
 
-    fr->CallAfter( [fr, target]() {
-        if( PCB_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>() )
-        {
-            st->AddItemToSel( target );
-            schedulePresenceSelCheck();
-        }
-    } );
+    presenceCore().selectItem( target );
 
     return toUtf8( target->m_Uuid.AsString() );
 }
@@ -2112,13 +1696,7 @@ std::string pcbCollabTestSelectComponent()
     if( !target )
         return "";
 
-    fr->CallAfter( [fr, target]() {
-        if( PCB_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>() )
-        {
-            st->AddItemToSel( target );
-            schedulePresenceSelCheck();
-        }
-    } );
+    presenceCore().selectItem( target );
 
     return toUtf8( target->m_Uuid.AsString() );
 }
@@ -2131,72 +1709,13 @@ std::string pcbCollabTestSelectComponent()
 // selection re-emit (programmatic changes close no canvas event).
 void pcbCollabReleaseSelection( std::string aUuidsJson, std::string aHolder )
 {
-    json j = json::parse( aUuidsJson, nullptr, /*allow_exceptions*/ false );
-
-    if( j.is_discarded() || !j.is_array() )
-        return;
-
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return;
-
-    std::vector<KIID> ids;
-
-    for( const json& u : j )
-    {
-        if( u.is_string() )
-            ids.emplace_back( wxString::FromUTF8( u.get<std::string>().c_str() ) );
-    }
-
-    if( ids.empty() )
-        return;
-
-    wxString holder = wxString::FromUTF8( aHolder.c_str() );
-
-    fr->CallAfter( [fr, ids, holder]() {
-        if( !fr->ToolStackIsEmpty() )
-            fr->GetToolManager()->RunAction( ACTIONS::cancelInteractive );
-
-        PCB_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>();
-
-        if( !st )
-            return;
-
-        bool released = false;
-
-        for( const KIID& id : ids )
-        {
-            BOARD_ITEM* item = fr->GetBoard()->ResolveItem( id, /*allowNullptr*/ true );
-
-            if( item && item->IsSelected() )
-            {
-                st->RemoveItemFromSel( item );
-                released = true;
-            }
-        }
-
-        if( released )
-        {
-            fr->ShowInfoBarWarning( wxString::Format( _( "%s is editing this — released from "
-                                                         "your selection." ),
-                                                      holder ),
-                                    true );
-        }
-
-        schedulePresenceSelCheck();
-    } );
+    presenceCore().releaseSelection( aUuidsJson, aHolder );
 }
 
 // Test probe (0007): the current remote soft-lock set as `[{uuid, name}]`.
 std::string pcbCollabTestGetLocked()
 {
-    json arr = json::array();
-
-    for( const auto& [id, name] : presence::g_locks )
-        arr.push_back( { { "uuid", toUtf8( id.AsString() ) }, { "name", name } } );
-
-    return arr.dump();
+    return presenceCore().locksJson();
 }
 
 // Test helper: clear the selection through the tool + run the presence check.
@@ -2208,10 +1727,12 @@ bool pcbCollabTestClearSelection()
         return false;
 
     fr->CallAfter( [fr]() {
+        // ClearSelection is not on the shared SELECTION_TOOL base — the one
+        // presence hook that stays editor-typed.
         if( PCB_SELECTION_TOOL* st = fr->GetToolManager()->GetTool<PCB_SELECTION_TOOL>() )
         {
             st->ClearSelection();
-            schedulePresenceSelCheck();
+            presenceCore().scheduleSelCheck();
         }
     } );
 
@@ -2260,33 +1781,15 @@ static BOARD_ITEM* testResolve( PCB_EDIT_FRAME* aFrame, const std::string& aId )
 // Delete an item by uuid. With a footprint CHILD uuid this is the bug-03
 // sending half (the UI's fp-text delete): the emit must lift to a parent
 // re-blob; today it goes out as a bare child removal.
-// Run Edit>Undo exactly like the UI would (main-loop + fiber stack) — miss 09:
-// exercises the local-ops-only undo policy and the stale-picker UUID guard.
+// Run Edit>Undo / read the undo depth — miss 09; frame-generic, collab_common.h.
 bool pcbCollabTestUndo()
 {
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    if( !fr )
-        return false;
-
-    fr->CallAfter( [fr]() {
-        COROUTINE<int, int> cor( [fr]( int ) -> int
-                                 {
-                                     fr->GetToolManager()->RunAction( ACTIONS::undo );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
-    } );
-
-    return true;
+    return pcbjam_collab::testUndo( pcbFrame() );
 }
 
-// Local undo stack depth — remote applies must not grow it (miss 09).
 int pcbCollabTestUndoDepth()
 {
-    PCB_EDIT_FRAME* fr = pcbFrame();
-
-    return fr ? fr->GetUndoCommandCount() : -1;
+    return pcbjam_collab::testUndoDepth( pcbFrame() );
 }
 
 bool pcbCollabTestRemoveItem( std::string aId )
@@ -2297,15 +1800,10 @@ bool pcbCollabTestRemoveItem( std::string aId )
     if( !item )
         return false;
 
-    fr->CallAfter( [fr, item]() {
-        COROUTINE<int, int> cor( [fr, item]( int ) -> int
-                                 {
-                                     BOARD_COMMIT commit( fr );
-                                     commit.Remove( item );
-                                     commit.Push( wxT( "Collab test remove" ) );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
+    pcbjam_collab::runOnFiber( fr, [fr, item]() {
+        BOARD_COMMIT commit( fr );
+        commit.Remove( item );
+        commit.Push( wxT( "Collab test remove" ) );
     } );
 
     return true;
@@ -2322,17 +1820,11 @@ bool pcbCollabTestRotateItem( std::string aId, double aDeg )
     if( !item )
         return false;
 
-    fr->CallAfter( [fr, item, aDeg]() {
-        COROUTINE<int, int> cor( [fr, item, aDeg]( int ) -> int
-                                 {
-                                     BOARD_COMMIT commit( fr );
-                                     commit.Modify( item );
-                                     item->Rotate( item->GetPosition(),
-                                                   EDA_ANGLE( aDeg, DEGREES_T ) );
-                                     commit.Push( wxT( "Collab test rotate" ) );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
+    pcbjam_collab::runOnFiber( fr, [fr, item, aDeg]() {
+        BOARD_COMMIT commit( fr );
+        commit.Modify( item );
+        item->Rotate( item->GetPosition(), EDA_ANGLE( aDeg, DEGREES_T ) );
+        commit.Push( wxT( "Collab test rotate" ) );
     } );
 
     return true;
@@ -2350,16 +1842,11 @@ bool pcbCollabTestSetPadSize( std::string aId, int aW, int aH )
 
     PAD* pad = static_cast<PAD*>( item );
 
-    fr->CallAfter( [fr, pad, aW, aH]() {
-        COROUTINE<int, int> cor( [fr, pad, aW, aH]( int ) -> int
-                                 {
-                                     BOARD_COMMIT commit( fr );
-                                     commit.Modify( pad );
-                                     pad->SetSize( PADSTACK::ALL_LAYERS, VECTOR2I( aW, aH ) );
-                                     commit.Push( wxT( "Collab test pad size" ) );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
+    pcbjam_collab::runOnFiber( fr, [fr, pad, aW, aH]() {
+        BOARD_COMMIT commit( fr );
+        commit.Modify( pad );
+        pad->SetSize( PADSTACK::ALL_LAYERS, VECTOR2I( aW, aH ) );
+        commit.Push( wxT( "Collab test pad size" ) );
     } );
 
     return true;
@@ -2376,27 +1863,22 @@ bool pcbCollabTestMoveEndpoint( std::string aId, int aDx, int aDy )
     if( !item || ( !isTrackType( item->Type() ) && item->Type() != PCB_SHAPE_T ) )
         return false;
 
-    fr->CallAfter( [fr, item, aDx, aDy]() {
-        COROUTINE<int, int> cor( [fr, item, aDx, aDy]( int ) -> int
-                                 {
-                                     BOARD_COMMIT commit( fr );
-                                     commit.Modify( item );
+    pcbjam_collab::runOnFiber( fr, [fr, item, aDx, aDy]() {
+        BOARD_COMMIT commit( fr );
+        commit.Modify( item );
 
-                                     if( isTrackType( item->Type() ) )
-                                     {
-                                         auto* t = static_cast<PCB_TRACK*>( item );
-                                         t->SetEnd( t->GetEnd() + VECTOR2I( aDx, aDy ) );
-                                     }
-                                     else
-                                     {
-                                         auto* s = static_cast<PCB_SHAPE*>( item );
-                                         s->SetEnd( s->GetEnd() + VECTOR2I( aDx, aDy ) );
-                                     }
+        if( isTrackType( item->Type() ) )
+        {
+            auto* t = static_cast<PCB_TRACK*>( item );
+            t->SetEnd( t->GetEnd() + VECTOR2I( aDx, aDy ) );
+        }
+        else
+        {
+            auto* s = static_cast<PCB_SHAPE*>( item );
+            s->SetEnd( s->GetEnd() + VECTOR2I( aDx, aDy ) );
+        }
 
-                                     commit.Push( wxT( "Collab test endpoint" ) );
-                                     return 0;
-                                 } );
-        cor.Call( 0 );
+        commit.Push( wxT( "Collab test endpoint" ) );
     } );
 
     return true;
