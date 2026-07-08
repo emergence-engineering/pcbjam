@@ -324,16 +324,20 @@ test("cursor emit: mouse motion over the canvas produces throttled world coords"
   // Sweep the pointer across the canvas center with many small steps.
   const cx = box!.x + box!.width / 2;
   const cy = box!.y + box!.height / 2;
+  const sweepStart = Date.now();
   for (let i = 0; i < 30; i++) {
     await page.mouse.move(cx - 150 + i * 10, cy, { steps: 1 });
   }
+  const sweepMs = Date.now() - sweepStart;
 
   const emits = await page.evaluate(
     () => (window as unknown as PresenceWindow).__cursorEmits!,
   );
   expect(emits.length).toBeGreaterThan(0);
-  // Throttle: 30 moves in well under a second must not emit 30 times.
-  expect(emits.length).toBeLessThan(25);
+  // Throttle is 50 ms (≤20 Hz). On a slow runner the awaited moves themselves
+  // can straddle throttle windows, so bound by measured sweep duration rather
+  // than a fixed count: one emit per 50 ms window, +1 leading edge, +2 slack.
+  expect(emits.length).toBeLessThanOrEqual(Math.floor(sweepMs / 50) + 3);
 
   const active = emits.filter((e) => e.active === 1);
   expect(active.length).toBeGreaterThan(0);
