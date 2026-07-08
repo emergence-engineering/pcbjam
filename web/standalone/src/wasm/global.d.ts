@@ -46,6 +46,8 @@ declare global {
     FS?: EmscriptenFS;
     wxElementRegistry?: WxElementRegistry;
     kicadWebOpenTool?: (toolName: string, fileName: string) => boolean;
+    /** wx wasm port → page: the app's main frame was destroyed (File→Quit). */
+    wxAppTopWindowClosed?: () => void;
     /** File System Access API (Chromium): writable local-folder sessions. */
     showDirectoryPicker?(options?: {
       mode?: "read" | "readwrite";

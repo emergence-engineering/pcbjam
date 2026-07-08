@@ -246,6 +246,99 @@ function installToolNavigationHook(
   };
 }
 
+// The wx wasm port calls window.wxAppTopWindowClosed() when the app's MAIN
+// frame is destroyed (wxwidgets src/wasm/toplevel.cpp) — i.e. on a real
+// File→Quit / window close. A close vetoed by the unsaved-changes prompt never
+// destroys the frame, so it never fires. The port also closes the frame while
+// the page itself unloads (app.cpp UnloadCallback), so the dispatcher latches
+// off as soon as any unload/navigation is under way.
+
+let activeQuitHook: (() => void) | undefined;
+let quitHandled = false;
+
+const quitDispatcher = () => {
+  if (quitHandled) return;
+  quitHandled = true;
+  activeQuitHook?.();
+};
+
+function ensureQuitDispatcher(win: ToolWindow): boolean {
+  if (win.wxAppTopWindowClosed === quitDispatcher) return true;
+
+  try {
+    Object.defineProperty(win, "wxAppTopWindowClosed", {
+      configurable: true,
+      value: quitDispatcher,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+if (typeof window !== "undefined") {
+  ensureQuitDispatcher(window as ToolWindow);
+}
+
+function installQuitHook(
+  win: ToolWindow,
+  opts: { fallbackUrl: string; log: (m: string) => void },
+): () => void {
+  const hook = () => {
+    // A same-origin referrer means we entered by an in-app hard navigation
+    // (ProjectView / NewFileDialog / tool-switch all location.assign), so
+    // going back lands wherever the user came from. Deep links and fresh tabs
+    // have no usable history — go to the fallback instead.
+    let sameOriginReferrer = false;
+    try {
+      sameOriginReferrer =
+        !!win.document.referrer &&
+        new URL(win.document.referrer).origin === win.location.origin;
+    } catch {
+      sameOriginReferrer = false;
+    }
+
+    // Defer the navigation out of the wasm callback: this fires from inside the
+    // frame's C++ destructor (via EM_ASM under Asyncify), and the teardown keeps
+    // running after we return. A cross-document location.assign() started here is
+    // aborted by that continuing teardown (only the same-document history.back()
+    // survives) — so hand it to a fresh task once the wasm stack has unwound.
+    setTimeout(() => {
+      if (sameOriginReferrer && win.history.length > 1) {
+        opts.log("[quit] editor closed — history.back()");
+        win.history.back();
+      } else {
+        opts.log(`[quit] editor closed — no in-app history, going to ${opts.fallbackUrl}`);
+        win.location.assign(opts.fallbackUrl);
+      }
+    }, 0);
+  };
+
+  if (!ensureQuitDispatcher(win)) {
+    opts.log("[quit] unable to install quit hook");
+  }
+  activeQuitHook = hook;
+
+  // Once the page is unloading for any reason, the hook must never navigate.
+  const markUnloading = () => {
+    quitHandled = true;
+  };
+  win.addEventListener("pagehide", markUnloading);
+
+  // A bfcache restore (Forward after quitting) would resurrect a page whose wx
+  // frame was already destroyed — force a clean re-boot instead.
+  const onPageShow = (e: PageTransitionEvent) => {
+    if (e.persisted) win.location.reload();
+  };
+  win.addEventListener("pageshow", onPageShow);
+
+  return () => {
+    if (activeQuitHook === hook) activeQuitHook = undefined;
+    win.removeEventListener("pagehide", markUnloading);
+    win.removeEventListener("pageshow", onPageShow);
+  };
+}
+
 /**
  * Read the opened file back from MEMFS (what the editor actually loaded) and
  * parse it into the full `KicadDoc` (ysync 0007 `fileToDoc`). Used to seed the
@@ -748,14 +841,27 @@ export function WasmTool({
   }, [ready]);
 
   React.useEffect(() => {
-    const removeNavigationHook = installToolNavigationHook(window as ToolWindow, {
+    const win = window as ToolWindow;
+    const removeNavigationHook = installToolNavigationHook(win, {
       slug,
       files,
       targetPath,
       log: append,
     });
 
-    return () => removeNavigationHook();
+    // File→Quit leaves the editor. Lib editors (/:scope/libs/:name) have no
+    // project overview to fall back to — go home instead.
+    const segments = win.location.pathname.split("/").filter(Boolean);
+    const removeQuitHook = installQuitHook(win, {
+      fallbackUrl:
+        segments[1] === "libs" ? "/" : projectPath(currentScope(), slug),
+      log: append,
+    });
+
+    return () => {
+      removeNavigationHook();
+      removeQuitHook();
+    };
   }, [slug, files, targetPath, append]);
 
   React.useEffect(() => {
