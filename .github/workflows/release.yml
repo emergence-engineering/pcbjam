@@ -33,6 +33,11 @@ env:
   BUCKET: pcbjam-cdn
   # KiCad library snapshot the demo points at (published by publish-libs.yml).
   LIB_TAG: "10.0.3"
+  # kicad-packages3D snapshot the demo's lazy 3D models point at (published once
+  # to libs/kicad-models/<MODELS_TAG>/ — see scripts/deploy/publish-models.ts +
+  # upload-models-r2.sh; docs/features/3d-models). Empty ⇒ 3D models off.
+  # Keep in sync with deploy-demo.yml.
+  MODELS_TAG: "10.0.3"
   PAGES_PROJECT: pcbjam-demo
   PAGES_PROD_BRANCH: production
   # Backed editor deployment (remote mode against the closed API). The closed
@@ -124,6 +129,7 @@ jobs:
         run: >
           node scripts/deploy/build-demo.mjs --tag "${{ needs.meta.outputs.tag }}"
           --cdn "$CDN" --lib-tag "$LIB_TAG"
+          ${MODELS_TAG:+--models-tag "$MODELS_TAG"}
           --plausible "${{ vars.PLAUSIBLE_DOMAIN }}"
 
       - name: Ensure Pages project exists
@@ -172,6 +178,7 @@ jobs:
           node scripts/deploy/build-editor.mjs --tag "$RELEASE_TAG"
           --cdn "$CDN" --api-base "$EDITOR_API_BASE"
           --plausible "editor.pcbjam.com"
+          ${MODELS_TAG:+--models-tag "$MODELS_TAG"}
 
       - name: Ensure Pages project exists
         run: >
