@@ -165,10 +165,13 @@ jobs:
       - name: Install standalone workspace
         run: pnpm --dir web install --frozen-lockfile
 
+      # --plausible: the editor tracks as its OWN Plausible site (separate
+      # dashboard from the demo's vars.PLAUSIBLE_DOMAIN and the mgmt app's).
       - name: Build editor (remote mode)
         run: >
           node scripts/deploy/build-editor.mjs --tag "$RELEASE_TAG"
           --cdn "$CDN" --api-base "$EDITOR_API_BASE"
+          --plausible "editor.pcbjam.com"
 
       - name: Ensure Pages project exists
         run: >
