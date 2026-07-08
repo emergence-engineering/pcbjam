@@ -914,6 +914,10 @@ void doApply( PCB_EDIT_FRAME* aFrame, const json& aDelta )
     BOARD_COMMIT commit( aFrame );
     bool         staged = false;
 
+    // With SKIP_UNDO no undo picker takes ownership of removed items; the commit
+    // detaches them from the board and we free them after Push.
+    std::vector<BOARD_ITEM*> removedItems;
+
     for( const json& rid : aDelta.value( "removed", json::array() ) )
     {
         KIID id( wxString::FromUTF8( rid.get<std::string>().c_str() ) );
@@ -928,6 +932,7 @@ void doApply( PCB_EDIT_FRAME* aFrame, const json& aDelta )
                 continue;
 
             commit.Remove( item );
+            removedItems.push_back( item );
             staged = true;
         }
     }
@@ -963,8 +968,14 @@ void doApply( PCB_EDIT_FRAME* aFrame, const json& aDelta )
         }
     }
 
+    // SKIP_UNDO: a peer's edit must never land on this editor's undo stack — Ctrl+Z
+    // would revert (and re-broadcast) the peer's work. Undo is local-ops-only; stale
+    // local undo entries are dropped/re-resolved by UUID at undo time (miss 09).
     if( staged )
-        commit.Push( wxT( "Collaborative edit" ) );
+        commit.Push( wxT( "Collaborative edit" ), SKIP_UNDO );
+
+    for( BOARD_ITEM* item : removedItems )
+        delete item;
 
     // The applied remote changes (and any connectivity cleanup they triggered) are now the
     // shared state — fold them into the baseline so the post-apply listener flush doesn't
@@ -987,6 +998,9 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
     bool         staged = false;
 
     std::vector<std::string> touched;   // root uuids this apply acts on (targeted rebaseline)
+
+    // Owned by nobody once the SKIP_UNDO commit detaches them — freed after Push.
+    std::vector<BOARD_ITEM*> removedItems;
 
     std::set<std::string> removedIds;
 
@@ -1012,6 +1026,12 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
             }
 
             commit.Remove( item );
+
+            // A bare child "removal" of a PCB_FIELD_T is a hide, not a detach —
+            // the field stays owned by its parent footprint.
+            if( item->Type() != PCB_FIELD_T )
+                removedItems.push_back( item );
+
             staged = true;
         }
     }
@@ -1046,6 +1066,7 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
                 existing = fp;
 
             commit.Remove( existing );
+            removedItems.push_back( existing );
         }
 
         touched.push_back( toUtf8( parsed->m_Uuid.AsString() ) );
@@ -1059,8 +1080,12 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aWire )
     for( const json& w : aWire.value( "changed", json::array() ) )
         upsert( w );
 
+    // SKIP_UNDO: remote applies never land on the local undo stack (see doApply).
     if( staged )
-        commit.Push( wxT( "Collaborative edit (items)" ) );
+        commit.Push( wxT( "Collaborative edit (items)" ), SKIP_UNDO );
+
+    for( BOARD_ITEM* item : removedItems )
+        delete item;
 
     // Fold ONLY the applied uuids into the baseline (echo suppression), then flush:
     // anything else that now differs — a concurrent local edit, cleanup this apply's
@@ -2235,6 +2260,35 @@ static BOARD_ITEM* testResolve( PCB_EDIT_FRAME* aFrame, const std::string& aId )
 // Delete an item by uuid. With a footprint CHILD uuid this is the bug-03
 // sending half (the UI's fp-text delete): the emit must lift to a parent
 // re-blob; today it goes out as a bare child removal.
+// Run Edit>Undo exactly like the UI would (main-loop + fiber stack) — miss 09:
+// exercises the local-ops-only undo policy and the stale-picker UUID guard.
+bool pcbCollabTestUndo()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return false;
+
+    fr->CallAfter( [fr]() {
+        COROUTINE<int, int> cor( [fr]( int ) -> int
+                                 {
+                                     fr->GetToolManager()->RunAction( ACTIONS::undo );
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
+
+    return true;
+}
+
+// Local undo stack depth — remote applies must not grow it (miss 09).
+int pcbCollabTestUndoDepth()
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    return fr ? fr->GetUndoCommandCount() : -1;
+}
+
 bool pcbCollabTestRemoveItem( std::string aId )
 {
     PCB_EDIT_FRAME* fr = pcbFrame();
@@ -2436,6 +2490,8 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     function("kicadCollabGetPos", &pcbCollabGetPos);
     // ysync-review repro hooks shared with eeschema (dispatched when merged).
     function("kicadCollabTestRemoveItem", &pcbCollabTestRemoveItem);
+    function("kicadCollabTestUndo", &pcbCollabTestUndo);
+    function("kicadCollabTestUndoDepth", &pcbCollabTestUndoDepth);
     function("kicadCollabTestRotateItem", &pcbCollabTestRotateItem);
     // Presence (collab-presence 0002) — shared names; eeschema's counterparts land
     // with 0003 (the merged image dispatches pcb-only until then).

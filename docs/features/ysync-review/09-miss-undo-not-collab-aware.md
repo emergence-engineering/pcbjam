@@ -1,7 +1,8 @@
 # Design miss 09 — Undo is not collab-aware: Ctrl+Z reverts peers' work and re-broadcasts it
 
 **Severity:** design gap (converges, but with surprising and destructive UX)
-**Status:** open decision
+**Status:** FIXED 2026-07-07 — option 1 implemented, see
+[20-fix-miss09-collab-aware-undo.md](20-fix-miss09-collab-aware-undo.md)
 
 ## Where
 

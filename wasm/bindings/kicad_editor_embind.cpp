@@ -45,6 +45,9 @@ std::string pcbCollabTestMoveFirst( int aDx, int aDy );
 std::string pcbCollabGetPos( std::string aId );
 bool        pcbCollabTestRemoveItem( std::string aId );
 bool        pcbCollabTestRotateItem( std::string aId, double aDeg );
+// Collab-aware undo (ysync miss 09).
+bool        pcbCollabTestUndo();
+int         pcbCollabTestUndoDepth();
 // Presence (collab-presence 0002) + comment pins/panning (0005).
 void        pcbCollabPresenceStart();
 void        pcbCollabSetRemote( std::string aJson );
@@ -74,6 +77,9 @@ std::string schCollabTestMoveFirst( int aDx, int aDy );
 std::string schCollabGetPos( std::string aId );
 bool        schCollabTestRemoveItem( std::string aId );
 bool        schCollabTestRotateItem( std::string aId, double aDeg );
+// Collab-aware undo (ysync miss 09).
+bool        schCollabTestUndo();
+int         schCollabTestUndoDepth();
 // Presence (collab-presence 0003 — eeschema counterparts) + pins (0005).
 void        schCollabPresenceStart();
 void        schCollabSetRemote( std::string aJson );
@@ -169,6 +175,16 @@ static bool collabTestRotateItem( std::string aId, double aDeg )
 {
     return pcbEditorActive() ? pcbCollabTestRotateItem( aId, aDeg )
                              : schCollabTestRotateItem( aId, aDeg );
+}
+
+static bool collabTestUndo()
+{
+    return pcbEditorActive() ? pcbCollabTestUndo() : schCollabTestUndo();
+}
+
+static int collabTestUndoDepth()
+{
+    return pcbEditorActive() ? pcbCollabTestUndoDepth() : schCollabTestUndoDepth();
 }
 
 // Presence shims (collab-presence 0002 pcbnew / 0003 eeschema): route to the live
@@ -271,6 +287,9 @@ EMSCRIPTEN_BINDINGS(kicad_editor) {
     // endpoint, field text — flow from the per-editor blocks unchanged).
     function("kicadCollabTestRemoveItem", &collabTestRemoveItem);
     function("kicadCollabTestRotateItem", &collabTestRotateItem);
+    // Collab-aware undo (ysync miss 09).
+    function("kicadCollabTestUndo", &collabTestUndo);
+    function("kicadCollabTestUndoDepth", &collabTestUndoDepth);
     // Presence (collab-presence 0002/0003) + comment pins/panning (0005).
     function("kicadCollabPresenceStart", &collabPresenceStart);
     function("kicadCollabSetRemote", &collabSetRemote);

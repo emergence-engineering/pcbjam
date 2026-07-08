@@ -1064,6 +1064,11 @@ void doApply( SCH_EDIT_FRAME* aFrame, const json& aDelta )
     SCH_COMMIT commit( aFrame );
     bool       staged = false;
 
+    // With SKIP_UNDO no undo picker takes ownership of removed items; the commit
+    // detaches them from the screen and we free them after Push. Fields are hidden
+    // by CHT_REMOVE, not detached (still owned by their parent), so never freed.
+    std::vector<SCH_ITEM*> removedItems;
+
     for( const json& rid : aDelta.value( "removed", json::array() ) )
     {
         SCH_SHEET_PATH path;
@@ -1072,6 +1077,10 @@ void doApply( SCH_EDIT_FRAME* aFrame, const json& aDelta )
         if( SCH_ITEM* item = sch.ResolveItem( id, &path, /*allowNull*/ true ) )
         {
             commit.Remove( item, path.LastScreen() );
+
+            if( item->Type() != SCH_FIELD_T )
+                removedItems.push_back( item );
+
             staged = true;
         }
     }
@@ -1120,8 +1129,14 @@ void doApply( SCH_EDIT_FRAME* aFrame, const json& aDelta )
         }
     }
 
+    // SKIP_UNDO: a peer's edit must never land on this editor's undo stack — Ctrl+Z
+    // would revert (and re-broadcast) the peer's work. Undo is local-ops-only; stale
+    // local undo entries are dropped/re-resolved by UUID at undo time (miss 09).
     if( staged )
-        commit.Push( wxT( "Collaborative edit" ) );
+        commit.Push( wxT( "Collaborative edit" ), SKIP_UNDO );
+
+    for( SCH_ITEM* item : removedItems )
+        delete item;
 
     // The applied remote changes (and any connectivity cleanup they triggered) are now the
     // shared state — fold them into the baseline so the post-apply listener flush doesn't
@@ -1146,6 +1161,10 @@ void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
 
     std::vector<std::string> touched;   // uuids this apply acts on (targeted rebaseline)
 
+    // Owned by nobody once the SKIP_UNDO commit detaches them — freed after Push
+    // (fields are hidden, not detached, so excluded). See doApply.
+    std::vector<SCH_ITEM*> removedItems;
+
     for( const json& rid : aWire.value( "removed", json::array() ) )
     {
         SCH_SHEET_PATH path;
@@ -1156,6 +1175,10 @@ void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
         if( SCH_ITEM* item = sch.ResolveItem( id, &path, /*allowNull*/ true ) )
         {
             commit.Remove( item, path.LastScreen() );
+
+            if( item->Type() != SCH_FIELD_T )
+                removedItems.push_back( item );
+
             staged = true;
         }
     }
@@ -1223,7 +1246,12 @@ void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
             SCH_SHEET_PATH path;
 
             if( SCH_ITEM* existing = sch.ResolveItem( item->m_Uuid, &path, /*allowNull*/ true ) )
+            {
                 commit.Remove( existing, path.LastScreen() );
+
+                if( existing->Type() != SCH_FIELD_T )
+                    removedItems.push_back( existing );
+            }
 
             if( item->Type() == SCH_SYMBOL_T )
             {
@@ -1245,8 +1273,12 @@ void doApplyItems( SCH_EDIT_FRAME* aFrame, const json& aWire )
     for( const json& w : aWire.value( "changed", json::array() ) )
         upsert( w );
 
+    // SKIP_UNDO: remote applies never land on the local undo stack (see doApply).
     if( staged )
-        commit.Push( wxT( "Collaborative edit (items)" ) );
+        commit.Push( wxT( "Collaborative edit (items)" ), SKIP_UNDO );
+
+    for( SCH_ITEM* item : removedItems )
+        delete item;
 
     // Fold ONLY the applied uuids into the baseline (echo suppression), then flush:
     // anything else that now differs — a concurrent local edit, the connectivity
@@ -1503,6 +1535,35 @@ bool schCollabTestRotateItem( std::string aId, double aDeg )
     } );
 
     return true;
+}
+
+// Run Edit>Undo exactly like the UI would (main-loop + fiber stack) — miss 09:
+// exercises the local-ops-only undo policy and the stale-picker UUID guard.
+bool schCollabTestUndo()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return false;
+
+    fr->CallAfter( [fr]() {
+        COROUTINE<int, int> cor( [fr]( int ) -> int
+                                 {
+                                     fr->GetToolManager()->RunAction( ACTIONS::undo );
+                                     return 0;
+                                 } );
+        cor.Call( 0 );
+    } );
+
+    return true;
+}
+
+// Local undo stack depth — remote applies must not grow it (miss 09).
+int schCollabTestUndoDepth()
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    return fr ? fr->GetUndoCommandCount() : -1;
 }
 
 // Set a symbol's Value field text — bug 04: fields live inside the symbol (not
@@ -2116,6 +2177,8 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     // ysync-review repro hooks shared with pcbnew (dispatched when merged).
     function("kicadCollabTestRemoveItem", &schCollabTestRemoveItem);
     function("kicadCollabTestRotateItem", &schCollabTestRotateItem);
+    function("kicadCollabTestUndo", &schCollabTestUndo);
+    function("kicadCollabTestUndoDepth", &schCollabTestUndoDepth);
     // Presence (collab-presence 0003) — shared names with pcbnew's 0002 set.
     function("kicadCollabPresenceStart", &schCollabPresenceStart);
     function("kicadCollabSetRemote", &schCollabSetRemote);
