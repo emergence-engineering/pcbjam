@@ -24,6 +24,7 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/bind.h>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <wx/app.h>
@@ -124,13 +125,34 @@ static bool kicadOpenFile( std::string path )
 }
 
 
-// Canvas-only mobile chrome toggle (features/mobile): hide/show every AUI pane
+// Canvas-only chrome toggle (features/mobile): hide/show every AUI pane
 // except the central draw canvas, plus the menubar and status bar, so the GAL
 // canvas fills the frame. Generic wxFrame/wxAui surface only (keeps this TU
 // header-light and serves both editor frames). Hidden bars release their space
 // because the wasm port's frame client-area math skips !IsShown() bars (native
 // parity, see wxwidgets/src/wasm/frame.cpp). Returns false until the editor
 // frame exists — main() builds it after runtime init — so JS polls this.
+
+// Hide-time visibility snapshot. KiCad keeps several panes hidden by default
+// (Search, Properties, Net Inspector, …), so a blanket Show(true) on restore
+// would surface panes the user never had open — restore only what the hide
+// actually took away. Keyed to the frame so a snapshot never leaks onto a
+// different frame's wxAuiManager.
+static struct
+{
+    wxFrame*              frame = nullptr;
+    bool                  valid = false;
+    bool                  menuShown = false;
+    bool                  statusShown = false;
+    std::vector<wxString> paneNames;
+} s_chromeSnap;
+
+static bool chromeSkipsPane( const wxAuiPaneInfo& aPane )
+{
+    // keep the central editor canvas (named "DrawFrame" in both editors)
+    return aPane.dock_direction == wxAUI_DOCK_CENTER || aPane.name == wxT( "DrawFrame" );
+}
+
 static bool kicadSetChrome( bool aShow )
 {
     wxFrame* frame =
@@ -139,15 +161,50 @@ static bool kicadSetChrome( bool aShow )
     if( !frame )
         return false;
 
-    if( wxMenuBar* menuBar = frame->GetMenuBar() )
-        menuBar->Show( aShow );
+    wxMenuBar*    menuBar = frame->GetMenuBar();
+    wxStatusBar*  statusBar = frame->GetStatusBar();
+    wxAuiManager* mgr = wxAuiManager::GetManager( frame );
+
+    if( !aShow )
+    {
+        // A repeated hide keeps the original snapshot (idempotent).
+        if( !s_chromeSnap.valid || s_chromeSnap.frame != frame )
+        {
+            s_chromeSnap.frame = frame;
+            s_chromeSnap.menuShown = menuBar && menuBar->IsShown();
+            s_chromeSnap.statusShown = statusBar && statusBar->IsShown();
+            s_chromeSnap.paneNames.clear();
+
+            if( mgr )
+            {
+                wxAuiPaneInfoArray& panes = mgr->GetAllPanes();
+
+                for( size_t i = 0; i < panes.GetCount(); ++i )
+                {
+                    wxAuiPaneInfo& pane = panes.Item( i );
+
+                    if( !chromeSkipsPane( pane ) && pane.IsShown() )
+                        s_chromeSnap.paneNames.push_back( pane.name );
+                }
+            }
+
+            s_chromeSnap.valid = true;
+        }
+    }
+
+    // A show with no snapshot (or one taken on a different frame) falls back
+    // to revealing the standard chrome instead of obeying stale state.
+    const bool haveSnap = s_chromeSnap.valid && s_chromeSnap.frame == frame;
+
+    if( menuBar )
+        menuBar->Show( aShow && ( haveSnap ? s_chromeSnap.menuShown : true ) );
 
     // Kept alive rather than detached: KiCad SetStatusText()s on every cursor
     // move, and wxFrameBase wxCHECKs a null status bar.
-    if( wxStatusBar* statusBar = frame->GetStatusBar() )
-        statusBar->Show( aShow );
+    if( statusBar )
+        statusBar->Show( aShow && ( haveSnap ? s_chromeSnap.statusShown : true ) );
 
-    if( wxAuiManager* mgr = wxAuiManager::GetManager( frame ) )
+    if( mgr )
     {
         wxAuiPaneInfoArray& panes = mgr->GetAllPanes();
 
@@ -155,15 +212,36 @@ static bool kicadSetChrome( bool aShow )
         {
             wxAuiPaneInfo& pane = panes.Item( i );
 
-            // keep the central editor canvas (named "DrawFrame" in both editors)
-            if( pane.dock_direction == wxAUI_DOCK_CENTER || pane.name == wxT( "DrawFrame" ) )
+            if( chromeSkipsPane( pane ) )
                 continue;
 
-            pane.Show( aShow );
+            if( !aShow )
+            {
+                pane.Show( false );
+            }
+            else if( haveSnap )
+            {
+                if( std::find( s_chromeSnap.paneNames.begin(), s_chromeSnap.paneNames.end(),
+                               pane.name )
+                    != s_chromeSnap.paneNames.end() )
+                {
+                    pane.Show( true );
+                }
+            }
+            else if( pane.IsToolbar() )
+            {
+                // Show with no (or a stale, other-frame) snapshot: reveal the
+                // toolbars only — blanket-showing plain panels would surface
+                // the default-hidden ones.
+                pane.Show( true );
+            }
         }
 
         mgr->Update();
     }
+
+    if( aShow )
+        s_chromeSnap.valid = false;
 
     frame->SendSizeEvent();
     return true;

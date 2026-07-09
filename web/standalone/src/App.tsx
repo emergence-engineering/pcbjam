@@ -1,12 +1,13 @@
 import { Route, Routes } from "react-router-dom";
 import { VersionBadge } from "@/components/VersionBadge";
-import { isMobileMode } from "@/lib/mobile-mode";
+import { useChromeHidden } from "@/lib/chrome-visibility";
 import { HomePage } from "@/pages/HomePage";
 import { LibToolPage } from "@/pages/LibToolPage";
 import { ProjectView } from "@/pages/ProjectView";
 import { ToolPage } from "@/pages/ToolPage";
 
 export default function App() {
+  const chromeHidden = useChromeHidden();
   return (
     <>
       <Routes>
@@ -19,8 +20,8 @@ export default function App() {
         <Route path="/:scope/libs/:name" element={<LibToolPage />} />
       </Routes>
       {/* Version + source link, bottom-right on every route (home + editor).
-          Mobile mode is canvas-only — no persistent overlays. */}
-      {!isMobileMode() && <VersionBadge />}
+          Keys off the Figma-like hide-UI toggle (hidden is the mobile default). */}
+      {!chromeHidden && <VersionBadge />}
     </>
   );
 }

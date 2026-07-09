@@ -280,20 +280,24 @@ test('pan: one-finger drag translates the view (not a rubber-band select)', asyn
   expect(dBack, 'panning back returns near baseline').toBeLessThan(dPan / 3);
 });
 
-test('editor is canvas-only: no menubar, GL canvas fills the viewport', async () => {
-  await shot('chrome');
-
-  // The menubar is real DOM (.wx-menu-title per menu); AUI toolbars/panels are
-  // canvas islands, so the GL-canvas-fills-viewport check below is what proves
-  // THEY are gone (hidden AUI panes release their space to the center pane).
-  const menus = await page.evaluate(
+/** Count of visible menubar titles (0 ⇒ menubar hidden). */
+async function visibleMenuTitles(pg: Page): Promise<number> {
+  return pg.evaluate(
     () =>
       Array.from(document.querySelectorAll('.wx-menu-title')).filter((el) => {
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0 && getComputedStyle(el).display !== 'none';
       }).length,
   );
-  expect(menus, 'no visible menubar titles').toBe(0);
+}
+
+test('editor is canvas-only: no menubar, GL canvas fills the viewport', async () => {
+  await shot('chrome');
+
+  // The menubar is real DOM (.wx-menu-title per menu); AUI toolbars/panels are
+  // canvas islands, so the GL-canvas-fills-viewport check below is what proves
+  // THEY are gone (hidden AUI panes release their space to the center pane).
+  expect(await visibleMenuTitles(page), 'no visible menubar titles').toBe(0);
 
   // the drawing canvas reclaims the whole viewport
   const box = await getGlBox(page);
@@ -303,4 +307,31 @@ test('editor is canvas-only: no menubar, GL canvas fills the viewport', async ()
 
   // the shell's own persistent overlays are gone too
   expect(await page.getByText(/console \(/).count(), 'console toggle hidden').toBe(0);
+});
+
+test('the floating toggle brings the full UI up and back off (Figma-like hide-UI)', async () => {
+  // Canvas-only is the mobile DEFAULT, but the toggle must stay reachable.
+  const toggle = page.locator('[data-testid="chrome-toggle"]');
+  await expect(toggle, 'toggle button present in canvas-only mode').toBeVisible();
+
+  await toggle.tap();
+  await expect
+    .poll(() => visibleMenuTitles(page), { timeout: 15000 })
+    .toBeGreaterThan(0);
+  // console footer follows the toggle (full shell UI back)
+  await expect(page.getByText(/console \(/)).toHaveCount(1);
+  // chrome takes real estate again (side toolbars + layers panel eat width)
+  const shown = await getGlBox(page);
+  const vp = page.viewportSize()!;
+  expect(shown.width, 'chrome reclaims width').toBeLessThan(vp.width * 0.95);
+  await shot('toggle-shown');
+
+  // …and back to canvas-only, leaving the file in its baseline hidden state.
+  await toggle.tap();
+  await expect.poll(() => visibleMenuTitles(page), { timeout: 15000 }).toBe(0);
+  await expect
+    .poll(async () => (await getGlBox(page)).width, { timeout: 15000 })
+    .toBeGreaterThan(vp.width * 0.95);
+  expect(await page.getByText(/console \(/).count(), 'console toggle hidden again').toBe(0);
+  await shot('toggle-rehidden');
 });

@@ -14,7 +14,7 @@ import {
   type KicadDoc,
   type Tool,
 } from "@pcbjam/shared";
-import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { ChevronDown, ChevronUp, EyeOff, Loader2, PanelsTopLeft } from "lucide-react";
 import {
   currentScope,
   libsSourceConfig,
@@ -84,9 +84,29 @@ import { MemoryExhaustedDialog } from "@/recovery/MemoryExhaustedDialog";
 import type { SourceDescriptor } from "@/lib/project-source-shared";
 import { SourceChip } from "@/components/SourceChip";
 import { isMobileMode } from "@/lib/mobile-mode";
+import {
+  isChromeToggleHotkey,
+  toggleChromeHidden,
+  useChromeHidden,
+} from "@/lib/chrome-visibility";
 
 // Tools with the v2 items bridge (kicadCollabSnapshotItems/ApplyItems embind exports).
 const COLLAB_TOOLS = new Set<Tool>(["pl_editor", "eeschema", "pcbnew"]);
+
+// Chrome (editor UI) toggle: only the merged kicad_editor bundle exports
+// kicadSetChrome (gerbview/calculator/pl_editor don't) — everything about the
+// toggle is feature-gated on the export being there.
+function chromeSetter(win: Window): ((show: boolean) => boolean) | null {
+  const fn = (win as { Module?: { kicadSetChrome?: unknown } }).Module
+    ?.kicadSetChrome;
+  return typeof fn === "function" ? (fn as (show: boolean) => boolean) : null;
+}
+
+// Tooltip only — the matcher accepts both chords on any platform.
+const CHROME_HOTKEY_LABEL =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.platform)
+    ? "⌘\\"
+    : "Ctrl+\\";
 
 // Which library item kind each tool browses — drives the load-screen pre-sync
 // (warm the right bundles into IDB while the wasm downloads). Tools that don't
@@ -690,9 +710,13 @@ export function WasmTool({
 }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const startedRef = React.useRef(false);
-  // Canvas-only mobile mode (features/mobile): the shell hides its persistent
-  // overlays, boot installs the touch-gesture shim + hides the editor chrome.
+  // Mobile device (features/mobile): boot installs the touch-gesture shim.
+  // Chrome/overlay visibility is the separate runtime toggle below.
   const mobileUi = React.useMemo(() => isMobileMode(), []);
+  // Figma-like "hide UI" toggle: mobile defaults to hidden, the floating
+  // button / Cmd+\ flips it live; shell overlays key off this, and the layout
+  // effect below applies it to the wasm frame.
+  const chromeHidden = useChromeHidden();
   const driftRef = React.useRef<{ stop(): void } | null>(null);
   const presenceRef = React.useRef<PresenceHandle | null>(null);
   const presenceBridgeRef = React.useRef<{ destroy(): void } | null>(null);
@@ -979,6 +1003,18 @@ export function WasmTool({
     };
     win.addEventListener("keydown", swallowBrowserSave, true);
 
+    // Cmd/Ctrl+\ (Figma's hide-UI chord) is ours alone: unlike Cmd+S it must
+    // NOT reach the wx layer, so also stop propagation — capture on window
+    // fires before wx's bubble-phase window listeners (wasm/app.cpp).
+    const chromeHotkey = (e: KeyboardEvent) => {
+      if (!isChromeToggleHotkey(e)) return;
+      if (!chromeSetter(win)) return; // bundle without the export
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      toggleChromeHidden();
+    };
+    win.addEventListener("keydown", chromeHotkey, true);
+
     void (async () => {
       try {
         // Resolve the per-tool asset base at runtime (CDN manifest → versioned
@@ -1173,6 +1209,7 @@ export function WasmTool({
 
     return () => {
       win.removeEventListener("keydown", swallowBrowserSave, true);
+      win.removeEventListener("keydown", chromeHotkey, true);
       commentsRef.current?.destroy();
       commentsRef.current = null;
       presenceBridgeRef.current?.destroy();
@@ -1195,6 +1232,49 @@ export function WasmTool({
     // they don't retrigger a (rejected) second boot.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool, slug, assetBaseUrl, append]);
+
+  // kicadSetChrome, once the editor is up (null on bundles without it).
+  const setChromeFn = React.useMemo(
+    () => (ready ? chromeSetter(window) : null),
+    [ready],
+  );
+
+  // Apply the chrome-visibility state to the wasm frame. A LAYOUT effect with
+  // a synchronous first attempt: `ready` unmounts the opaque boot overlay in
+  // this same commit, and a passive effect would let one frame of full chrome
+  // paint on mobile. appliedRef skips the initial "shown" apply — never
+  // relayout a frame this component never hid.
+  const appliedRef = React.useRef<boolean | null>(null);
+  React.useLayoutEffect(() => {
+    if (!setChromeFn) return;
+    if (appliedRef.current === chromeHidden) return;
+    if (appliedRef.current === null && !chromeHidden) return;
+
+    const apply = () => {
+      try {
+        return setChromeFn(!chromeHidden) === true;
+      } catch (err) {
+        append(`[chrome] kicadSetChrome failed: ${String(err)}`);
+        return true; // don't retry a throwing binding
+      }
+    };
+    if (apply()) {
+      appliedRef.current = chromeHidden;
+      return;
+    }
+    // The editor frame can lag `ready` (waitForWxUi falls through after 25 s)
+    // — retry briefly rather than dropping the toggle.
+    const t0 = Date.now();
+    const tick = window.setInterval(() => {
+      if (apply()) {
+        appliedRef.current = chromeHidden;
+        window.clearInterval(tick);
+      } else if (Date.now() - t0 > 30_000) {
+        window.clearInterval(tick);
+      }
+    }, 300);
+    return () => window.clearInterval(tick);
+  }, [setChromeFn, chromeHidden, append]);
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-[#1a1a2e]">
@@ -1312,19 +1392,35 @@ export function WasmTool({
         </div>
       )}
 
-      {/* Top-right overlay chips: who else is in this file (awareness roster) +
-          where this project lives / whether Save persists (chip hidden in
-          canvas-only mobile mode). */}
-      {ready && (peers.length > 0 || (sourceDescriptor && !mobileUi)) && (
-        <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
-          {peers.length > 0 && (
-            <PresenceRoster peers={peers} activeSheetPath={activeSheetPath} />
-          )}
-          {sourceDescriptor && !mobileUi && (
-            <SourceChip descriptor={sourceDescriptor} />
-          )}
-        </div>
-      )}
+      {/* Top-right overlay row: who else is in this file (awareness roster),
+          where this project lives / whether Save persists (chip hidden while
+          the UI is hidden), and the Figma-like hide/show-UI toggle — the one
+          control that stays up in canvas-only mode. */}
+      {ready &&
+        (setChromeFn !== null ||
+          peers.length > 0 ||
+          (sourceDescriptor && !chromeHidden)) && (
+          <div className="absolute right-3 top-3 z-20 flex items-center gap-2">
+            {peers.length > 0 && (
+              <PresenceRoster peers={peers} activeSheetPath={activeSheetPath} />
+            )}
+            {sourceDescriptor && !chromeHidden && (
+              <SourceChip descriptor={sourceDescriptor} />
+            )}
+            {setChromeFn !== null && (
+              <button
+                data-testid="chrome-toggle"
+                aria-pressed={chromeHidden}
+                // same pill design as the comment-bar toggle below it
+                className="flex h-8 min-w-8 items-center justify-center rounded-full bg-black/70 text-white shadow-sm ring-1 ring-inset ring-white/20 hover:bg-black/85"
+                title={`${chromeHidden ? "Show" : "Hide"} UI (${CHROME_HOTKEY_LABEL})`}
+                onClick={() => toggleChromeHidden()}
+              >
+                {chromeHidden ? <PanelsTopLeft size={15} /> : <EyeOff size={15} />}
+              </button>
+            )}
+          </div>
+        )}
 
       {/* Figma-like comments (0005): GAL pin dots + this DOM layer (hit targets,
           thread popovers, comment mode, panel). */}
@@ -1373,7 +1469,7 @@ export function WasmTool({
         </button>
       )}
 
-      {!mobileUi && (
+      {!chromeHidden && (
         <div className="absolute bottom-0 left-0 right-0 z-20">
           <button
             className="flex items-center gap-1 bg-black/70 px-3 py-1 font-mono text-xs text-white"

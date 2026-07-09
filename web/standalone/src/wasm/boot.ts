@@ -78,9 +78,10 @@ export interface BootOptions {
    *  `--frame=<token>` in `Module.arguments`; parsed in single_top.cpp. Omitted
    *  ⇒ the bundle's build-time default frame. See `TOOL_FRAME` in constants.ts. */
   frame?: string;
-  /** Canvas-only mobile mode (features/mobile): install the touch-gesture shim
-   *  (pinch-zoom / one-finger pan / tap-select) on the input canvas and hide the
-   *  editor chrome (toolbars/panels/menubar) once the frame is up. */
+  /** Mobile device (features/mobile): install the touch-gesture shim
+   *  (pinch-zoom / one-finger pan / tap-select) on the input canvas. Gestures
+   *  only — chrome visibility is owned by the shell's chrome-visibility store
+   *  (WasmTool applies it via kicadSetChrome). */
   mobile?: boolean;
 }
 
@@ -468,32 +469,6 @@ async function doBoot(opts: BootOptions): Promise<void> {
       log("[boot] runtime initialized");
       const canvas = (w.Module as { canvas?: HTMLCanvasElement }).canvas;
       if (canvas) canvas.style.display = "block";
-      if (opts.mobile) {
-        // Hide the editor chrome (toolbars/panels/menubar) so the canvas fills
-        // the frame. kicadSetChrome (embind) returns false until the editor
-        // frame exists — main() builds it after runtime init — so poll.
-        const mod = w.Module as unknown as {
-          kicadSetChrome?: (show: boolean) => boolean;
-        };
-        const t0 = Date.now();
-        const tick = setInterval(() => {
-          let hidden = false;
-          try {
-            hidden = mod.kicadSetChrome?.(false) === true;
-          } catch (err) {
-            log(`[boot] mobile: kicadSetChrome failed: ${String(err)}`);
-            clearInterval(tick);
-            return;
-          }
-          if (hidden) {
-            log("[boot] mobile: editor chrome hidden");
-            clearInterval(tick);
-          } else if (Date.now() - t0 > 120_000) {
-            log("[boot] mobile: gave up waiting for the editor frame");
-            clearInterval(tick);
-          }
-        }, 300);
-      }
       onStatus("");
     },
     // Resolve wasm + pthread worker against the asset base, not the SPA route.
