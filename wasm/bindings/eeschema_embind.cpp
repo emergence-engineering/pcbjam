@@ -59,6 +59,7 @@
 #include "collab_common.h"
 #include "collab_presence_core.h"
 #include "collab_presence_style.h"
+#include "pcbjam_libs_reload.h"
 #include <algorithm>
 
 using namespace emscripten;
@@ -1195,6 +1196,38 @@ std::string schCollabTestMoveFirst( int aDx, int aDy )
 }
 
 
+// How many placed instances of a library symbol the open schematic holds —
+// the JS lib-sync bridge asks after a remote lib update so the editor chrome
+// can warn "a symbol you are using changed" (placed SCH_SYMBOLs keep their
+// embedded copy across a lib reload, so the user must update explicitly).
+// Counts across all unique screens of the hierarchy; 0 without a schematic
+// frame (symbol editor / viewer sessions).
+int schLibsSymbolUsage( std::string aLibNickname, std::string aSymbolName )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return 0;
+
+    const LIB_ID target( wxString::FromUTF8( aLibNickname.c_str() ),
+                         wxString::FromUTF8( aSymbolName.c_str() ) );
+
+    int         count = 0;
+    SCH_SCREENS screens( fr->Schematic().Root() );
+
+    for( SCH_SCREEN* screen = screens.GetFirst(); screen; screen = screens.GetNext() )
+    {
+        for( SCH_ITEM* item : screen->Items().OfType( SCH_SYMBOL_T ) )
+        {
+            if( static_cast<SCH_SYMBOL*>( item )->GetLibId() == target )
+                count++;
+        }
+    }
+
+    return count;
+}
+
+
 // Test helper: read an item's position by uuid as "x,y" (internal units).
 std::string schCollabGetPos( std::string aId )
 {
@@ -1715,6 +1748,11 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     function("kicadCollabTestSelectFirst", &schCollabTestSelectFirst);
     function("kicadCollabTestSelectComponent", &schCollabTestSelectComponent);
     function("kicadCollabTestClearSelection", &schCollabTestClearSelection);
+    // Library reload after a remote (synced) lib edit — r2-idb-sync realtime.
+    function("kicadLibsReload", &pcbjam_libs::reloadLibrary);
+    // Placed-instance count for a library symbol (drives the "a symbol you are
+    // using was updated" toast after a remote lib edit).
+    function("kicadLibsSymbolUsage", &schLibsSymbolUsage);
 #endif // !KICAD_MERGED_EMBIND
 }
 #endif

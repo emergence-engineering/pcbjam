@@ -143,6 +143,14 @@ export const LIB_ERROR_EVENT = "pcbjam:lib-error";
  * as the bytes are handed to the bridge; the consumer coalesces the per-lib run.
  */
 export const LIB_LOADING_EVENT = "pcbjam:lib-loading";
+/**
+ * Fired after a REMOTE (peer) lib edit has been applied to the running editor
+ * (the synced source's subscribe → `kicadLibsReload` bridge): names the updated
+ * items and which of them are placed in the open document (`usedNames`, via
+ * `kicadLibsSymbolUsage`) — so the chrome can warn "a symbol you are using was
+ * updated" (placed copies keep the previous version until updated explicitly).
+ */
+export const LIB_ITEM_UPDATED_EVENT = "pcbjam:lib-item-updated";
 
 export interface LibBusyDetail {
   busy: boolean;
@@ -160,6 +168,15 @@ export interface LibLoadingDetail {
   done: number;
   /** Total libs of this kind to load (from listLibs), or 0 if unknown. */
   total: number;
+}
+export interface LibItemUpdatedDetail {
+  /** Display name of the library (its lib-table nickname). */
+  lib: string;
+  kind: string;
+  /** Every item updated in this burst. */
+  names: string[];
+  /** The subset placed in the open document (empty ⇒ informational only). */
+  usedNames: string[];
 }
 
 function emitLibBusy(detail: LibBusyDetail): void {

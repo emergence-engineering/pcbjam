@@ -51,6 +51,7 @@
 #include "collab_common.h"
 #include "collab_presence_core.h"
 #include "collab_presence_style.h"
+#include "pcbjam_libs_reload.h"
 #include <algorithm>
 #include <chrono>
 #include <map>
@@ -2004,6 +2005,8 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     function("kicadCollabTestSelectFirst", &pcbCollabTestSelectFirst);
     function("kicadCollabTestSelectComponent", &pcbCollabTestSelectComponent);
     function("kicadCollabTestClearSelection", &pcbCollabTestClearSelection);
+    // Library reload after a remote (synced) lib edit — r2-idb-sync realtime.
+    function("kicadLibsReload", &pcbjam_libs::reloadLibrary);
 #endif // !KICAD_MERGED_EMBIND
 }
 #endif

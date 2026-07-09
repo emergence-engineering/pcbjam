@@ -110,7 +110,10 @@ import {
   withSpikeWritableLib,
 } from "@/wasm/libs/spike-writable";
 import { staticLibsSource } from "@/wasm/libs/static-source";
-import { syncedLibsSource } from "@/wasm/libs/synced-source";
+import {
+  syncedLibsSource,
+  syncedScopeLibsSource,
+} from "@/wasm/libs/synced-source";
 
 /**
  * Which Yjs collab provider this deployment uses (one active per env), and its
@@ -151,6 +154,9 @@ export function docSourceConfig(): DocSource {
  *   "remote" (default) — fetch from the backend at `API_BASE_URL` over the
  *                        shared contract (origins served by the registry, or the
  *                        GPL example backend).
+ *   "synced"           — remote listing + per-lib r2-idb-sync stacks (IDB cache,
+ *                        realtime peer updates + editor reload). Also switches
+ *                        `libsSourceForLib` to the single-lib synced source.
  *   "static"           — built-in offline example symbols (no backend).
  *   "off"              — disable libs (empty sym-lib-table).
  */
@@ -248,7 +254,20 @@ export function libsSourceConfig(projectId?: string): LibsSource | null {
           ? CDN_LIBS_MANIFEST_URL
             ? cdnLibsSource(CDN_LIBS_MANIFEST_URL)
             : staticLibsSource() // misconfigured cdn ⇒ offline fallback
-          : remoteLibsSource(API_BASE_URL, currentScope(), userSlug(), project);
+          : kind === "synced"
+            ? // Remote listing + per-lib sync stacks (IDB cache, realtime,
+              // editor reload on peer edits) — see syncedScopeLibsSource.
+              syncedScopeLibsSource(
+                remoteLibsSource(API_BASE_URL, currentScope(), userSlug(), project),
+                {
+                  apiBase: API_BASE_URL,
+                  scope: currentScope(),
+                  user: userSlug(),
+                  project,
+                  log: (m) => console.log(m),
+                },
+              )
+            : remoteLibsSource(API_BASE_URL, currentScope(), userSlug(), project);
 
   // 0004-A spike: `?libwrite=1` adds one in-memory writable user SYMBOL lib so the
   // editor save path works with no backend (a dev/test aid). The real remote

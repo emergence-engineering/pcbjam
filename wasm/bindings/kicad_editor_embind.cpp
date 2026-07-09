@@ -37,6 +37,8 @@
 #include <kiway.h>
 #include <kiway_player.h>
 
+#include "pcbjam_libs_reload.h"
+
 using namespace emscripten;
 
 // Per-editor entry points and frame probes — defined (with external linkage) in
@@ -76,6 +78,7 @@ std::string pcbCollabTestSelectFirst();
 bool        pcbCollabTestClearSelection();
 
 bool        schEditorActive();
+int         schLibsSymbolUsage( std::string aLibNickname, std::string aSymbolName );
 void        schCollabApply( std::string aJson );
 void        schCollabApplyItems( std::string aJson );
 std::string schCollabSnapshot();
@@ -319,6 +322,13 @@ static int collabTestUndoDepth()
     return pcbEditorActive() ? pcbCollabTestUndoDepth() : schCollabTestUndoDepth();
 }
 
+// Placed-instance count for a library symbol — meaningful only with a schematic
+// frame; every other editor answers 0 ("nothing placed here uses it").
+static int libsSymbolUsage( std::string aLib, std::string aName )
+{
+    return schEditorActive() ? schLibsSymbolUsage( aLib, aName ) : 0;
+}
+
 // Presence shims (collab-presence 0002 pcbnew / 0003 eeschema): route to the live
 // editor's implementation, same pattern as the collab bridge shims above.
 static void collabPresenceStart()
@@ -453,6 +463,12 @@ EMSCRIPTEN_BINDINGS(kicad_editor) {
     function("kicadCollabTestGetLocked", &collabTestGetLocked);
     function("kicadCollabTestSelectFirst", &collabTestSelectFirst);
     function("kicadCollabTestClearSelection", &collabTestClearSelection);
+    // Library reload after a remote (synced) lib edit — r2-idb-sync realtime.
+    function("kicadLibsReload", &pcbjam_libs::reloadLibrary);
+    // Placed-instance count for a library symbol (schematic sessions only —
+    // 0 from any other frame; drives the "symbol you are using was updated"
+    // toast after a remote lib edit).
+    function("kicadLibsSymbolUsage", &libsSymbolUsage);
 }
 
 #endif // __EMSCRIPTEN__

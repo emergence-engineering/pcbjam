@@ -29,9 +29,11 @@ import { resolveWasmBase } from "@/wasm/wasm-assets";
 import {
   LIB_BUSY_EVENT,
   LIB_ERROR_EVENT,
+  LIB_ITEM_UPDATED_EVENT,
   LIB_LOADING_EVENT,
   type LibBusyDetail,
   type LibErrorDetail,
+  type LibItemUpdatedDetail,
   type LibLoadingDetail,
   type LibsSource,
 } from "@/wasm/libs/source";
@@ -762,6 +764,9 @@ export function WasmTool({
   } | null>(null);
   // Last lib error (e.g. a backend 404 on open), shown as a dismissible toast.
   const [libError, setLibError] = React.useState<string | null>(null);
+  // A collaborator updated library items that are PLACED in the open document
+  // (LIB_ITEM_UPDATED_EVENT) — placed copies keep the previous version, so warn.
+  const [libUpdate, setLibUpdate] = React.useState<string | null>(null);
   // Eager whole-library idb→wasm load in flight (the ~tens-of-seconds fat-load on
   // first chooser/editor open). Drives a full-cover overlay so the freeze reads as
   // "loading, just slow" rather than a hang. Null when idle; `done/total` count the
@@ -816,12 +821,26 @@ export function WasmTool({
     const onError = (e: Event) => {
       setLibError((e as CustomEvent<LibErrorDetail>).detail.message);
     };
+    const onItemUpdated = (e: Event) => {
+      const d = (e as CustomEvent<LibItemUpdatedDetail>).detail;
+      // Only warn when the update touches something PLACED here — the library
+      // tree already reflects updates to everything else.
+      if (d.usedNames.length === 0) return;
+      const names = d.usedNames.map((n) => `"${n}"`).join(", ");
+      setLibUpdate(
+        `${d.usedNames.length === 1 ? "Symbol" : "Symbols"} ${names} in "${d.lib}" ` +
+          `${d.usedNames.length === 1 ? "was" : "were"} updated by a collaborator — ` +
+          `placed copies keep the previous version until updated from the library.`,
+      );
+    };
     window.addEventListener(LIB_BUSY_EVENT, onBusy);
     window.addEventListener(LIB_ERROR_EVENT, onError);
+    window.addEventListener(LIB_ITEM_UPDATED_EVENT, onItemUpdated);
     return () => {
       clearTimeout(busyTimer);
       window.removeEventListener(LIB_BUSY_EVENT, onBusy);
       window.removeEventListener(LIB_ERROR_EVENT, onError);
+      window.removeEventListener(LIB_ITEM_UPDATED_EVENT, onItemUpdated);
     };
   }, []);
 
@@ -831,6 +850,13 @@ export function WasmTool({
     const t = setTimeout(() => setLibError(null), 6000);
     return () => clearTimeout(t);
   }, [libError]);
+
+  // Auto-dismiss the lib update toast (a touch longer — it carries a caveat).
+  React.useEffect(() => {
+    if (!libUpdate) return;
+    const t = setTimeout(() => setLibUpdate(null), 10_000);
+    return () => clearTimeout(t);
+  }, [libUpdate]);
 
   // Full-library eager load overlay. The fat-load fires one loading:true/false
   // pair PER library (222 on the full set), and between them the C++ side parses
@@ -1525,6 +1551,18 @@ export function WasmTool({
           title="Dismiss"
         >
           {libError}
+        </button>
+      )}
+
+      {/* A collaborator updated a symbol PLACED in this document — auto-dismisses. */}
+      {libUpdate && (
+        <button
+          data-testid="lib-update-toast"
+          className="absolute left-1/2 top-3 z-40 max-w-md -translate-x-1/2 rounded bg-amber-950/95 px-3 py-2 text-center text-xs text-amber-100 shadow-lg ring-1 ring-amber-500/40"
+          onClick={() => setLibUpdate(null)}
+          title="Dismiss"
+        >
+          {libUpdate}
         </button>
       )}
 
