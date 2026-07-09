@@ -90,6 +90,16 @@ const BIG_MODULE_SPECS = [
   // boots pcbnew.html — must run on V8 (chromium-ci); on Firefox/x86 CI the
   // ~190M module OOMs at instantiation and #canvas never appears (run 27626037849).
   "**/pcbnew-move.spec.ts",
+  // boots pcbnew.html and opens the Page Settings dialog (H-1 modal input-lock repro).
+  "**/modal-input-lock.spec.ts",
+  // boots pcbnew.html and opens Board Setup > Net Classes (H-2 DC-clip repro).
+  "**/grid-clip-bleed.spec.ts",
+  // boots pcbnew.html and opens Track & Via Properties (H-3 select-on-open repro).
+  "**/dialog-select-on-open.spec.ts",
+  // boots pcbnew.html and opens the Edit menu (H-7 menu-staleness repro).
+  "**/menu-undo-stale.spec.ts",
+  // boots pcbnew.html and right-clicks the canvas (H-8 context-menu-staleness repro).
+  "**/contextmenu-fresh.spec.ts",
   // 3D viewer specs boot pcbnew.html (3D-enabled build) — same V8 routing.
   "**/3d-viewer.spec.ts",
   // Isolated (own file → own worker) so its heavy single load isn't degraded by the
