@@ -87,16 +87,25 @@ case "$APP_NAME" in
         ;;
 esac
 
-# Which app's embind bindings to compile + link. Most apps use their own; the
-# sym_convert CLI links the eeschema kiface objects, which reference eeschema's
-# embind symbols (kicadCollabOnSave et al.) — reuse eeschema's embind object.
+# Which app's embind bindings to compile + link. Most apps use their own.
+# NOTE sym_convert deliberately does NOT reuse eeschema's embind object even
+# though it links the eeschema kiface: the kiface references exactly one embind
+# symbol (kicadCollabOnSave), and linking the real bindings TU for it roots the
+# whole editor surface from .init_array (~4x binary size — ysync 0009 size
+# research). Its own wasm/bindings/sym_convert_embind.cpp provides a no-op hook.
 case "$APP_NAME" in
-    sym_convert)      EMBIND_APP="eeschema" ;;
-    # occ_service links the pcbnew kiface objects → pcbnew's embind object, same
-    # reason (its own embind entry points live in occ_service_main.cpp, compiled
-    # inside the CMake target).
+    # occ_service links the pcbnew kiface objects → pcbnew's embind object (its
+    # own embind entry points live in occ_service_main.cpp, compiled inside the
+    # CMake target).
     occ_service)      EMBIND_APP="pcbnew" ;;
     *)                EMBIND_APP="$APP_NAME" ;;
+esac
+
+# Embind linker support (--bind). sym_convert has no bindings at all (see
+# above) — dropping --bind keeps the embind JS/native runtime out entirely.
+case "$APP_NAME" in
+    sym_convert)      EMBIND_LINK_FLAG="" ;;
+    *)                EMBIND_LINK_FLAG="--bind" ;;
 esac
 
 # Which app's WASM stub libraries (scripting/frame placeholders) to link.
@@ -515,7 +524,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -Xclang -fno-pch-timestamp -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1${DIAG_DEFINES} -I${SYSROOT}/include -I${STUBS_DIR} -include ${STUBS_DIR}/char_traits_uint16_workaround.h" \
     -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
-    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sMALLOC=mimalloc -sPTHREAD_POOL_SIZE='${PTHREAD_POOL_EXPR}' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 ${GL3D_LINK_FLAGS} ${NANOSLEEP_YIELD_LINK} ${MALLINFO_STUB_LINK} -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] --bind -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a${APP_STUB_LINK} ${STUBS_BUILD}/libnng_stub.a ${EMBIND_OBJ}" \
+    -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sMALLOC=mimalloc -sPTHREAD_POOL_SIZE='${PTHREAD_POOL_EXPR}' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 ${GL3D_LINK_FLAGS} ${NANOSLEEP_YIELD_LINK} ${MALLINFO_STUB_LINK} -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] ${EMBIND_LINK_FLAG} -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a${APP_STUB_LINK} ${STUBS_BUILD}/libnng_stub.a ${EMBIND_OBJ}" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
     \
