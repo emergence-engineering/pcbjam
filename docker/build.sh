@@ -81,7 +81,7 @@ trap 'kw_fail 130; exit 130' INT TERM
 
 cd "$(dirname "$0")/.."
 
-VALID_APPS="kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert | occ_service | all"
+VALID_APPS="kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | kicad_tools | occ_service | all"
 
 usage() {
     echo "Usage: ./docker/build.sh <app>[,<app>...] [args...]" >&2
@@ -114,7 +114,7 @@ else
     IFS=',' read -r -a APPS <<< "$APP_NAME"
     for app in "${APPS[@]}"; do
         case "$app" in
-            kicad_editor|pcbnew|eeschema|calculator|pl_editor|gerbview|sym_convert|occ_service) ;;
+            kicad_editor|pcbnew|eeschema|calculator|pl_editor|gerbview|kicad_tools|occ_service) ;;
             *)
                 echo "Error: unknown app '$app' (expected: ${VALID_APPS})" >&2
                 usage
@@ -213,7 +213,6 @@ kicad_subdir_for() {
     case "$1" in
         calculator)       echo "pcb_calculator" ;;
         pl_editor)        echo "pagelayout_editor" ;;
-        sym_convert)      echo "eeschema" ;;
         *)                echo "$1" ;;
     esac
 }
@@ -239,7 +238,7 @@ compile_app() {
     # EMSDK lets scripts/common/env.sh source /emsdk/emsdk_env.sh and activate the toolchain.
     # BUILD_3D_VIEWER passes through EMPTY when the host didn't set it, so
     # build-kicad-target.sh can apply per-app defaults (ON for editors, OFF
-    # for headless CLIs like sym_convert — the gl1 shim needs glm).
+    # for headless CLIs like kicad_tools — the gl1 shim needs glm).
     docker compose -f docker/docker-compose.yml exec -e EMSDK=/emsdk \
         -e BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-}" \
         kicad-wasm-builder \
@@ -273,10 +272,10 @@ postprocess_app() {
     local app="$1"
     local out_dir="output"
 
-    # The converter and the OCC service are finalized in-container (real tools,
-    # small -g0 wasm) and build with ASYNCIFY=0, so they need no host
+    # The headless CLI and the OCC service are finalized in-container (real
+    # tools, small -g0 wasm) and build with ASYNCIFY=0, so they need no host
     # post-processing (no dyncall shims, no finalize, no asyncify).
-    if [ "$app" = "sym_convert" ] || [ "$app" = "occ_service" ]; then
+    if [ "$app" = "kicad_tools" ] || [ "$app" = "occ_service" ]; then
         echo "Skipping host post-processing for ${app} (finalized in-container)"
         return 0
     fi
@@ -296,14 +295,12 @@ postprocess_app() {
     kw_stage finalize
     ./scripts/common/apply-finalize.sh "${out_dir}/${app}.wasm" "${out_dir}/${app}.wasm"
 
-    # Apply asyncify transformation on host. The converter is a synchronous node
-    # CLI built with ASYNCIFY=0, so asyncify is unnecessary and would be wrong.
+    # Apply asyncify transformation on host (the ASYNCIFY=0 CLIs returned
+    # early above and never reach this).
     # apply-asyncify always runs the --hoist-cpp-catches pass FIRST (native wasm-EH is the only build
     # mode) so Asyncify can suspend from inside C++ catch arms, then asyncify + removelist + wasm-opt -O1.
-    if [ "$app" != "sym_convert" ]; then
-        kw_stage asyncify
-        ./scripts/common/apply-asyncify.sh "${out_dir}/${app}.wasm" "${out_dir}/${app}.wasm"
-    fi
+    kw_stage asyncify
+    ./scripts/common/apply-asyncify.sh "${out_dir}/${app}.wasm" "${out_dir}/${app}.wasm"
 }
 
 # --- Pipelined driver state (KICAD_PIPELINE=1) ---

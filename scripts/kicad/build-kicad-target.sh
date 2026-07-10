@@ -66,15 +66,18 @@ case "$APP_NAME" in
         KICAD_TARGET="pcb_calculator"
         KICAD_SUBDIR="pcb_calculator"
         ;;
-    sym_convert)
-        # Standalone .lib -> .kicad_sym converter + --lint CLI (node). Its
-        # add_executable lives in eeschema/CMakeLists.txt (gated by
-        # KICAD_SYM_CONVERTER_WASM), so artifacts land in the eeschema/ subdir
-        # of its own kicad-sym_convert tree. A headless CLI has no 3D viewer:
-        # skip the wasm/gl1 FFP shim compile (it needs glm, which the libs
-        # sysroot doesn't guarantee) unless the caller forces it.
-        KICAD_TARGET="sym_convert"
-        KICAD_SUBDIR="eeschema"
+    kicad_tools)
+        # Merged headless CLI (pcbjam-mcp 0001 tier 3a): both dieted kifaces —
+        # .lib conversion (--convert-lib), --lint, --erc, --netlist, --bom,
+        # --plot, --drc in one node image. (Supersedes the retired standalone
+        # sym_convert / pcb_convert apps.) Its add_executable lives in
+        # wasm/tools/ (added by the fork's top-level CMakeLists under
+        # -DKICAD_TOOLS_WASM=ON); the binary dir doubles as the artifact
+        # subdir of its own kicad-kicad_tools tree. A headless CLI has no 3D
+        # viewer: skip the wasm/gl1 FFP shim compile (it needs glm, which the
+        # libs sysroot doesn't guarantee) unless the caller forces it.
+        KICAD_TARGET="kicad_tools"
+        KICAD_SUBDIR="kicad_tools"
         BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-OFF}"
         ;;
     occ_service)
@@ -86,17 +89,17 @@ case "$APP_NAME" in
         KICAD_SUBDIR="occ_service"
         ;;
     *)
-        echo "Error: unknown app '$APP_NAME' (expected: kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | sym_convert | occ_service)" >&2
+        echo "Error: unknown app '$APP_NAME' (expected: kicad_editor | pcbnew | eeschema | calculator | pl_editor | gerbview | kicad_tools | occ_service)" >&2
         exit 1
         ;;
 esac
 
 # Which app's embind bindings to compile + link. Most apps use their own.
-# NOTE sym_convert deliberately does NOT reuse eeschema's embind object even
-# though it links the eeschema kiface: the kiface references exactly one embind
-# symbol (kicadCollabOnSave), and linking the real bindings TU for it roots the
+# NOTE kicad_tools deliberately does NOT reuse the editors' embind objects even
+# though it links both kifaces: each kiface references exactly one embind
+# symbol (kicadCollabOnSave), and linking a real bindings TU for it roots the
 # whole editor surface from .init_array (~4x binary size — ysync 0009 size
-# research). Its own wasm/bindings/sym_convert_embind.cpp provides a no-op hook.
+# research). Its own wasm/bindings/kicad_tools_embind.cpp provides a no-op hook.
 case "$APP_NAME" in
     # occ_service links the pcbnew kiface objects → pcbnew's embind object (its
     # own embind entry points live in occ_service_main.cpp, compiled inside the
@@ -105,20 +108,21 @@ case "$APP_NAME" in
     *)                EMBIND_APP="$APP_NAME" ;;
 esac
 
-# Embind linker support (--bind). sym_convert has no bindings at all (see
+# Embind linker support (--bind). kicad_tools has no bindings at all (see
 # above) — dropping --bind keeps the embind JS/native runtime out entirely.
 case "$APP_NAME" in
-    sym_convert)      EMBIND_LINK_FLAG="" ;;
+    kicad_tools)      EMBIND_LINK_FLAG="" ;;
     *)                EMBIND_LINK_FLAG="--bind" ;;
 esac
 
 # Which app's WASM stub libraries (scripting/frame placeholders) to link.
-# sym_convert links the eeschema kiface objects, so it needs eeschema's frame
-# stub (eeschema_frame_stub.cpp). kicad_editor links pcbnew's kiface objects, which
-# reference the action-plugin scripting placeholders (pcbnewGet*); eeschema's frame
-# stub arrives via CMake (target_sources on eeschema_kiface_objects), not this path.
+# kicad_editor links pcbnew's kiface objects, which reference the action-plugin
+# scripting placeholders (pcbnewGet*); eeschema's frame stub arrives via CMake
+# (target_sources on eeschema_kiface_objects), not this path.
 case "$APP_NAME" in
-    sym_convert)      STUB_APP="eeschema" ;;
+    # kicad_tools links both kifaces: eeschema's frame stub comes through this
+    # path, pcbnew's via CMake PCBNEW_WASM_STUBS.
+    kicad_tools)      STUB_APP="eeschema" ;;
     kicad_editor)     STUB_APP="pcbnew" ;;
     # occ_service links the pcbnew kiface objects → pcbnew's stubs (frame +
     # action-plugin scripting placeholders), like the editors.
@@ -356,7 +360,7 @@ log_info "Stub libraries built"
 # Step 6.2/6.3: wasm-opt + wasm-emscripten-finalize handling.
 # For the editor apps these tools OOM on the huge debug wasm, so we stub them in
 # the container and run them on the host (docker/build.sh phase 2). The small,
-# debug-stripped (-g0) converter finalizes fine in-container, so for sym_convert
+# debug-stripped (-g0) CLI finalizes fine in-container, so for kicad_tools
 # we restore/keep the real tools and skip host post-processing entirely.
 if [ -z "${EMSDK}" ]; then
     log_error "EMSDK environment variable is not set."
@@ -365,7 +369,7 @@ fi
 EMSDK_WASM_OPT="${EMSDK}/upstream/bin/wasm-opt"
 EMSDK_FINALIZE="${EMSDK}/upstream/bin/wasm-emscripten-finalize"
 
-if [ "${APP_NAME}" = "sym_convert" ] || [ "${APP_NAME}" = "occ_service" ]; then
+if [ "${APP_NAME}" = "kicad_tools" ] || [ "${APP_NAME}" = "occ_service" ]; then
     # Use the real tools so the small -g0 module is fully finalized inside the
     # container (no host post-processing / asyncify for these targets).
     [ -f "${EMSDK_WASM_OPT}.real" ] && cp "${EMSDK_WASM_OPT}.real" "${EMSDK_WASM_OPT}"
@@ -434,11 +438,12 @@ if command -v ccache &> /dev/null; then
     log_info "Using ccache for compilation"
 fi
 
-# The standalone converter is a gated eeschema target; enabling the option also
-# trims the SCH_IO factory to the two KiCad plugins (no pcbjam/http) for this tree.
-SYM_CONVERTER_CMAKE_FLAG=""
-if [ "${APP_NAME}" = "sym_convert" ]; then
-    SYM_CONVERTER_CMAKE_FLAG="-DKICAD_SYM_CONVERTER_WASM=ON"
+# The merged headless CLI configures with BOTH diet options (each trims its
+# own kiface for this tree; the eeschema one also trims the SCH_IO factory to
+# the two KiCad plugins) plus the wasm/tools/ subdir gate.
+KICAD_TOOLS_CMAKE_FLAG=""
+if [ "${APP_NAME}" = "kicad_tools" ]; then
+    KICAD_TOOLS_CMAKE_FLAG="-DKICAD_TOOLS_WASM=ON -DKICAD_SYM_CONVERTER_WASM=ON -DKICAD_PCB_CONVERTER_WASM=ON"
 fi
 
 # Merged pcbnew+eeschema editor: gates the wasm/editor/ subdir, the per-engine
@@ -490,8 +495,17 @@ fi
 # Mirrors the wasm/gl1 pattern (compile to .o, add to the link). Shim:
 # wasm/shims/nanosleep_yield.c; its EM_ASYNC_JS yield is covered by env.__asyncjs__* in
 # scripts/common/asyncify-imports.txt.
-emcc -c -pthread "${PROJECT_ROOT}/wasm/shims/nanosleep_yield.c" -o "${STUBS_BUILD}/nanosleep_yield.o"
-NANOSLEEP_YIELD_LINK="${STUBS_BUILD}/nanosleep_yield.o"
+# The synchronous node CLIs (ASYNCIFY=0) must NOT link it: their Asyncify JS
+# runtime doesn't exist, so the shim's yield throws "Asyncify is not defined"
+# on the first main-thread sleep (e.g. DRC copper-clearance's worker-poll).
+# A blocking CLI wants libc's real blocking nanosleep anyway — node permits
+# Atomics.wait on its main thread.
+if [ "${APP_NAME}" = "kicad_tools" ] || [ "${APP_NAME}" = "occ_service" ]; then
+    NANOSLEEP_YIELD_LINK=""
+else
+    emcc -c -pthread "${PROJECT_ROOT}/wasm/shims/nanosleep_yield.c" -o "${STUBS_BUILD}/nanosleep_yield.o"
+    NANOSLEEP_YIELD_LINK="${STUBS_BUILD}/nanosleep_yield.o"
+fi
 
 # mallinfo() stub for the mimalloc build: -sMALLOC=mimalloc doesn't export the
 # glibc mallinfo() that OpenCASCADE's OSD_MemInfo.cxx (libTKernel, pcbnew's 3D)
@@ -518,7 +532,7 @@ fi
 
 emcmake cmake "${KICAD_DIR}" \
     ${CCACHE_OPTS} \
-    ${SYM_CONVERTER_CMAKE_FLAG} \
+    ${KICAD_TOOLS_CMAKE_FLAG} \
     ${MERGED_EDITOR_CMAKE_FLAG} \
     ${OCC_SERVICE_CMAKE_FLAG} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
@@ -672,7 +686,7 @@ emmake make -j${JOBS} "${KICAD_TARGET}"
 # Step 8.1: Build bitmap resources (images.tar.gz)
 # This creates the icon archive that KiCad loads at runtime. The headless
 # converter/service targets have no GUI/icons, so skip it.
-if [ "${APP_NAME}" != "sym_convert" ] && [ "${APP_NAME}" != "occ_service" ]; then
+if [ "${APP_NAME}" != "kicad_tools" ] && [ "${APP_NAME}" != "occ_service" ]; then
     kw_stage kicad-bitmaps
     log_info "Building bitmap resources..."
     emmake make bitmap_archive_build
