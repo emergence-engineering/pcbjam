@@ -7,6 +7,17 @@
 // with an in-memory store: every read returns "absent" → KiCad falls back to
 // defaults; writes live only for the process lifetime. Semantics mirror
 // wxwidgets/build/wasm/wx.js exactly (sans persistence).
+// Emscripten does NOT inherit the host environment into the wasm getenv()
+// table (node included) — without this, KICAD_CONFIG_HOME / SYM_CONVERT_TRACE
+// set by the caller silently never arrive. Copy process.env in before main.
+Module['preRun'] = Module['preRun'] || [];
+Module['preRun'].push( function() {
+  if( typeof process !== 'undefined' && process.env && typeof ENV !== 'undefined' )
+  {
+    for( var k in process.env ) ENV[k] = process.env[k];
+  }
+} );
+
 (function( g ) {
   if( !g.localStorage )
   {

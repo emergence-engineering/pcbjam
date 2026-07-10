@@ -67,11 +67,15 @@ case "$APP_NAME" in
         KICAD_SUBDIR="pcb_calculator"
         ;;
     sym_convert)
-        # Standalone .lib -> .kicad_sym converter (node CLI). Its add_executable
-        # lives in eeschema/CMakeLists.txt (gated by KICAD_SYM_CONVERTER_WASM), so
-        # artifacts land in the eeschema/ subdir of its own kicad-sym_convert tree.
+        # Standalone .lib -> .kicad_sym converter + --lint CLI (node). Its
+        # add_executable lives in eeschema/CMakeLists.txt (gated by
+        # KICAD_SYM_CONVERTER_WASM), so artifacts land in the eeschema/ subdir
+        # of its own kicad-sym_convert tree. A headless CLI has no 3D viewer:
+        # skip the wasm/gl1 FFP shim compile (it needs glm, which the libs
+        # sysroot doesn't guarantee) unless the caller forces it.
         KICAD_TARGET="sym_convert"
         KICAD_SUBDIR="eeschema"
+        BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-OFF}"
         ;;
     occ_service)
         # Standalone OpenCASCADE 3D service (worker embind module). Target lives

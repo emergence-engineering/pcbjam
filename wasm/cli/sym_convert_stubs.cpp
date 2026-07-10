@@ -18,27 +18,26 @@
 
 #include <ki_exception.h>
 #include <font/font.h>
+#include <sch_bus_entry.h>
 #include <sch_field.h>
 #include <sch_io/kicad_legacy/sch_io_kicad_legacy.h>
 #include <sch_io/kicad_sexpr/sch_io_kicad_sexpr.h>
+#include <sch_junction.h>
+#include <sch_label.h>
+#include <sch_line.h>
 #include <sch_pin.h>
+#include <sch_sheet.h>
+#include <sch_symbol.h>
 #include <sch_text.h>
 #include <sch_textbox.h>
 
 // ── (b) schematic-file entry points ──────────────────────────────────────────
-// Severs the schematic half of both instantiated plugins: ParseSchematic,
-// SCHEMATIC/SCH_SCREEN/sheets, SCH_SYMBOL/SCH_LINE/labels/groups vtables (and
-// their Plot/font/GUI edges), Fontconfig()->ListFonts and Pgm().
-
-SCH_SHEET* SCH_IO_KICAD_SEXPR::LoadSchematicFile( const wxString& aFileName, SCHEMATIC*,
-                                                  SCH_SHEET*,
-                                                  const std::map<std::string, UTF8>* )
-{
-    THROW_IO_ERROR( wxString::Format(
-            wxS( "sym_convert: schematic loading is compiled out (stub); cannot load '%s'" ),
-            aFileName ) );
-}
-
+// Originally BOTH plugins' load+save were stubbed, severing the whole
+// schematic half. The --lint mode (ysync 0009 §7) needs the REAL s-expr
+// LoadSchematicFile back, so only three of the four stay stubbed: the s-expr
+// SAVE (lint/convert never write schematics) and the LEGACY load+save (.sch
+// lint unsupported). The re-rooted schematic object model costs binary size —
+// the price of the lint tier riding this binary instead of a second wasm.
 
 void SCH_IO_KICAD_SEXPR::SaveSchematicFile( const wxString& aFileName, SCH_SHEET*, SCHEMATIC*,
                                             const std::map<std::string, UTF8>* )
@@ -95,21 +94,46 @@ void SCH_PIN::GetMsgPanelInfo( EDA_DRAW_FRAME*, std::vector<MSG_PANEL_ITEM>& )
 {
 }
 
-// ── (c) font-factory choke point ─────────────────────────────────────────────
-// The single route into the font engine: severs STROKE_FONT::LoadFont (and the
-// 2.7 MB newstroke glyph data), OUTLINE_FONT (freetype + harfbuzz), fontconfig.
-// abort() (not a soft null) so any violated assumption surfaces immediately in
-// the qa corpus instead of producing subtly wrong output.
+// The --lint mode re-roots the schematic object model (real LoadSchematicFile);
+// these model TUs' GetMsgPanelInfo overrides dynamic_cast to SCH_EDIT_FRAME,
+// whose typeinfo the kiface prune removed. Same treatment as SCH_PIN above —
+// message-panel population is unreachable without a frame.
 
-namespace KIFONT
+void SCH_BUS_ENTRY_BASE::GetMsgPanelInfo( EDA_DRAW_FRAME*, std::vector<MSG_PANEL_ITEM>& )
 {
-
-FONT* FONT::GetFont( const wxString&, bool, bool, const std::vector<wxString>*, bool )
-{
-    std::fprintf( stderr,
-                  "sym_convert: FATAL: KIFONT::FONT::GetFont called — the font engine is "
-                  "compiled out (ysync 0009 diet stub)\n" );
-    std::abort();
 }
 
-} // namespace KIFONT
+
+void SCH_JUNCTION::GetMsgPanelInfo( EDA_DRAW_FRAME*, std::vector<MSG_PANEL_ITEM>& )
+{
+}
+
+
+void SCH_LABEL_BASE::GetMsgPanelInfo( EDA_DRAW_FRAME*, std::vector<MSG_PANEL_ITEM>& )
+{
+}
+
+
+void SCH_LINE::GetMsgPanelInfo( EDA_DRAW_FRAME*, std::vector<MSG_PANEL_ITEM>& )
+{
+}
+
+
+void SCH_SHEET::GetMsgPanelInfo( EDA_DRAW_FRAME*, std::vector<MSG_PANEL_ITEM>& )
+{
+}
+
+
+void SCH_SYMBOL::GetMsgPanelInfo( EDA_DRAW_FRAME*, std::vector<MSG_PANEL_ITEM>& )
+{
+}
+
+// ── (c) font-factory choke point — RETIRED by the --lint mode ─────────────────
+// The abort stub on KIFONT::FONT::GetFont severed STROKE_FONT::LoadFont (and
+// the 2.7 MB newstroke glyph data), OUTLINE_FONT (freetype + harfbuzz) and
+// fontconfig while this binary only converted symbol libraries (whose parse
+// never resolves fonts). Schematic lint changed that: SCH_SCREEN::Append
+// RTree-inserts every parsed item by bounding box, and any text bbox resolves
+// the draw font — so the REAL font engine is linked again (wasm fontconfig is
+// the no-op variant; unknown names fall back to the stroke font). This is the
+// bulk of the lint tier's size cost over the pure converter.
