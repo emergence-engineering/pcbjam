@@ -29,6 +29,7 @@ const plans: {
     price: { monthly: { amount: '$0' } },
     tagline: 'For open hardware, learning, and side projects.',
     features: [
+      'Real-time collaboration',
       'Unlimited public projects',
       '7 private projects',
       '3 people on private work, in your personal team (owner included)',
@@ -47,7 +48,7 @@ const plans: {
     },
     tagline: 'For the independent engineer.',
     features: [
-      'Everything in the Free plan',
+      'Everything from the Free plan',
       'Unlimited private projects in your personal team',
       {
         label: 'AI assistant + MCP, credits included monthly - on any project you can edit',
@@ -69,8 +70,8 @@ const plans: {
     tagline: 'For teams shipping hardware.',
     features: [
       'Every person with private access is a seat - any role, owner included',
+      'Every seat is a Pro seat - AI + MCP on this team’s projects only',
       'Unlimited private projects',
-      'AI + MCP for the whole team, on team projects',
       '10 GB + 5 GB per seat storage',
       'Roles, permissions, seat management',
     ],
@@ -83,6 +84,7 @@ const plans: {
     price: { monthly: { amount: 'Let’s talk' } },
     tagline: 'For organizations with requirements.',
     features: [
+      'Everything from the Team plan',
       'SSO/SAML and audit logs',
       'Pay by invoice',
       'Pooled AI credits with spend limits',
@@ -101,7 +103,7 @@ const faqs = [
   },
   {
     q: 'Do viewers and commenters pay?',
-    a: 'Anyone can view public projects. Commenting and editing need membership (the reader role is enough to comment) - free and unlimited on public projects. On private projects, members use one of your three free spots or a seat - the role doesn’t matter, having access to private work is what counts.',
+    a: 'Anyone can view public projects. Members can be readers, commenters, or editors: readers see the project and its comments, commenters can also add comments, editors can edit too - membership is free and unlimited on public projects. On private projects, members use one of your three free spots or a seat - the role doesn’t matter, having access to private work is what counts.',
   },
   {
     q: 'We stopped paying - what happens?',
@@ -110,6 +112,10 @@ const faqs = [
   {
     q: 'What happens when I add someone to private work?',
     a: 'On your personal team the first three people are free. Beyond them - and for everyone on a shared team - private access needs a seat: with an unassigned seat they’re in immediately, otherwise the billing admin gets a seat request to confirm. We never charge silently.',
+  },
+  {
+    q: 'Are team seats Pro seats?',
+    a: 'Yes - every seat includes Pro features (AI assistant + MCP) on that team’s projects, and only there. A personal Pro subscription is separate: it travels with you to any project you can edit, in any team.',
   },
   {
     q: 'Can I move a team to someone else?',
