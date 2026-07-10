@@ -1113,7 +1113,8 @@ int symConvertMain( int argc, char** argv )
                           "       kicad_tools --netlist [--xml] <file.kicad_sch> [<out>]\n"
                           "       kicad_tools --bom <file.kicad_sch> [<out>]\n"
                           "       kicad_tools --plot [--pdf] <file.kicad_sch> [<out>]\n"
-                          "       kicad_tools --drc [--json] [--strict] <file.kicad_pcb> [<out>]\n" );
+                          "       kicad_tools --drc [--json] [--strict] <file.kicad_pcb> [<out>]\n"
+                          "       kicad_tools --gerbers <file.kicad_pcb> [<outdir>]\n" );
     return 2;
 }
 

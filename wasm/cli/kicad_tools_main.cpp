@@ -7,6 +7,7 @@
  *
  *   pcbnew side   (pcb_convert_main.cpp):
  *     kicad_tools --drc [--json] [--strict] <file.kicad_pcb> [<out>]
+ *     kicad_tools --gerbers <file.kicad_pcb> [<outdir>]
  *
  *   eeschema side (sym_convert_main.cpp) — everything else:
  *     kicad_tools --convert-lib <input.lib> <output.kicad_sym>
@@ -35,10 +36,15 @@ int main( int argc, char** argv )
 {
     int rc;
 
-    if( argc >= 2 && std::strcmp( argv[1], "--drc" ) == 0 )
+    if( argc >= 2
+        && ( std::strcmp( argv[1], "--drc" ) == 0 || std::strcmp( argv[1], "--gerbers" ) == 0 ) )
+    {
         rc = pcbConvertMain( argc, argv );
+    }
     else
+    {
         rc = symConvertMain( argc, argv );
+    }
 
     // Skip the EXIT_RUNTIME static-dtor pass (same rationale as
     // pcb_convert_main.cpp, which already does this on its --drc path): with

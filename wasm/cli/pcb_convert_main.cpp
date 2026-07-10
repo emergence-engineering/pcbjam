@@ -16,6 +16,12 @@
  *             Exit: 0 clean, 1 violations (--strict: also warnings +
  *             unconnected), 2 usage, 4 load/run failure.
  *
+ *   gerbers:  pcb_convert --gerbers <file.kicad_pcb> [<outdir>]
+ *             One .gbr per enabled layer (stackup plot order) + the .gbrjob
+ *             file, kicad-cli CLI defaults (no board-plot-params), into
+ *             <outdir> (default: the input's directory). Zone fills plot as
+ *             saved (no re-check). Exit: 0 ok, 2 usage, 4 failure.
+ *
  * No GUI, no renderer, no embind bindings. Wired into pcbnew/CMakeLists.txt
  * behind the KICAD_PCB_CONVERTER_WASM option (see
  * scripts/kicad/build-pcb_convert.sh).
@@ -43,17 +49,23 @@
 #include <drc/drc_engine.h>
 #include <drc/drc_item.h>
 #include <drc/drc_report.h>
+#include <exporters/gerber_jobfile_writer.h>
+#include <jobs/job_export_pcb_gerbers.h>
 #include <ki_exception.h>
 #include <layer_ids.h>
 #include <lset.h>
 #include <libraries/library_manager.h>
 #include <pcb_io/pcb_io_mgr.h>
 #include <pcb_marker.h>
+#include <pcb_plotter.h>
+#include <pcbplot.h>
 #include <pgm_base.h>
+#include <plotters/plotter_gerber.h>
 #include <project.h>
 #include <project/project_file.h>
 #include <properties/property.h>
 #include <properties/property_mgr.h>
+#include <reporter.h>
 #include <settings/settings_manager.h>
 #include <widgets/report_severity.h>
 
@@ -348,6 +360,88 @@ int runDrc( const char* aInPath, bool aJson, bool aStrict, const char* aOutPath 
     return failed ? 1 : 0;
 }
 
+// ── headless gerber export ────────────────────────────────────────────────────
+// Mirrors PCBNEW_JOBS_HANDLER::JobExportGerbers with the headless deltas: no
+// zone re-check (tool framework pruned; fills plot as saved), no progress
+// reporter, kicad-cli CLI defaults via a default-constructed
+// JOB_EXPORT_PCB_GERBERS (board's enabled layers, .gbrjob file on, no protel
+// extensions unless the board plot params say so — we DON'T use board plot
+// params, matching kicad-cli's default).
+
+int runGerbers( const char* aInPath, const char* aOutDir )
+{
+    wxFileName fn( wxString::FromUTF8( aInPath ) );
+    fn.MakeAbsolute();
+
+    BOARD* brd = loadBoardHeadless( aInPath );
+
+    if( !brd )
+        return 4;
+
+    wxString outPath = aOutDir ? wxString::FromUTF8( aOutDir ) : fn.GetPath();
+
+    if( !outPath.EndsWith( wxS( "/" ) ) )
+        outPath += wxS( "/" );
+
+    REPORTER& reporter = CLI_REPORTER::GetInstance();
+
+    // kicad-cli defaults (m_useBoardPlotParams=false, m_createJobsFile=true);
+    // layer selection = the board's enabled layers, stackup plot order.
+    JOB_EXPORT_PCB_GERBERS gerberJob;
+    PCB_PLOT_PARAMS        plotOpts;
+    PCB_PLOTTER::PlotJobToPlotOpts( plotOpts, &gerberJob, reporter );
+
+    GERBER_JOBFILE_WRITER jobfileWriter( brd );
+    LSEQ layersToPlot = brd->GetEnabledLayers().SeqStackupForPlotting();
+    int  plotted = 0;
+    bool failed = false;
+
+    for( PCB_LAYER_ID layer : layersToPlot )
+    {
+        LSEQ plotSequence;
+        plotSequence.push_back( layer );
+
+        wxFileName gbrFn( brd->GetFileName() );
+        wxString   layerName = brd->GetLayerName( layer );
+        wxString   fileExt = plotOpts.GetUseGerberProtelExtensions()
+                                     ? GetGerberProtelExtension( layer )
+                                     : wxString( wxS( "gbr" ) );
+
+        BuildPlotFileName( &gbrFn, outPath, layerName, fileExt );
+        wxString gbrName = gbrFn.GetFullName(); // AddGbrFile wants a non-const ref
+        jobfileWriter.AddGbrFile( layer, gbrName );
+
+        trace( "runGerbers: StartPlotBoard" );
+        GERBER_PLOTTER* plotter = (GERBER_PLOTTER*) StartPlotBoard(
+                brd, &plotOpts, layer, layerName, gbrFn.GetFullPath(), wxEmptyString,
+                wxEmptyString );
+
+        if( plotter )
+        {
+            PlotBoardLayers( brd, plotter, plotSequence, plotOpts );
+            plotter->EndPlot();
+            plotted++;
+        }
+        else
+        {
+            std::fprintf( stderr, "%s: error: failed to plot %s\n", aInPath,
+                          (const char*) gbrFn.GetFullPath().ToUTF8() );
+            failed = true;
+        }
+
+        delete plotter;
+    }
+
+    wxFileName jobFn( brd->GetFileName() );
+    BuildPlotFileName( &jobFn, outPath, wxS( "job" ), wxS( "gbrjob" ) );
+    jobfileWriter.CreateJobFile( jobFn.GetFullPath() );
+
+    std::fprintf( stderr, "%s: %s (%d layers + job file) -> %s\n", aInPath,
+                  failed ? "FAIL" : "OK", plotted, (const char*) outPath.ToUTF8() );
+
+    return failed ? 4 : 0;
+}
+
 } // namespace
 
 
@@ -468,7 +562,34 @@ int pcbConvertMain( int argc, char** argv )
         _exit( rc );
     }
 
-    std::fprintf( stderr, "usage: pcb_convert --drc [--json] [--strict] <file.kicad_pcb> [<out>]\n" );
+    if( argc >= 2 && std::strcmp( argv[1], "--gerbers" ) == 0 )
+    {
+        wxDisableAsserts();
+
+        if( argc < 3 )
+        {
+            std::fprintf( stderr, "usage: kicad_tools --gerbers <file.kicad_pcb> [<outdir>]\n" );
+            return 2;
+        }
+
+        int rc = 4;
+
+        try
+        {
+            rc = runGerbers( argv[2], argc >= 4 ? argv[3] : nullptr );
+        }
+        catch( const std::exception& e )
+        {
+            std::fprintf( stderr, "%s: error: %s\n", argv[2], e.what() );
+        }
+
+        // Same static-dtor rationale as --drc above.
+        std::fflush( nullptr );
+        _exit( rc );
+    }
+
+    std::fprintf( stderr, "usage: kicad_tools --drc [--json] [--strict] <file.kicad_pcb> [<out>]\n"
+                          "       kicad_tools --gerbers <file.kicad_pcb> [<outdir>]\n" );
     return 2;
 }
 
