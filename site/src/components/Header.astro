@@ -5,6 +5,7 @@
 const links = [
   { href: '/#how-it-works', label: 'How it works' },
   { href: '/#open', label: 'Open & yours' },
+  { href: '/pricing', label: 'Pricing' },
   { href: '/blog', label: 'Blog' },
   {
     href: 'https://emergence-engineering.com',
@@ -87,6 +88,7 @@ const isActive = (href: string, external?: boolean) =>
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 0.1rem 0.4rem;
+    white-space: nowrap;
   }
   .nav {
     display: flex;
@@ -141,9 +143,9 @@ const isActive = (href: string, external?: boolean) =>
   }
 
   /* Collapse to the hamburger menu once the full one-line nav no longer fits the
-     1024px-capped bar (adding the demo link pushed the crowded desktop nav past
-     the point where it stays on a single row). */
-  @media (max-width: 1024px) {
+     1024px-capped bar (the demo link, then the Pricing link, pushed the crowded
+     desktop nav past the point where it stays on a single row). */
+  @media (max-width: 1120px) {
     .brand-chip {
       display: none;
     }
