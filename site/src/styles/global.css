@@ -227,6 +227,15 @@ main {
   margin: 1rem 0;
 }
 
+/* Post media (screenshots, gifs, video loops): never overflow the column —
+   the hand-rolled reset has no img rule (Preflight is skipped, see top). */
+.prose img,
+.prose video {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-sm);
+}
+
 .prose .table-wrap {
   overflow-x: auto;
   margin: 1rem 0;
