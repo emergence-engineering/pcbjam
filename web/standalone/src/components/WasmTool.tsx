@@ -71,6 +71,10 @@ import {
   type FollowTarget,
 } from "@/wasm/collab/follow-user";
 import { startCrossAppPresence, type CrossAppHandle } from "@/wasm/collab/cross-app";
+import {
+  startSiblingRestage,
+  type SiblingRestageHandle,
+} from "@/wasm/collab/sibling-restage";
 import { DOC_REVERTED_EVENT } from "@/wasm/collab/kicad-binding";
 import {
   createComments,
@@ -834,6 +838,7 @@ export function WasmTool({
   // Project-wide presence room (0006): joined once per session, survives
   // eeschema sheet rebinds — the bridge re-reads it on every startPresence.
   const crossAppRef = React.useRef<CrossAppHandle | null>(null);
+  const siblingRestageRef = React.useRef<SiblingRestageHandle | null>(null);
   const sheetManagerRef = React.useRef<SheetCollabManager | null>(null);
   // The single-room collab doc (pcbnew/pl_editor), for the layout save-sync
   // (miss 08B); eeschema routes per sheet through the manager instead.
@@ -1426,6 +1431,21 @@ export function WasmTool({
           collabDocRef.current = collabHandle?.doc ?? null;
           startPresence(collabHandle?.provider, undefined, collabHandle?.doc);
           startComments(collabHandle?.doc);
+          // Live sibling mirror (project-sync 0001 bug 3): keep the schematic
+          // files a PCB session syncs from fresh in MEMFS, instead of the
+          // one-shot boot snapshot. Same opt-out as the room collab; read-only
+          // viewers skip it (they can't run the sync anyway).
+          if (tool === "pcbnew" && collabHandle && !readOnly) {
+            siblingRestageRef.current = await startSiblingRestage({
+              win,
+              slug,
+              scopeId,
+              projectId,
+              files,
+              provider: yjsProviderConfig(),
+              log: append,
+            });
+          }
           if (collabHandle && targetPath && COLLAB_TOOLS.has(tool) && !readOnly) {
             driftRef.current = startDriftDetection({
               doc: collabHandle.doc,
@@ -1462,6 +1482,8 @@ export function WasmTool({
       presenceRef.current = null;
       crossAppRef.current?.destroy();
       crossAppRef.current = null;
+      siblingRestageRef.current?.destroy();
+      siblingRestageRef.current = null;
       driftRef.current?.stop();
       driftRef.current = null;
       // Tears down every warm room's provider/doc (the only place providers are

@@ -1,5 +1,6 @@
 import type { Tool } from "@pcbjam/shared";
 import { FILELESS_TOOLS } from "@pcbjam/shared";
+import { defaultKicadPro } from "../lib/new-file";
 import { memfsFilePath, memfsProjectDir } from "./constants";
 import { prescanBoardModels } from "./libs/models-bridge";
 import { openFileInTool } from "./open-flow";
@@ -45,17 +46,32 @@ function getFS(win: ToolWindow): EmscriptenFS {
   return fs as EmscriptenFS;
 }
 
+/**
+ * Write one project file into the tool's MEMFS. Shared by the boot-time
+ * whole-tree staging below and the live sibling re-stage (collab/sibling-restage):
+ * a peer's schematic edits must land in MEMFS so "Update PCB from Schematic"
+ * reads current data, not the page-load snapshot.
+ */
+export function restageFile(
+  win: ToolWindow,
+  slug: string,
+  relPath: string,
+  bytes: Uint8Array,
+  log: (msg: string) => void,
+): void {
+  const fs = getFS(win);
+  const dest = memfsFilePath(slug, relPath);
+  fs.mkdirTree(dest.slice(0, dest.lastIndexOf("/")));
+  fs.writeFile(dest, bytes);
+  log(`[memfs] wrote ${dest} (${bytes.length} bytes)`);
+}
+
 /** Mirror the whole project tree into the tool's MEMFS (sync-whole-tree). */
 async function syncProjectToMemfs(win: ToolWindow, opts: DriveOptions): Promise<void> {
-  const fs = getFS(win);
-  fs.mkdirTree(memfsProjectDir(opts.slug));
+  getFS(win).mkdirTree(memfsProjectDir(opts.slug));
   for (const file of opts.files) {
-    const dest = memfsFilePath(opts.slug, file.path);
-    const dir = dest.slice(0, dest.lastIndexOf("/"));
-    fs.mkdirTree(dir);
     const bytes = await opts.fetchBytes(file.path);
-    fs.writeFile(dest, bytes);
-    opts.log(`[memfs] wrote ${dest} (${bytes.length} bytes)`);
+    restageFile(win, opts.slug, file.path, bytes, opts.log);
     // 3D models: prefetch every model this board references (R2 → IDB → MEMFS)
     // so the 3D viewer's first open resolves locally. Fire-and-forget — project
     // open never waits on it; a ref that misses falls back to the C++ per-model
@@ -67,6 +83,26 @@ async function syncProjectToMemfs(win: ToolWindow, opts: DriveOptions): Promise<
       );
     }
   }
+}
+
+/**
+ * KiCad expects a `<stem>.kicad_pro` next to a board/schematic; without one it
+ * runs on an in-memory defaults project, so nothing project-scoped (netclasses,
+ * ERC/DRC exclusions, text variables) persists — and the settings save paths
+ * are gated on the file existing at all. pcbjam projects historically carry no
+ * project file (docs/features/project-sync/0001), so seed a minimal one into
+ * MEMFS for the target document when the project doesn't provide its own.
+ * MEMFS-only: it is not added to the project file list or uploaded.
+ */
+function synthesizeProjectFile(win: ToolWindow, opts: DriveOptions): void {
+  const match = (opts.targetPath ?? "").match(/^(.*)\.kicad_(pcb|sch)$/);
+  if (!match) return;
+  const proPath = `${match[1]}.kicad_pro`;
+  if (opts.files.some((f) => f.path === proPath)) return;
+  const fileName = proPath.slice(proPath.lastIndexOf("/") + 1);
+  const bytes = new TextEncoder().encode(defaultKicadPro(fileName));
+  getFS(win).writeFile(memfsFilePath(opts.slug, proPath), bytes);
+  opts.log(`[memfs] synthesized ${proPath} (project has no project file)`);
 }
 
 /**
@@ -89,6 +125,7 @@ export async function driveProjectIntoTool(
 
   onStatus("Loading project files…");
   await syncProjectToMemfs(win, opts);
+  synthesizeProjectFile(win, opts);
 
   if (opts.targetPath && !FILELESS_TOOLS.has(opts.tool)) {
     onStatus("Opening file…");

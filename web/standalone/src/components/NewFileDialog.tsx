@@ -12,6 +12,7 @@ import { localProjectStore } from "@/lib/project-source";
 import { useLocalProjects } from "@/lib/api";
 import {
   defaultFileName,
+  defaultKicadPro,
   newFileTemplate,
   withExtension,
 } from "@/lib/new-file";
@@ -86,16 +87,31 @@ export function NewFileDialog({
       const bytes = new TextEncoder().encode(
         newFileTemplate(tool, crypto.randomUUID()),
       );
+      const files = [{ path: finalName, bytes }];
+      // A board/schematic is a project root: create its `<stem>.kicad_pro`
+      // sibling with it (project-sync 0001) so KiCad opens a real project and
+      // project-scoped settings (netclasses, ERC/DRC exclusions) can persist.
+      const proName = finalName.replace(/\.kicad_(pcb|sch)$/, ".kicad_pro");
+      if (
+        proName !== finalName &&
+        !(project?.existingPaths ?? []).includes(proName)
+      ) {
+        files.push({
+          path: proName,
+          bytes: new TextEncoder().encode(defaultKicadPro(proName)),
+        });
+      }
       let slug: string;
       if (homeMode && target === NEW) {
         if (!store) throw new Error("local project store unavailable");
-        const created = await store.createProject(projectName.trim() || "Untitled", [
-          { path: finalName, bytes },
-        ]);
+        const created = await store.createProject(
+          projectName.trim() || "Untitled",
+          files,
+        );
         slug = created.slug;
       } else {
         slug = project ? project.slug : target;
-        await uploadFileBytes(slug, finalName, bytes);
+        for (const f of files) await uploadFileBytes(slug, f.path, f.bytes);
       }
       // Full navigation so Emscripten boots into a clean page opening the file.
       // A home-created project is browser-local (@local scope); an in-project new

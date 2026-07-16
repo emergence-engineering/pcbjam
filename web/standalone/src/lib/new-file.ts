@@ -32,6 +32,22 @@ export function withExtension(tool: Tool, name: string): string {
   return ext && !name.toLowerCase().endsWith(ext) ? `${name}${ext}` : name;
 }
 
+/**
+ * Minimal `.kicad_pro` a board/schematic can live next to. KiCad's PROJECT_FILE
+ * (JSON_SETTINGS) fills every missing key with schema defaults, and the file's
+ * mere existence is what unlocks the project-settings save paths (netclasses,
+ * ERC/DRC exclusions, text variables — pcbnew/files.cpp gates them on
+ * FileExists()); the first in-editor save then writes the full document.
+ * `version` must track projectFileSchemaVersion (kicad common/project/project_file.cpp).
+ */
+export function defaultKicadPro(fileName: string): string {
+  return `${JSON.stringify(
+    { meta: { filename: fileName, version: 3 } },
+    null,
+    2,
+  )}\n`;
+}
+
 export function newFileTemplate(tool: Tool, uuid: string): string {
   switch (tool) {
     case "eeschema":
