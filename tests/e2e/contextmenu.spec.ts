@@ -1,7 +1,7 @@
 // Context-menu (DoPopupMenu) e2e — right-click pops a DOM popup, items route
 // wxEVT_MENU back to the handler, and outside-click/Escape cancels.
 import { test, expect, tryLoadApp, getCanvasBox } from './utils/fixtures';
-import { findRenderedByType, clickMenuItem } from './utils/element-tracker';
+import { findRenderedByType, clickMenuItem, shotPath } from './utils/element-tracker';
 
 async function rightClickCanvasCentre(page: import('@playwright/test').Page) {
   const box = await getCanvasBox(page);
@@ -45,7 +45,7 @@ test.describe('DOM-port context menu', () => {
     expect(paste, 'Paste should be present').toBeTruthy();
     expect(paste!.enabled, 'Paste should be disabled').toBe(false);
 
-    await page.screenshot({ path: 'test-results/contextmenu-01-open.png', fullPage: true });
+    await page.screenshot({ path: shotPath(page, 'contextmenu-01-open.png'), fullPage: true });
 
     expect(testLogger.errors.filter((e) => !e.includes('favicon'))).toHaveLength(0);
   });

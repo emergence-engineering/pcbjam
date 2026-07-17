@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { expect, type Page } from '@playwright/test';
-import { clickByLabel } from '../../e2e/utils/element-tracker';
+import { clickByLabel, shotPath } from '../../e2e/utils/element-tracker';
 
 /**
  * Shared screenshot-comparison and app-startup helpers for the KiCad specs
@@ -151,7 +151,7 @@ export async function completeWizard(page: Page, opts: { screenshots?: boolean }
     await page.waitForTimeout(2000);
 
     if (opts.screenshots) {
-        await page.screenshot({ path: 'test-results/wizard-00-initial.png', scale: 'css' });
+        await page.screenshot({ path: shotPath(page, 'wizard-00-initial.png'), scale: 'css' });
     }
 
     for (let i = 1; i <= 10; i++) {
@@ -163,7 +163,7 @@ export async function completeWizard(page: Page, opts: { screenshots?: boolean }
             if (finished && opts.screenshots) {
                 await page.waitForTimeout(500);
                 await page.screenshot({
-                    path: `test-results/wizard-${String(i).padStart(2, '0')}-finish.png`,
+                    path: shotPath(page, `wizard-${String(i).padStart(2, '0')}-finish.png`),
                     scale: 'css'
                 });
             }
@@ -175,7 +175,7 @@ export async function completeWizard(page: Page, opts: { screenshots?: boolean }
 
         if (opts.screenshots) {
             await page.screenshot({
-                path: `test-results/wizard-${String(i).padStart(2, '0')}.png`,
+                path: shotPath(page, `wizard-${String(i).padStart(2, '0')}.png`),
                 scale: 'css'
             });
         }

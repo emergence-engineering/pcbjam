@@ -15,7 +15,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { PNG } from 'pngjs';
-import { BASELINE_DIRS, DIFF_OUT_DIR, floorFor, labelText, LABEL } from './config';
+import { BASELINE_ROOT, DIFF_OUT_DIR, floorFor, labelText, splitKey, LABEL } from './config';
 import { comparePair, type Report } from './compare';
 import { loadPng, savePng, withBottomLabel } from './image-ops';
 import { buildSpecResolver } from './spec-map';
@@ -60,9 +60,9 @@ async function main(): Promise<void> {
         }
     }
 
-    // Repo-relative baseline dir prefixes (e.g. tests/baseline-screenshots).
-    const prefixes = BASELINE_DIRS.map((d) => path.relative(repoRoot, path.join(cwd, d)));
-    const diff = git(repoRoot, ['diff', '--name-status', base, head, '--', ...prefixes]);
+    // Repo-relative baseline root prefix (e.g. tests/baseline-screenshots).
+    const prefix = path.relative(repoRoot, path.join(cwd, BASELINE_ROOT));
+    const diff = git(repoRoot, ['diff', '--name-status', base, head, '--', prefix]);
     if (!diff) {
         console.log('[changelog] no baseline changes between', base.slice(0, 7), 'and', head);
         return;
@@ -89,12 +89,14 @@ async function main(): Promise<void> {
         fs.writeFileSync(f, b);
         return loadPng(f);
     };
+    // Engine-qualified key (`<engine>/<name>.png`) from a repo path under the baseline root.
+    const keyOf = (repoPath: string): string => path.relative(prefix, repoPath).split(path.sep).join('/');
     // Save a single captioned image (added/removed) and record it in the report.
-    const saveSingle = (img: PNG, name: string, status: 'added' | 'removed'): void => {
+    const saveSingle = (img: PNG, key: string, status: 'added' | 'removed'): void => {
         const suffix = status === 'added' ? 'added' : 'removed';
-        const rel = path.join(DIFF_OUT_DIR, `${name}.${suffix}.png`);
-        savePng(path.join(cwd, rel), withBottomLabel(img, labelText(status, name, specFor(name)), LABEL.colors[status]));
-        report[status].push({ name, image: rel });
+        const rel = path.join(DIFF_OUT_DIR, `${key.replace('/', '_')}.${suffix}.png`);
+        savePng(path.join(cwd, rel), withBottomLabel(img, labelText(status, key, specFor(splitKey(key).name)), LABEL.colors[status]));
+        report[status].push({ name: key, image: rel });
     };
 
     for (const line of diff.split('\n')) {
@@ -102,28 +104,27 @@ async function main(): Promise<void> {
         const status = parts[0][0]; // M/A/D/R
         const repoPath = parts[status === 'R' ? 2 : 1];
         const oldPath = status === 'R' ? parts[1] : repoPath;
-        const name = path.basename(repoPath);
+        const key = keyOf(repoPath);
 
         if (status === 'A' || status === 'R') {
             const img = blobPng(head, repoPath);
-            if (img) saveSingle(img, name, 'added');
+            if (img) saveSingle(img, key, 'added');
             if (status === 'R') {
-                const oldName = path.basename(oldPath);
                 const oldImg = blobPng(base, oldPath);
-                if (oldImg) saveSingle(oldImg, oldName, 'removed');
+                if (oldImg) saveSingle(oldImg, keyOf(oldPath), 'removed');
             }
         } else if (status === 'D') {
             const img = blobPng(base, repoPath);
-            if (img) saveSingle(img, name, 'removed');
+            if (img) saveSingle(img, key, 'removed');
         } else {
             // Modified: captioned triptych old vs new.
             const oldImg = blobPng(base, repoPath);
             const newImg = blobPng(head, repoPath);
             if (!oldImg || !newImg) continue;
-            const { result, heatmap, triptych } = comparePair(oldImg, newImg, name, floorFor(name));
-            const triptychRel = path.join(DIFF_OUT_DIR, `${name}.triptych.png`);
-            const heatmapRel = path.join(DIFF_OUT_DIR, `${name}.heatmap.png`);
-            savePng(path.join(cwd, triptychRel), withBottomLabel(triptych, labelText('changed', name, specFor(name)), LABEL.colors.changed));
+            const { result, heatmap, triptych } = comparePair(oldImg, newImg, key, floorFor(key));
+            const triptychRel = path.join(DIFF_OUT_DIR, `${key.replace('/', '_')}.triptych.png`);
+            const heatmapRel = path.join(DIFF_OUT_DIR, `${key.replace('/', '_')}.heatmap.png`);
+            savePng(path.join(cwd, triptychRel), withBottomLabel(triptych, labelText('changed', key, specFor(splitKey(key).name)), LABEL.colors.changed));
             savePng(path.join(cwd, heatmapRel), heatmap);
             report.changed.push({ ...result, triptych: triptychRel, heatmap: heatmapRel });
         }

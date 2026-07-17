@@ -19,17 +19,21 @@ This builds `apps/minimal_test.{html,js,wasm}` and standalone test apps.
 
 ```bash
 npm install
-npm test          # wx e2e specs + the asyncify race harness
+npm test          # setup:kicad + the full merged run (same projects as CI)
 ```
 
-KiCad application tests are a separate, heavier suite (they need the
-docker-built KiCad WASM): `npm run test:kicad`. Run only the wx e2e specs with
-`npm run test:wx`.
+One merged config (`playwright.config.ts`) drives every wasm suite as
+Playwright *projects*; `npm run test:e2e` runs the CI set: `wx-chromium`,
+`kicad-firefox`, `kicad-chromium`, `asyncify-firefox`, `coroutine-firefox`.
+The KiCad specs (heavier — they need the docker-built KiCad WASM) run on BOTH
+engines; `npm run test:kicad` is the firefox-only shortcut. The React web app
+suite is separate: `npm run test:web` (see `playwright-web.config.ts`).
 
-To run specific tests:
+To run a subset, pick a project (and optionally a spec):
 ```bash
-npx playwright test menu.spec.ts        # Run menu tests only
-npx playwright test --grep "wxTimer"    # Run tests matching pattern
+npx playwright test --project=wx-chromium menu.spec.ts     # wx menu tests only
+npx playwright test --project=kicad-firefox kicad/pcbnew.spec.ts
+npx playwright test --project=wx-chromium --grep "wxTimer"
 ```
 
 ## Test Structure
@@ -49,12 +53,14 @@ tests/
 │   ├── wxwidgets.spec.ts   # Comprehensive UI interaction tests
 │   └── ...
 ├── logs/                   # Test logs (auto-generated)
-├── test-results/           # Screenshots (auto-generated)
-├── baseline-screenshots/   # Reference screenshots for comparison
+├── test-results/{chromium,firefox}/   # Screenshots per engine (auto-generated)
+├── baseline-screenshots/{chromium,firefox}/  # Committed reference screenshots per engine
+├── screenshot-manifest.json # Authoritative {name, engine} list (npm run screenshots:manifest)
 ├── apps/              # Built WASM test applications
 │   ├── minimal_test.html  # Main test app
 │   └── standalone/        # Individual component test apps
-└── playwright.config.ts   # Playwright configuration
+├── playwright.config.ts       # THE merged config (wx / kicad / asyncify / coroutine / perf projects)
+└── playwright-web.config.ts   # React web-app suite (own server stack)
 ```
 
 ## Logging
@@ -76,10 +82,15 @@ Example log format:
 
 ## Screenshots
 
-Tests capture screenshots to `test-results/`. Compare against baselines:
+Tests capture raw PNGs to `test-results/<engine>/` (engine-scoped via
+`stableShot`/`shotPath`). The offline gate compares them against the committed
+per-engine baselines:
 ```bash
-../scripts/compare-screenshots.sh
+npm run screenshots:check
 ```
+CI's Linux render is the source of truth — update baselines by promoting a CI
+run (`npm run screenshots:promote -- --run <ci-run-id>`), never by copying
+local renders. Rules and details: `TESTING.md`.
 
 ## Viewing the App Directly
 

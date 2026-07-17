@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickByTooltip, findByTooltip, waitForEditorReady } from '../e2e/utils/element-tracker';
+import { clickByTooltip, findByTooltip, waitForEditorReady, shotPath } from '../e2e/utils/element-tracker';
 import { hideCursor } from './utils/screenshot-compare';
 
 /**
@@ -142,7 +142,7 @@ test.describe('PCBnew move with "m" (#9)', () => {
         const drawnId = newItems[0].id;
         const pos0 = await getPos(page, drawnId);
 
-        const beforeMove = await page.screenshot({ path: 'test-results/pcbnew-move-00-before.png', scale: 'css' });
+        const beforeMove = await page.screenshot({ path: shotPath(page, 'pcbnew-move-00-before.png'), scale: 'css' });
 
         // Hover onto the line, select it, press m, nudge right, commit with Enter. These
         // are documented interaction dwells: selection, move-mode entry, and per-arrow
@@ -166,7 +166,7 @@ test.describe('PCBnew move with "m" (#9)', () => {
         await page.keyboard.press('Enter');
         await page.waitForTimeout(500); // eslint-disable-line -- documented interaction dwell
 
-        const afterMove = await page.screenshot({ path: 'test-results/pcbnew-move-01-after.png', scale: 'css' });
+        const afterMove = await page.screenshot({ path: shotPath(page, 'pcbnew-move-01-after.png'), scale: 'css' });
 
         const pos1 = await getPos(page, drawnId);
         const dx = pos1.x - pos0.x;

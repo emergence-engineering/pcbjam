@@ -1,4 +1,5 @@
-import { Page } from '@playwright/test';
+import { Page, Locator, expect as baseExpect } from '@playwright/test';
+import * as fs from 'fs';
 
 export interface WxElement {
   id: string;
@@ -1923,19 +1924,61 @@ export async function waitForRenderStable(page: Page, options: StableShotOptions
 }
 
 /**
- * Stabilize the render, then write a raw PNG to test-results/<name> for the offline screenshot gate
- * (tools/screenshots/compare.ts vs tests/baseline-screenshots/). Drop-in replacement for
- * `expect(page).toHaveScreenshot(name, opts)`: keeps toHaveScreenshot's render-settle but NOT its
- * inline comparison (that's the calibrated offline pipeline's job) nor its per-platform baseline
- * files. Non-asserting — a render regression is caught by `npm run screenshots:check`, not the test.
+ * Engine-scoped path for a gate screenshot: test-results/<engine>/<name>, where <engine> is the
+ * running browser family (chromium | firefox | webkit). Every engine gets its OWN namespace so a
+ * spec running on two browsers in one invocation can't have the engines overwrite each other's
+ * PNG (the old flat test-results/<name> made the surviving file whichever worker wrote last).
+ * The offline gate (tools/screenshots) compares each engine against its own committed baselines
+ * in tests/baseline-screenshots/<engine>/.
+ */
+export function shotPath(page: Page, name: string): string {
+  const engine = page.context().browser()!.browserType().name();
+  const dir = `test-results/${engine}`;
+  // page.screenshot creates parent dirs itself, but fs writers (canvas dumps) don't.
+  fs.mkdirSync(dir, { recursive: true });
+  return `${dir}/${name}`;
+}
+
+/**
+ * Stabilize the render, then write a raw PNG to test-results/<engine>/<name> for the offline
+ * screenshot gate (tools/screenshots/compare.ts vs tests/baseline-screenshots/<engine>/). Drop-in
+ * replacement for `expect(page).toHaveScreenshot(name, opts)`: keeps toHaveScreenshot's
+ * render-settle but NOT its inline comparison (that's the calibrated offline pipeline's job) nor
+ * its per-platform baseline files. Non-asserting — a render regression is caught by
+ * `npm run screenshots:check`, not the test. A name containing '/' is used verbatim (for writers
+ * outside the gate, e.g. gal-regression outputs).
  */
 export async function stableShot(page: Page, name: string, options: StableShotOptions = {}): Promise<void> {
   await waitForRenderStable(page, options);
   await page.screenshot({
-    path: name.includes('/') ? name : `test-results/${name}`,
+    path: name.includes('/') ? name : shotPath(page, name),
     fullPage: options.fullPage ?? false,
     ...SHOT_OPTS,
   });
+}
+
+/**
+ * Byte-stable screenshot of a locator (or the whole page): capture only once two consecutive
+ * screenshots are identical — the same equality a later "pixels restored" poll asserts, so
+ * before/after comparisons are self-consistent. Guards against baselining a mid-convergence
+ * frame the canvas never shows again. Pass the Page when the settled region must include
+ * wx dialogs/popups that render outside #canvas. (Shared by the presence overlay specs and
+ * the web gesture/chooser specs.)
+ */
+export async function settledShot(canvas: Locator | Page, expectImpl: typeof baseExpect = baseExpect): Promise<Buffer> {
+  let prev = await canvas.screenshot();
+  await expectImpl
+    .poll(
+      async () => {
+        const next = await canvas.screenshot();
+        const settled = next.equals(prev);
+        prev = next;
+        return settled;
+      },
+      { timeout: 30000, intervals: [250] },
+    )
+    .toBe(true);
+  return prev;
 }
 
 // ============================================================================

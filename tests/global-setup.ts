@@ -24,8 +24,12 @@ function cleanDirectory(dir: string): number {
 /**
  * Global setup for Playwright tests.
  * Cleans the logs directory (and subdirectories) before each test run.
+ * Not on CI: the workspace starts empty there, and the suites (wx, asyncify,
+ * kicad, perf) run as sequential steps of ONE job — cleaning here would wipe
+ * the previous suite's logs out of the uploaded artifact.
  */
 export default async function globalSetup() {
+  if (process.env.CI) return;
   const logsDir = path.join(__dirname, 'logs');
   const count = cleanDirectory(logsDir);
   if (count > 0) {

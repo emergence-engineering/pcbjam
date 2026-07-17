@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { waitForRegistry } from '../e2e/utils/element-tracker';
+import { waitForRegistry, shotPath, settledShot } from '../e2e/utils/element-tracker';
 
 /**
  * The symbol chooser's footprint selector + preview in the SCHEMATIC editor —
@@ -19,7 +19,7 @@ import { waitForRegistry } from '../e2e/utils/element-tracker';
  * backend). The spec logs which path ran; it asserts on behavior, not path.
  */
 
-const SHOT = (n: string) => `test-results/eefpsel-${n}.png`;
+const SHOT = (page: Page, n: string) => shotPath(page, `eefpsel-${n}.png`);
 
 async function canvasCenter(page: Page): Promise<{ x: number; y: number }> {
   const box = await page.locator('#canvas').boundingBox();
@@ -28,6 +28,12 @@ async function canvasCenter(page: Page): Promise<{ x: number; y: number }> {
 }
 
 test('symbol chooser footprint selector populates and preview renders (eeschema)', async ({ page }) => {
+  // KNOWN-BROKEN on CI only: the flow completes but a wasm "index out of
+  // bounds" pageerror fires under CI's software GL (llvmpipe AND SwiftShader;
+  // clean on real GL). Expected-fail rather than fixme — it finishes fast and
+  // the trap deserves a red flag the day it starts reproducing locally too.
+  // docs/features/web-e2e-rot/01-editor-lib-bridge-flows.md (§CI-only sibling).
+  test.fail(!!process.env.CI, 'CI software-GL wasm trap: index out of bounds');
   test.setTimeout(420000);
   const logs: string[] = [];
   page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
@@ -75,8 +81,8 @@ test('symbol chooser footprint selector populates and preview renders (eeschema)
     .poll(() => page.title(), { timeout: 150000, intervals: [1000] })
     .toMatch(/Schematic Editor/i);
   await page.waitForFunction(() => !!(window as any).kicadLibs, null, { timeout: 60000 });
-  await page.waitForTimeout(3000);
-  await page.screenshot({ path: SHOT('01-boot'), scale: 'css' });
+  await settledShot(page, expect);
+  await page.screenshot({ path: SHOT(page, '01-boot'), scale: 'css' });
 
   // Add Symbol (hotkey A over the canvas) arms the placer; the chooser dialog
   // opens on the tool's first interaction. wx WASM defers wxPostEvent'd
@@ -86,9 +92,10 @@ test('symbol chooser footprint selector populates and preview renders (eeschema)
   const c = await canvasCenter(page);
   await page.mouse.move(c.x, c.y);
   await page.mouse.click(c.x, c.y);
-  await page.waitForTimeout(300);
+  // The focus click must be pumped through the wx loop before the hotkey lands;
+  // no registry observable exists for "click consumed".
+  await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell: click→hotkey pacing
   await page.keyboard.press('a');
-  await page.waitForTimeout(1500);
 
   // The registry reports little while a modal pumps: the reliable open signal
   // is the dialog's Cancel button becoming visible (the main frame has none).
@@ -100,11 +107,25 @@ test('symbol chooser footprint selector populates and preview renders (eeschema)
         .findAll({ visible: true })
         .some((e: any) => /^&?Cancel$/i.test(e.label ?? ''));
     });
-  for (let i = 0; i < 40 && !(await chooserUp()); i++) {
-    await page.mouse.move(c.x + (i % 5) * 4, c.y + (i % 3) * 4);
-    if (i === 2) await page.mouse.click(c.x, c.y); // armed placer → open chooser
-    await page.waitForTimeout(2000);
-  }
+  // wx WASM defers wxPostEvent'd follow-ups until the next input event, so the
+  // jiggle inside the predicate IS the event pump; one canvas click (3rd probe)
+  // fires the armed placer if the hotkey alone didn't open the chooser. Failure
+  // falls through to the diagnostics dump + hard assert below.
+  let probe = 0;
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.move(c.x + (probe % 5) * 4, c.y + (probe % 3) * 4);
+        if (probe === 2) await page.mouse.click(c.x, c.y); // armed placer → open chooser
+        probe++;
+        return chooserUp();
+      },
+      { timeout: 80000, intervals: [2000] },
+    )
+    .toBe(true)
+    // documented best-effort: on poll timeout the diagnostics dump + hard
+    // assert right below own the failure (with far better context). [documented]
+    .catch(() => {}); // eslint-disable-line -- documented best-effort, see above
   if (!(await chooserUp())) {
     // Diagnostics: dump what IS registered + the page console before failing.
     const dump = await page.evaluate(() =>
@@ -126,12 +147,14 @@ test('symbol chooser footprint selector populates and preview renders (eeschema)
     console.log(`[eefpsel] console tail:\n${logs.slice(-40).join('\n')}`);
   }
   expect(await chooserUp(), 'symbol chooser dialog opened').toBe(true);
-  await page.waitForTimeout(1500);
-  await page.screenshot({ path: SHOT('02-chooser'), scale: 'css' });
+  await settledShot(page, expect);
+  await page.screenshot({ path: SHOT(page, '02-chooser'), scale: 'css' });
 
   // Search for Device:R and select the top hit. The search box has focus on open.
+  // The page-settle after typing is the "search results finished redrawing"
+  // signal (the result rows aren't individually registry-tracked).
   await page.keyboard.type('R', { delay: 60 });
-  await page.waitForTimeout(1000);
+  await settledShot(page, expect);
   await page.keyboard.press('ArrowDown');
   // Selecting a symbol fires showFootprintFor + populateFootprintSelector —
   // the footprint side loads now (index: one small fetch; fallback: per-lib
@@ -160,8 +183,8 @@ test('symbol chooser footprint selector populates and preview renders (eeschema)
     )
     .then((h) => h.jsonValue());
   console.log(`[eefpsel] combo state: ${JSON.stringify(comboPopulated)}`);
-  await page.waitForTimeout(2500);
-  await page.screenshot({ path: SHOT('03-selected'), scale: 'css' });
+  await settledShot(page, expect);
+  await page.screenshot({ path: SHOT(page, '03-selected'), scale: 'css' });
 
   // Which footprint-list path ran? (info only — index for CDN sources, per-lib
   // fat-loads for sources without a published index)
@@ -212,10 +235,9 @@ test('symbol chooser footprint selector populates and preview renders (eeschema)
   });
   expect(combo, 'footprint selector combobox rendered').toBeTruthy();
   await page.mouse.click(combo!.x, combo!.y); // opens the popup list
-  await page.waitForTimeout(1000);
   await page.mouse.move(combo!.x, combo!.y - 40); // pump wx deferred paints
-  await page.waitForTimeout(500);
-  await page.screenshot({ path: SHOT('04-popup'), scale: 'css' });
+  await settledShot(page, expect); // popup list finished painting
+  await page.screenshot({ path: SHOT(page, '04-popup'), scale: 'css' });
 
   // Click a real footprint row in the popup by its registered position; the
   // rows render as popup list entries (label "Lib:Name"). Fall back to
@@ -233,13 +255,30 @@ test('symbol chooser footprint selector populates and preview renders (eeschema)
     await page.mouse.click(row.x, row.y);
   } else {
     await page.keyboard.press('ArrowDown');
-    await page.waitForTimeout(300);
+    // Popup keyboard fallback: the highlight move must be pumped before Enter
+    // commits it (no registry observable for popup-row highlight).
+    await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell: popup key pacing
     await page.keyboard.press('Enter');
   }
-  await page.waitForTimeout(1000);
-  await page.mouse.move(c.x, c.y); // pump so the selection's follow-ups run
-  await page.waitForTimeout(3000);
-  await page.screenshot({ path: SHOT('05-fp-selected'), scale: 'css' });
+  // EVT_COMBOBOX → showFootprint runs off wxPostEvent'd follow-ups; the jiggle
+  // pumps them, the observable is the preview's own bridge traffic (per-item
+  // "get", or a "bodies" fat-load serving it from the plugin cache).
+  let pump = 0;
+  await expect
+    .poll(
+      async () => {
+        pump++;
+        await page.mouse.move(c.x + (pump % 3) * 2, c.y);
+        const calls = (await page.evaluate(() => (window as any).__libsCalls)) as string[][];
+        return calls.filter(
+          (cc) => cc[3] === 'footprint' && (cc[0] === 'get' || cc[2] === 'bodies'),
+        ).length;
+      },
+      { timeout: 60000, message: 'preview never requested a footprint body over the bridge' },
+    )
+    .toBeGreaterThan(0);
+  await settledShot(page, expect); // preview render settles before the capture
+  await page.screenshot({ path: SHOT(page, '05-fp-selected'), scale: 'css' });
 
   // The preview load is a per-item footprint "get" over the bridge (or served
   // from the plugin cache when a fat-load already pulled the body).

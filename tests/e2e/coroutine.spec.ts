@@ -1,4 +1,5 @@
 import { test, expect, tryLoadApp } from './utils/fixtures';
+import { shotPath } from './utils/element-tracker';
 
 const EXPECTED_CASES = [
   'first_entry_runs_once',
@@ -36,7 +37,7 @@ test.describe('Coroutine Harness Tests', () => {
       expect(caseLogs.some((log) => log.includes(`[COROUTINE_TEST] CASE ${caseName}`))).toBe(true);
     }
 
-    await page.screenshot({ path: 'test-results/coroutine-01-loaded.png', fullPage: true });
+    await page.screenshot({ path: shotPath(page, 'coroutine-01-loaded.png'), fullPage: true });
 
     expect(loaded, 'Coroutine harness should load').toBe(true);
   });
@@ -69,6 +70,6 @@ test.describe('Coroutine Harness Tests', () => {
     expect(passLogs).toHaveLength(EXPECTED_CASES.length);
     expect(testLogger.errors.filter((error) => !error.includes('favicon'))).toHaveLength(0);
 
-    await page.screenshot({ path: 'test-results/coroutine-02-summary.png', fullPage: true });
+    await page.screenshot({ path: shotPath(page, 'coroutine-02-summary.png'), fullPage: true });
   });
 });

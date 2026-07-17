@@ -8,13 +8,44 @@
  * Paths are relative to the `tests/` directory (that is the working directory
  * the npm scripts and CI steps run from).
  */
+import * as nodeFs from 'fs';
+import * as nodePath from 'path';
 
 /**
- * Committed baseline directory. Single dir on purpose: `e2e/baseline-screenshots/`
- * used to also hold a few names (grid-tab-final, wxgrid-*) that ALSO live here with
- * different bytes — so they got silently shadowed. Consolidated to one dir.
+ * Committed baseline root. One PER-ENGINE subdirectory per browser family:
+ * `baseline-screenshots/{chromium,firefox}/<name>.png`. Renders mirror the
+ * layout (`test-results/<engine>/<name>.png`, written by stableShot/shotPath),
+ * so each engine is gated against its OWN baselines — the old flat namespace
+ * let two engines running the same spec overwrite each other's PNG, and the
+ * surviving file was whichever parallel worker wrote last.
  */
-export const BASELINE_DIRS = ['baseline-screenshots'] as const;
+export const BASELINE_ROOT = 'baseline-screenshots';
+
+/** Engine subdirectories the tooling recognizes (a browser family per dir). */
+export const ENGINES = ['chromium', 'firefox', 'webkit'] as const;
+
+/**
+ * The canonical screenshot key is `<engine>/<name>.png` — the path of both the
+ * render (under test-results/) and the baseline (under baseline-screenshots/)
+ * relative to their root.
+ */
+export function splitKey(key: string): { engine: string; name: string } {
+    const i = key.indexOf('/');
+    return i < 0 ? { engine: 'unknown', name: key } : { engine: key.slice(0, i), name: key.slice(i + 1) };
+}
+
+/** Engine-qualified keys (`<engine>/<name>.png`) found under a root's engine subdirs. */
+export function listEngineKeys(base: string): string[] {
+    const keys: string[] = [];
+    for (const engine of ENGINES) {
+        const dir = nodePath.join(base, engine);
+        if (!nodeFs.existsSync(dir)) continue;
+        for (const f of nodeFs.readdirSync(dir)) {
+            if (f.toLowerCase().endsWith('.png')) keys.push(`${engine}/${f}`);
+        }
+    }
+    return keys;
+}
 
 /** Where Playwright writes the current run's screenshots (gitignored). */
 export const RESULTS_DIR = 'test-results';
@@ -67,9 +98,10 @@ export const TRIPTYCH = {
  */
 export type EngineFloor = { changedRatio: number; meanChannelGuard: number };
 
+// Keyed by engine dir name (CI renderers: firefox = Mesa llvmpipe, chromium = SwiftShader).
 export const FLOORS: Record<string, EngineFloor> = {
-    'firefox-llvmpipe': { changedRatio: 0.005, meanChannelGuard: 2.0 },
-    'chromium-swiftshader': { changedRatio: 0.005, meanChannelGuard: 2.0 },
+    firefox: { changedRatio: 0.005, meanChannelGuard: 2.0 },
+    chromium: { changedRatio: 0.005, meanChannelGuard: 2.0 },
     default: { changedRatio: 0.005, meanChannelGuard: 2.0 },
 };
 
@@ -88,9 +120,10 @@ export const IGNORE_REGIONS: Record<string, Array<{ x: number; y: number; width:
  */
 export const IGNORE_SCREENSHOTS = new Set<string>(['retinascale-01-loaded.png']);
 
-/** True if a screenshot is excluded from comparison. */
-export function isIgnored(name: string): boolean {
-    return IGNORE_SCREENSHOTS.has(name);
+/** True if a screenshot is excluded from comparison. Matches the bare name, so an
+ *  ignored screenshot is ignored in every engine. */
+export function isIgnored(key: string): boolean {
+    return IGNORE_SCREENSHOTS.has(splitKey(key).name);
 }
 
 /** Bottom caption strip baked onto each posted composite (status + name + spec). */
@@ -109,17 +142,21 @@ export const LABEL = {
 
 export type LabelStatus = 'added' | 'removed' | 'changed' | 'unchanged';
 
-/** Caption text: `CHANGED  name.png · kicad/pcbnew.spec.ts` (spec omitted if unknown). */
-export function labelText(status: LabelStatus, name: string, spec: string | null): string {
+/** Caption text: `CHANGED [chromium] name.png · kicad/pcbnew.spec.ts` (spec omitted if
+ *  unknown). The engine is PREPENDED — the auto-fit strip truncates the tail, so a
+ *  trailing tag could be cut off on long names. Accepts an engine-qualified key. */
+export function labelText(status: LabelStatus, key: string, spec: string | null): string {
     const s = status.toUpperCase();
-    return spec ? `${s}  ${name} · ${spec}` : `${s}  ${name}`;
+    const { engine, name } = splitKey(key);
+    const head = `${s} [${engine}]  ${name}`;
+    return spec ? `${head} · ${spec}` : head;
 }
 
 export type ManifestEntry = { name: string; engine: string };
 export type Manifest = { screenshots: ManifestEntry[] };
 
-/** Resolve the verdict floor for a screenshot via the manifest's engine tag. */
-export function floorFor(name: string, manifest?: Manifest): EngineFloor {
-    const engine = manifest?.screenshots.find((e) => e.name === name)?.engine;
-    return (engine && FLOORS[engine]) || FLOORS.default;
+/** Verdict floor for an engine-qualified key — the engine IS the key prefix now,
+ *  no manifest lookup needed. */
+export function floorFor(key: string): EngineFloor {
+    return FLOORS[splitKey(key).engine] || FLOORS.default;
 }

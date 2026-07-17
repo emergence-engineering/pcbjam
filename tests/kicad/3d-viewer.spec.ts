@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { shotPath } from '../e2e/utils/element-tracker';
 import { waitForPcbnew } from './utils/pcbnew-ready';
 import { DEMO, loadBoard, countGlCanvases, logThreeDDiag, openThreeDViewer, waitForThreeDRender }
     from './utils/threed-viewer';
@@ -29,7 +30,7 @@ test.describe('3D viewer from pcbnew', () => {
         await waitForPcbnew(page);
 
         await loadBoard(page, testLogger);
-        await page.screenshot({ path: `test-results/3d-viewer-00-board-loaded.png`, scale: 'css' });
+        await page.screenshot({ path: shotPath(page, `3d-viewer-00-board-loaded.png`), scale: 'css' });
 
         const glBefore = await countGlCanvases(page);
         console.log(`[TEST] glcanvas count before opening 3D viewer: ${glBefore}`);
@@ -42,7 +43,7 @@ test.describe('3D viewer from pcbnew', () => {
         // waitForThreeDRender).
         await waitForThreeDRender(page);
 
-        await page.screenshot({ path: `test-results/3d-viewer-${DEMO.name}.png`, scale: 'css' });
+        await page.screenshot({ path: shotPath(page, `3d-viewer-${DEMO.name}.png`), scale: 'css' });
 
         // Read the 3D viewer canvas (the newest glcanvas) directly from its backing
         // store: copy it onto a 2D canvas with drawImage and sample pixels. This is
@@ -78,7 +79,7 @@ test.describe('3D viewer from pcbnew', () => {
         console.log(`[TEST] 3D canvas ${render.id} ${render.w}x${render.h}, distinct colours: ${render.distinctColors}`);
 
         const b64 = render.dataUrl.replace(/^data:image\/png;base64,/, '');
-        require('fs').writeFileSync(`test-results/3d-viewer-${DEMO.name}-render.png`,
+        require('fs').writeFileSync(shotPath(page, `3d-viewer-${DEMO.name}-render.png`),
                                     Buffer.from(b64, 'base64'));
 
         // A blank/uniform canvas yields ~1 colour; the rendered board has many.
@@ -234,7 +235,7 @@ test.describe('3D viewer from pcbnew', () => {
             return all.find((id) => !before.includes(id)) ?? all[all.length - 1] ?? null;
         }, winsBefore);
         expect(winId, 'the 3D viewer should open a new top-level window').toBeTruthy();
-        await page.screenshot({ path: 'test-results/3d-viewer-titlebar.png', scale: 'css' });
+        await page.screenshot({ path: shotPath(page, '3d-viewer-titlebar.png'), scale: 'css' });
 
         // It must have a real DOM title bar (the frames-only fix covers the viewer).
         const bar = page.locator(`#${winId} .window-titlebar`);

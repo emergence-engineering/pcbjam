@@ -21,7 +21,7 @@
 import { test, expect, waitForWxApp, MAIN_CANVAS } from './utils/fixtures';
 import {
   findRenderedByType,
-  findAuiPaneContent, stableShot } from './utils/element-tracker';
+  findAuiPaneContent, stableShot, shotPath } from './utils/element-tracker';
 import type { Page } from '@playwright/test';
 
 const APP = '/standalone/aui/aui_test.html';
@@ -242,11 +242,11 @@ test.describe('wxAuiManager dock-sash resize UX (pcbjam#20)', () => {
     // intermediate frame while the button is still held.
     await page.mouse.move(sash.x - 90, sash.y, { steps: 10 });
     await page.waitForTimeout(70); // eslint-disable-line -- documented interaction dwell: let the mid-drag frame paint before capturing it for the pixel-diff
-    const midShot = await page.screenshot({ path: 'test-results/aui-resize-03-mid-drag.png', scale: 'css' });
+    const midShot = await page.screenshot({ path: shotPath(page, 'aui-resize-03-mid-drag.png'), scale: 'css' });
 
     await page.mouse.up();
     await page.waitForTimeout(200); // eslint-disable-line -- documented interaction dwell: let the release settle before capturing the after frame for the pixel-diff
-    const afterShot = await page.screenshot({ path: 'test-results/aui-resize-04-after.png', scale: 'css' });
+    const afterShot = await page.screenshot({ path: shotPath(page, 'aui-resize-04-after.png'), scale: 'css' });
 
     const midFrac = await stippleFraction(page, midShot, region);
     const afterFrac = await stippleFraction(page, afterShot, region);

@@ -1,4 +1,5 @@
 import { test, expect, tryLoadApp } from './utils/fixtures';
+import { shotPath } from './utils/element-tracker';
 
 const EXPECTED_CASES = [
   'baseline_modal_alone',
@@ -36,7 +37,7 @@ test.describe('Nested Coroutine+Modal Tests', () => {
       ).toBe(true);
     }
 
-    await page.screenshot({ path: 'test-results/coroutine-nested-01-loaded.png', fullPage: true });
+    await page.screenshot({ path: shotPath(page, 'coroutine-nested-01-loaded.png'), fullPage: true });
 
     expect(loaded, 'Nested harness should load').toBe(true);
   });
@@ -81,7 +82,7 @@ test.describe('Nested Coroutine+Modal Tests', () => {
       'no unexpected page errors'
     ).toHaveLength(0);
 
-    await page.screenshot({ path: 'test-results/coroutine-nested-02-summary.png', fullPage: true });
+    await page.screenshot({ path: shotPath(page, 'coroutine-nested-02-summary.png'), fullPage: true });
   });
 
   test('per-scenario status (diagnostic)', async ({ page, testLogger }) => {

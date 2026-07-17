@@ -372,6 +372,21 @@ jobs:
         working-directory: tests
         run: npm ci
 
+      # Cheap hygiene gates (no build needed): the determinism lint keeps the
+      # banned flake patterns out of the specs, the manifest check keeps
+      # screenshot-manifest.json in lockstep with the committed baselines
+      # (a stale manifest silently disables removed-screenshot detection), and
+      # the CI-coverage lint proves every spec file on disk is reachable from
+      # the npm scripts THIS workflow invokes (a spec/project that CI never
+      # runs is how the web suite once rotted unnoticed).
+      - name: Lint test determinism + screenshot manifest + CI coverage
+        if: inputs.run_tests
+        working-directory: tests
+        run: |
+          npm run lint:determinism
+          npm run screenshots:manifest -- --check
+          npm run lint:ci-coverage
+
       - name: Install web workspace deps (collab bundle)
         if: inputs.run_tests
         working-directory: web
@@ -413,37 +428,36 @@ jobs:
         working-directory: tests
         run: npm run setup:kicad
 
-      # The e2e suites run as separate steps so one suite's failure never skips
-      # the others — every suite still renders its screenshots, so the screenshot
-      # report below can show exactly what broke/went missing. A failing step
-      # still fails the JOB (no continue-on-error); the later steps run anyway
-      # via `!cancelled()` + "previous stage wasn't skipped" guards
-      # (steps.wx_e2e.outcome != 'skipped' ⇔ the build reached the tests — on a
-      # build failure everything below stays skipped, as before).
-      - name: wxWidgets e2e (npm run test:wx)
-        id: wx_e2e
+      # ONE merged Playwright invocation for every apps-server suite (wx,
+      # kicad×2 engines, asyncify, coroutine — see playwright.config.ts). One
+      # invocation = one start-of-run outputDir wipe BEFORE anything rendered,
+      # so the engine-scoped screenshots in test-results/{chromium,firefox}/
+      # accumulate naturally for the offline compare. A failure fails the JOB
+      # (no continue-on-error); the report below still runs and shows exactly
+      # what broke or went missing. xvfb: the Firefox projects run headed on CI
+      # (GPU-less VMs have no headless GL).
+      - name: e2e (npm run test:e2e — all suites, both engines)
+        id: e2e
         if: inputs.run_tests
         working-directory: tests
-        run: npm run test:wx
+        run: xvfb-run -a npm run test:e2e
 
-      - name: Asyncify e2e (npm run test:asyncify:firefox)
-        id: asyncify_e2e
-        if: inputs.run_tests && !cancelled() && steps.wx_e2e.outcome != 'skipped'
+      # The React web-app suite (web/) against the pnpm dev stack (frontend
+      # :3048 + backend :3060, cold-started by Playwright's webServer on CI).
+      # Runs even if the main e2e failed (`!cancelled()` + not-skipped guard) so
+      # its screenshots still reach the report.
+      - name: web e2e (npm run test:web:ci)
+        id: web_e2e
+        if: inputs.run_tests && !cancelled() && steps.e2e.outcome != 'skipped'
         working-directory: tests
-        run: npm run test:asyncify:firefox
-
-      - name: KiCad e2e (npm run test:kicad:ci)
-        id: kicad_e2e
-        if: inputs.run_tests && !cancelled() && steps.wx_e2e.outcome != 'skipped'
-        working-directory: tests
-        run: xvfb-run -a npm run test:kicad:ci
+        run: xvfb-run -a npm run test:web:ci
 
       # Runtime-perf E2E (eeschema + pcbnew): measures the current build's
       # load / open+render / FPS and writes tests/test-results/perf-*.json.
       # Track-only — never gates the build (continue-on-error). CI is
       # headless/SwiftShader so FPS is CPU-bound + noisy; openMs is the stable number.
       - name: KiCad runtime perf (track-only, non-gating)
-        if: inputs.run_tests && !cancelled() && steps.kicad_e2e.outcome != 'skipped'
+        if: inputs.run_tests && !cancelled() && steps.e2e.outcome != 'skipped'
         continue-on-error: true
         working-directory: tests
         run: xvfb-run -a npm run test:perf
@@ -458,7 +472,7 @@ jobs:
       # baseline-webgl/ and flip this step gating. 3d:review writes the full
       # 47-pair triptych gallery for the artifact upload below.
       - name: 3D renderer parity (report-only)
-        if: inputs.run_tests && !cancelled() && steps.wx_e2e.outcome != 'skipped'
+        if: inputs.run_tests && !cancelled() && steps.e2e.outcome != 'skipped'
         continue-on-error: true
         working-directory: tests
         run: |
@@ -479,7 +493,7 @@ jobs:
       # the already-produced test-results (screenshots + perf-*.json).
       - name: Screenshot report + perf
         id: report
-        if: inputs.run_tests && !cancelled() && steps.kicad_e2e.outcome != 'skipped'
+        if: inputs.run_tests && !cancelled() && steps.e2e.outcome != 'skipped'
         continue-on-error: true
         working-directory: tests
         env:
@@ -490,9 +504,8 @@ jobs:
         # without --fail-on-change; continue-on-error also shields transient Discord hiccups.
         run: |
           E2E=pass
-          { [ "${{ steps.wx_e2e.outcome }}" = "success" ] \
-            && [ "${{ steps.asyncify_e2e.outcome }}" = "success" ] \
-            && [ "${{ steps.kicad_e2e.outcome }}" = "success" ]; } || E2E=fail
+          { [ "${{ steps.e2e.outcome }}" = "success" ] \
+            && [ "${{ steps.web_e2e.outcome }}" = "success" ]; } || E2E=fail
           npm run screenshots:check
           npm run screenshots:report -- --e2e "$E2E"
 

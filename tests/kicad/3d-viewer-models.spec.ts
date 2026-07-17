@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickMenuBarItem, clickMenuItem, clickMenuItemByText, waitForEditorReady, waitUntil } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItem, clickMenuItemByText, waitForEditorReady, waitForRenderedByLabel, waitUntil, shotPath } from '../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './utils/fs-inject';
 import { waitForBoardLoaded } from './utils/board-ready';
 import { logThreeDDiag, waitForThreeDRender } from './utils/threed-viewer';
@@ -116,6 +116,9 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
 
     expect(await clickMenuBarItem(page, 'File'), 'File menu should be findable').toBe(true);
     await waitForMenuItems(page);
+    // Items register progressively while the popup paints — wait for the one
+    // we click (clickMenuItem is single-shot; the >3-items gate isn't enough).
+    await waitForRenderedByLabel(page, 'Open...', { elementType: 'menuitem' });
     expect(await clickMenuItem(page, 'Open...'), 'Open… menu item should be findable').toBe(true);
 
     await page.waitForFunction(() => {
@@ -263,7 +266,7 @@ test.describe('3D viewer component models', () => {
         // reading pixels — see waitForThreeDRender for the all-black-first-frame flake.
         await waitForThreeDRender(page);
         await logThreeDDiag(page, 'models: before screenshot');
-        await page.screenshot({ path: `test-results/3d-viewer-models-${DEMO.name}.png`, scale: 'css' });
+        await page.screenshot({ path: shotPath(page, `3d-viewer-models-${DEMO.name}.png`), scale: 'css' });
 
         // --- render assertion --------------------------------------------------
         const render = await page.evaluate(() => {
@@ -290,7 +293,7 @@ test.describe('3D viewer component models', () => {
         });
         console.log(`[TEST] 3D canvas ${render.id} ${render.w}x${render.h}, distinct colours: ${render.distinctColors}`);
         const b64 = render.dataUrl.replace(/^data:image\/png;base64,/, '');
-        fs.writeFileSync(`test-results/3d-viewer-models-${DEMO.name}-render.png`,
+        fs.writeFileSync(shotPath(page, `3d-viewer-models-${DEMO.name}-render.png`),
                          Buffer.from(b64, 'base64'));
         expect(render.distinctColors,
             'the 3D viewer canvas should render the board + models, not a blank fill')

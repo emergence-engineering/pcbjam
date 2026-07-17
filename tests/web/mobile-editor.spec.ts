@@ -1,9 +1,14 @@
 import { test, expect, devices, type Page, type Browser } from '@playwright/test';
 import { openOverlayMenu } from './overlay-menu';
+import { shotPath, settledShot } from '../e2e/utils/element-tracker';
+
+// One shared page across the checks (beforeAll boots pcbnew ONCE — each boot
+// costs minutes). Serial group: fullyParallel would re-boot per test.
+test.describe.configure({ mode: 'serial' });
 
 /**
  * Mobile canvas-only mode e2e (features/mobile) — runs under the
- * `mobile-chromium` project (Pixel 7 emulation, system Chrome).
+ * `web-mobile` project (Pixel 7 emulation on the bundled Chromium).
  *
  * Boots pcbnew ONCE on the demo board with `?mobile=1` (the wasm runtime is
  * process-global and each boot costs minutes, so the four checks share one
@@ -83,7 +88,8 @@ async function fingerDrag(
     const x = from.x + ((to.x - from.x) * i) / steps;
     const y = from.y + ((to.y - from.y) * i) / steps;
     await touch(pg, 'touchmove', [{ id: 1, x, y }]);
-    await pg.waitForTimeout(30);
+    // The pacing IS the input: it gives the gesture a finger-plausible velocity.
+    await pg.waitForTimeout(30); // eslint-disable-line -- documented interaction dwell: gesture pacing
   }
   await touch(pg, 'touchend', [], [{ id: 1, x: to.x, y: to.y }]);
 }
@@ -104,7 +110,8 @@ async function pinch(
   for (let i = 1; i <= steps; i++) {
     const s = spreadFrom + ((spreadTo - spreadFrom) * i) / steps;
     await touch(pg, 'touchmove', at(s));
-    await pg.waitForTimeout(30);
+    // The pacing IS the input: it gives the gesture a finger-plausible velocity.
+    await pg.waitForTimeout(30); // eslint-disable-line -- documented interaction dwell: gesture pacing
   }
   await touch(pg, 'touchend', [], at(spreadTo));
 }
@@ -176,7 +183,14 @@ async function diffRatio(
 }
 
 const shot = (name: string) =>
-  page.screenshot({ path: `test-results/mobile-${name}.png`, scale: 'css' });
+  page.screenshot({ path: shotPath(page, `mobile-${name}.png`), scale: 'css' });
+
+/** Settle the render (two consecutive identical canvas screenshots), then capture
+ *  the named gate shot — the deterministic replacement for sleep-then-shoot. */
+const settledCapture = async (name: string): Promise<Buffer> => {
+  await settledShot(page.locator('#canvas'), expect);
+  return shot(name);
+};
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   test.setTimeout(420_000); // cold load: 136 MB wasm download + compile
@@ -193,8 +207,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // in WasmTool) must be GONE — the gesture tests diff screenshots, and an
   // overlay screenshot diffs to zero (learned the hard way on a cold load).
   await expect(page.locator('div.inset-0.z-30')).toHaveCount(0, { timeout: 180000 });
-  // let the first paint + fit-to-view and the chrome-hide poll settle
-  await page.waitForTimeout(4000);
+  // First paint + fit-to-view + the chrome-hide poll: settled when two
+  // consecutive canvas screenshots are byte-identical.
+  await settledShot(page.locator('#canvas'), expect);
 });
 
 test.afterAll(async () => {
@@ -212,9 +227,19 @@ test('tap contract: a touch tap synthesizes a LEFT click, no phantom middle-drag
 
   const p = { id: 1, x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 };
   await touch(page, 'touchstart', [p]);
-  await page.waitForTimeout(60);
+  // A tap's physical duration — instantaneous taps can be filtered as noise.
+  await page.waitForTimeout(60); // eslint-disable-line -- documented interaction dwell: tap duration
   await touch(page, 'touchend', [], [p]);
-  await page.waitForTimeout(300);
+  // The synthesized click is the observable: wait for the mouseup to land in the log.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => (window as unknown as { __mouseLog: [string, number][] }).__mouseLog.length,
+        ),
+      { timeout: 10000, message: 'tap never synthesized any mouse events' },
+    )
+    .toBeGreaterThanOrEqual(2);
 
   const log = await page.evaluate(
     () => (window as unknown as { __mouseLog: [string, number][] }).__mouseLog,
@@ -237,14 +262,12 @@ test('pinch: two-finger pinch-out zooms in, pinch-in restores', async () => {
   const box = await getGlBox(page);
   const centre = { x: box.x + box.width * 0.5, y: box.y + box.height * 0.45 };
 
-  const base = await shot('pinch-00-base');
+  const base = await settledCapture('pinch-00-base');
   await pinch(page, centre, 40, 140); // pinch OUT = zoom in
-  await page.waitForTimeout(500);
-  const zoomed = await shot('pinch-01-zoomed');
+  const zoomed = await settledCapture('pinch-01-zoomed');
 
   await pinch(page, centre, 140, 40); // pinch IN at the same centre = zoom back out
-  await page.waitForTimeout(500);
-  const restored = await shot('pinch-02-restored');
+  const restored = await settledCapture('pinch-02-restored');
 
   const dIn = await diffRatio(page, base, zoomed, box);
   const dBack = await diffRatio(page, base, restored, box);
@@ -264,14 +287,12 @@ test('pan: one-finger drag translates the view (not a rubber-band select)', asyn
   const from = { x: box.x + box.width * 0.15, y: box.y + box.height * 0.88 };
   const to = { x: box.x + box.width * 0.55, y: box.y + box.height * 0.7 };
 
-  const base = await shot('pan-00-base');
+  const base = await settledCapture('pan-00-base');
   await fingerDrag(page, from, to);
-  await page.waitForTimeout(500);
-  const panned = await shot('pan-01-panned');
+  const panned = await settledCapture('pan-01-panned');
 
   await fingerDrag(page, to, from); // drag back — translation is invertible
-  await page.waitForTimeout(500);
-  const restored = await shot('pan-02-restored');
+  const restored = await settledCapture('pan-02-restored');
 
   const dPan = await diffRatio(page, base, panned, box);
   const dBack = await diffRatio(page, base, restored, box);

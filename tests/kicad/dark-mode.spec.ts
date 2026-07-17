@@ -1,6 +1,6 @@
 import { test, expect } from './fixtures';
 import { compareToReference, hideCursor, PCBNEW_REFERENCE, PCBNEW_HEADER_REGION } from './utils/screenshot-compare';
-import { waitForEditorReady } from '../e2e/utils/element-tracker';
+import { waitForEditorReady, shotPath } from '../e2e/utils/element-tracker';
 
 /**
  * Dark-mode regression test.
@@ -39,7 +39,7 @@ test.describe('PCBnew dark-mode browser', () => {
         await hideCursor(page);
 
         const cssScreenshot = await page.screenshot({
-            path: 'test-results/pcbnew-dark-mode-loaded.png',
+            path: shotPath(page, 'pcbnew-dark-mode-loaded.png'),
             scale: 'css'
         });
 

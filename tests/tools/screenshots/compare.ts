@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PNG } from 'pngjs';
 import {
-    BASELINE_DIRS,
+    BASELINE_ROOT,
     RESULTS_DIR,
     DIFF_OUT_DIR,
     MANIFEST_PATH,
@@ -25,6 +25,8 @@ import {
     floorFor,
     isIgnored,
     labelText,
+    listEngineKeys,
+    splitKey,
     LABEL,
 } from './config';
 import { diffImages, cluster, drawBoxes, composite, loadPng, savePng, withBottomLabel, type Box } from './image-ops';
@@ -90,24 +92,11 @@ export type Report = {
 
 const DRIFT_BULK = 20;
 
-function listPngs(dir: string): string[] {
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.png'));
-}
-
-/** basename → absolute baseline path (first BASELINE_DIRS entry wins; collisions warned). */
+/** key (`<engine>/<name>`) → absolute baseline path. */
 function baselineIndex(root: string): Map<string, string> {
+    const abs = path.join(root, BASELINE_ROOT);
     const index = new Map<string, string>();
-    for (const dir of BASELINE_DIRS) {
-        const abs = path.join(root, dir);
-        for (const name of listPngs(abs)) {
-            if (index.has(name)) {
-                console.warn(`[compare] duplicate baseline name ${name} (${dir} shadowed by earlier dir)`);
-                continue;
-            }
-            index.set(name, path.join(abs, name));
-        }
-    }
+    for (const key of listEngineKeys(abs)) index.set(key, path.join(abs, key));
     return index;
 }
 
@@ -122,18 +111,23 @@ function loadManifest(root: string): Manifest | undefined {
     }
 }
 
-/** Full gate run: classify baselines vs the current run's screenshots. */
+/** Flat, collision-free artifact filename for an engine-qualified key. */
+function artifactName(key: string, suffix: string): string {
+    return `${key.replace('/', '_')}.${suffix}.png`;
+}
+
+/** Full gate run: classify baselines vs the current run's screenshots, per engine. */
 export function classify(root: string, sha: string | null): Report {
     const baselines = baselineIndex(root);
     const resultsDir = path.join(root, RESULTS_DIR);
-    const actuals = new Set(listPngs(resultsDir));
+    const actuals = new Set(listEngineKeys(resultsDir));
     // Drop excluded screenshots from both sides so they're never compared or counted.
-    for (const name of [...baselines.keys()]) if (isIgnored(name)) baselines.delete(name);
-    for (const name of [...actuals]) if (isIgnored(name)) actuals.delete(name);
+    for (const key of [...baselines.keys()]) if (isIgnored(key)) baselines.delete(key);
+    for (const key of [...actuals]) if (isIgnored(key)) actuals.delete(key);
     const manifest = loadManifest(root);
     const outDir = path.join(root, DIFF_OUT_DIR);
     fs.mkdirSync(outDir, { recursive: true });
-    const { specFor } = buildSpecResolver(root); // name → spec, for the caption strip
+    const { specFor } = buildSpecResolver(root); // bare name → spec, for the caption strip
 
     const report: Report = {
         generatedFor: sha,
@@ -145,45 +139,46 @@ export function classify(root: string, sha: string | null): Report {
     };
 
     // Changed / unchanged / removed: iterate the committed baselines.
-    for (const [name, baselinePath] of baselines) {
-        if (!actuals.has(name)) {
+    for (const [key, baselinePath] of baselines) {
+        const { engine, name } = splitKey(key);
+        if (!actuals.has(key)) {
             // Missing output. Only call it REMOVED when the manifest expects it — otherwise
             // a flaky/OOM'd/skipped spec that simply didn't write a PNG would masquerade as
             // an intentional removal. (The stronger "did the spec actually run" cross-check
             // against the Playwright JSON report lands with the manifest work.)
-            if (manifest?.screenshots.some((e) => e.name === name)) {
+            if (manifest?.screenshots.some((e) => e.name === name && e.engine === engine)) {
                 // Removed now gets a captioned image (the old baseline) so it's visible in Discord.
-                const imageRel = path.join(DIFF_OUT_DIR, `${name}.removed.png`);
-                const labeled = withBottomLabel(loadPng(baselinePath), labelText('removed', name, specFor(name)), LABEL.colors.removed);
+                const imageRel = path.join(DIFF_OUT_DIR, artifactName(key, 'removed'));
+                const labeled = withBottomLabel(loadPng(baselinePath), labelText('removed', key, specFor(name)), LABEL.colors.removed);
                 savePng(path.join(root, imageRel), labeled);
-                report.removed.push({ name, image: imageRel });
+                report.removed.push({ name: key, image: imageRel });
             }
             continue;
         }
         const { result, heatmap, triptych } = comparePair(
             loadPng(baselinePath),
-            loadPng(path.join(resultsDir, name)),
-            name,
-            floorFor(name, manifest)
+            loadPng(path.join(resultsDir, key)),
+            key,
+            floorFor(key)
         );
         if (result.verdict === 'unchanged') {
             report.unchangedCount++;
             continue;
         }
-        const triptychRel = path.join(DIFF_OUT_DIR, `${name}.triptych.png`);
-        const heatmapRel = path.join(DIFF_OUT_DIR, `${name}.heatmap.png`);
-        savePng(path.join(root, triptychRel), withBottomLabel(triptych, labelText('changed', name, specFor(name)), LABEL.colors.changed));
+        const triptychRel = path.join(DIFF_OUT_DIR, artifactName(key, 'triptych'));
+        const heatmapRel = path.join(DIFF_OUT_DIR, artifactName(key, 'heatmap'));
+        savePng(path.join(root, triptychRel), withBottomLabel(triptych, labelText('changed', key, specFor(name)), LABEL.colors.changed));
         savePng(path.join(root, heatmapRel), heatmap);
         report.changed.push({ ...result, triptych: triptychRel, heatmap: heatmapRel });
     }
 
     // Added: an actual with no committed baseline.
-    for (const name of actuals) {
-        if (baselines.has(name)) continue;
-        const imageRel = path.join(DIFF_OUT_DIR, `${name}.added.png`);
-        const labeled = withBottomLabel(loadPng(path.join(resultsDir, name)), labelText('added', name, specFor(name)), LABEL.colors.added);
+    for (const key of actuals) {
+        if (baselines.has(key)) continue;
+        const imageRel = path.join(DIFF_OUT_DIR, artifactName(key, 'added'));
+        const labeled = withBottomLabel(loadPng(path.join(resultsDir, key)), labelText('added', key, specFor(splitKey(key).name)), LABEL.colors.added);
         savePng(path.join(root, imageRel), labeled);
-        report.added.push({ name, image: imageRel });
+        report.added.push({ name: key, image: imageRel });
     }
 
     const driftLike = report.changed.filter((c) => c.driftHint === 'drift-like').length;

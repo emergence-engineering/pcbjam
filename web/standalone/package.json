@@ -9,6 +9,7 @@
     "link-wasm": "node scripts/link-wasm.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "e2e:preview": "node scripts/build-preview.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

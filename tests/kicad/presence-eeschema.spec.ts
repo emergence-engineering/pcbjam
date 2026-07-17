@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { settledShot } from "../e2e/utils/element-tracker";
 import { test, expect } from "./fixtures";
 
 /**
@@ -14,8 +15,12 @@ import { test, expect } from "./fixtures";
  */
 
 const WIRE1 = "22222222-0000-0000-0000-000000000001";
+// version must be the CURRENT schematic format (sch_file_versions.h): an older
+// one makes eeschema show the "created by an older version" wxInfoBar, whose
+// appearance relayouts the GL panel at a load-dependent moment — permanently
+// breaking the overlay tests' before/after pixel equality.
 const SAMPLE_SCH = `(kicad_sch
-\t(version 20250114)
+\t(version 20260306)
 \t(generator "eeschema")
 \t(generator_version "9.0")
 \t(uuid "11111111-1111-1111-1111-111111111111")
@@ -265,7 +270,7 @@ test("remote render paints the overlay without touching local selection", async 
   await bootAndOpen(page);
 
   const canvas = await galPanel(page);
-  const before = await canvas.screenshot();
+  const before = await settledShot(canvas);
 
   await page.evaluate(
     ({ wire }) => {
@@ -330,7 +335,7 @@ test("cross-app ghost render: a pcbnew peer's xsel uuid resolves on the current 
   await bootAndOpen(page);
 
   const canvas = await galPanel(page);
-  const before = await canvas.screenshot();
+  const before = await settledShot(canvas);
 
   // A pcbnew peer snapshot entry: xsel = the symbol uuid derived from the
   // footprint's path by the TS side. The fixture has no symbols, but the C++

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickMenuBarItem, clickMenuItem, waitForEditorReady, waitUntil, stableShot } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItem, waitForEditorReady, waitForRenderedByLabel, waitUntil, stableShot, settledShot } from '../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './utils/fs-inject';
 import { waitForBoardLoaded } from './utils/board-ready';
 
@@ -48,6 +48,9 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
 
     expect(await clickMenuBarItem(page, 'File'), 'File menu should be findable').toBe(true);
     await waitForMenuItems(page);
+    // Items register progressively while the popup paints — wait for the one
+    // we click (clickMenuItem is single-shot; the >3-items gate isn't enough).
+    await waitForRenderedByLabel(page, 'Open...', { elementType: 'menuitem' });
     expect(await clickMenuItem(page, 'Open...'), 'Open… menu item should be findable').toBe(true);
 
     await page.waitForFunction(() => {
@@ -113,14 +116,24 @@ test.describe('OCC export via occ_service worker', () => {
         await page.goto('/kicad/pcbnew.html');
         await waitForEditorReady(page);
         await loadBoard(page, testLogger);
+        // Board-loaded ≠ board-painted: once the export dialog's modal pump takes
+        // over, the GAL may never repaint behind it — whichever paint state the
+        // canvas had at menu-open time is what the dialog screenshots freeze.
+        // Settle the pixels first so occ-export-{dialog,done}.png always capture
+        // the painted board (this bistability flagged occ-export-done between two
+        // identical-code CI runs).
+        await settledShot(page.locator('#canvas'), expect);
 
         expect(occFetches, 'occ_service must NOT be fetched before the export').toHaveLength(0);
 
         // File → Export → STEP/GLB/…
         expect(await clickMenuBarItem(page, 'File'), 'File menu').toBe(true);
         await waitForMenuItems(page);
+        await waitForRenderedByLabel(page, 'Export', { elementType: 'menuitem' });
         expect(await clickMenuItem(page, 'Export'), 'Export submenu').toBe(true);
-        await waitForMenuItems(page);
+        // Wait for the SUBMENU's item — waitForMenuItems(>3) is satisfied by
+        // the still-rendered File menu items before the submenu paints.
+        await waitForRenderedByLabel(page, 'STEP/GLB/BREP/XAO/PLY/STL...', { elementType: 'menuitem' });
         expect(await clickMenuItem(page, 'STEP/GLB/BREP/XAO/PLY/STL...'),
             'STEP export menu item').toBe(true);
 

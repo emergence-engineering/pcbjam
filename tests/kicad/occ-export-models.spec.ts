@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { clickMenuBarItem, clickMenuItem, waitForEditorReady, waitUntil } from '../e2e/utils/element-tracker';
+import { clickMenuBarItem, clickMenuItem, waitForEditorReady, waitForRenderedByLabel, waitUntil } from '../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './utils/fs-inject';
 import { waitForBoardLoaded } from './utils/board-ready';
 
@@ -120,6 +120,9 @@ async function loadBoard(page: Page, testLogger: { consoleLogs: string[]; errors
 
     expect(await clickMenuBarItem(page, 'File'), 'File menu should be findable').toBe(true);
     await waitForMenuItems(page);
+    // Items register progressively while the popup paints — wait for the one
+    // we click (clickMenuItem is single-shot; the >3-items gate isn't enough).
+    await waitForRenderedByLabel(page, 'Open...', { elementType: 'menuitem' });
     expect(await clickMenuItem(page, 'Open...'), 'Open… menu item should be findable').toBe(true);
 
     await page.waitForFunction(() => {
@@ -174,8 +177,11 @@ async function clickWxButton(page: Page, label: string): Promise<boolean> {
 async function runStepExport(page: Page): Promise<{ exp: ExportCapture; ensures: Array<{ op: string; arg: string }> }> {
     expect(await clickMenuBarItem(page, 'File'), 'File menu').toBe(true);
     await waitForMenuItems(page);
+    await waitForRenderedByLabel(page, 'Export', { elementType: 'menuitem' });
     expect(await clickMenuItem(page, 'Export'), 'Export submenu').toBe(true);
-    await waitForMenuItems(page);
+    // Wait for the SUBMENU's item — waitForMenuItems(>3) is satisfied by
+    // the still-rendered File menu items before the submenu paints.
+    await waitForRenderedByLabel(page, 'STEP/GLB/BREP/XAO/PLY/STL...', { elementType: 'menuitem' });
     expect(await clickMenuItem(page, 'STEP/GLB/BREP/XAO/PLY/STL...'),
         'STEP export menu item').toBe(true);
 

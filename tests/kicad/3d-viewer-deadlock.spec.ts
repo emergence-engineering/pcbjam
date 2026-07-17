@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { clickByTooltip, clickToolbarTool } from '../e2e/utils/element-tracker';
+import { clickByTooltip, clickToolbarTool, shotPath } from '../e2e/utils/element-tracker';
 import { waitForPcbnew } from './utils/pcbnew-ready';
 import { countGlCanvases, loadBoard, logThreeDDiag, openThreeDViewer } from './utils/threed-viewer';
 
@@ -236,7 +236,7 @@ test.describe('3D viewer camera-move deadlock', () => {
         await settleRender(25000);
         await assertLive('camera rotate again settle');
 
-        await page.screenshot({ path: 'test-results/3d-viewer-deadlock.png', scale: 'device' });
+        await page.screenshot({ path: shotPath(page, '3d-viewer-deadlock.png'), scale: 'device' });
 
         // Sanity: the board still renders (not blank / crashed) after both moves.
         await logThreeDDiag(page, 'deadlock: after moves');

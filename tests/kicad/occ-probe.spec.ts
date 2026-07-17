@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { shotPath } from '../e2e/utils/element-tracker';
 
 /**
  * Minimal occ_service probe (no pcbnew boot): drive occExport directly from
@@ -34,7 +35,7 @@ test.describe('occ_service probe', () => {
         console.log(`[PROBE] ok=${res.ok} in ${res.ms}ms report=${(res.report || '').slice(0, 300)}`);
         const captured = await page.evaluate(() => (window as any).__occExports);
         console.log(`[PROBE] captured: ${JSON.stringify(captured)}`);
-        await page.screenshot({ path: 'test-results/occ-probe-done.png', scale: 'css' });
+        await page.screenshot({ path: shotPath(page, 'occ-probe-done.png'), scale: 'css' });
         expect(res.ok, 'demo board exports').toBe(true);
     });
 

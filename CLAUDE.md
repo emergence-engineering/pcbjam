@@ -7,11 +7,11 @@ The e2e tests are in /tests, with a README and WHATWORKS md files
 Test determinism rules (no blind sleeps/ifs, `stableShot` screenshots, retries:0) are in tests/TESTING.md, enforced by `npm run lint:determinism`.
 The e2e tests are separated per feature
 Wxwidgets wasm port has hooks for finding positions of UI elements, tests use that
-The test screenshots are tracked with git; CI's Linux render is the source of truth (tooling: tests/tools/screenshots/, see its README).
+The test screenshots are tracked with git, per engine (tests/baseline-screenshots/{chromium,firefox}/); CI's Linux render is the source of truth (tooling: tests/tools/screenshots/, see its README).
 To update baselines, promote a CI run's render (churn-free — only meaningfully-changed images restage): `cd tests && npm run screenshots:promote -- --run <ci-run-id>`, then commit. `npm run screenshots:check` is the local gate; on each main push CI posts a screenshot-diff + runtime-perf report to Discord.
 The tests have log files in tests/logs/{wxwidgets/kicad}/{test-name} after each run where the js console and cpp logs are visible
 Always check screenshots for validating tests
-Run e2e tests from /tests folder: `npm run test:kicad` or `npm run test:e2e` (not playwright directly)
+Run e2e tests from /tests folder: `npm run test:e2e` (full CI project set, one merged playwright.config.ts) or `npm run test:kicad` (firefox shortcut) — not playwright directly. One spec/engine: `npx playwright test --project=kicad-firefox kicad/pcbnew.spec.ts`. Web-app suite: `npm run test:web`.
 
 Build kicad with docker/build.sh (includes wxwidgets build, runs in docker)
 Build wxwidgets standalone with scripts/build-wx-wasm.sh (runs on machine, for wxwidgets-only changes)

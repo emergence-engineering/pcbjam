@@ -78,7 +78,12 @@ test.describe('web app — File → Quit after a tool switch', () => {
     await quitViaFileMenu(page);
 
     // Must land on the project overview — not back in the schematic editor.
-    await page.waitForURL(PROJECT_URL_RE, { timeout: 30000 });
+    // Poll the URL instead of waitForURL: the quit flow can supersede its own
+    // navigation while the wasm tears down, and Firefox then kills a pending
+    // waitForURL with NS_BINDING_ABORTED even though the final URL is right.
+    await expect
+      .poll(() => page.url(), { timeout: 30000 })
+      .toMatch(PROJECT_URL_RE);
     // And the overview must actually render (guards a URL-push-without-render
     // regression, which a URL-only assertion would miss).
     await expect(

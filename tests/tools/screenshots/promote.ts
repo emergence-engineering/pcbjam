@@ -16,22 +16,15 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { BASELINE_DIRS, MANIFEST_PATH, floorFor, isIgnored, type Manifest } from './config';
+import { BASELINE_ROOT, MANIFEST_PATH, floorFor, isIgnored, listEngineKeys, splitKey, type Manifest } from './config';
+import { writeManifest } from './gen-manifest';
 import { diffImages, loadPng } from './image-ops';
 
-function listPngs(dir: string): string[] {
-    if (!fs.existsSync(dir)) return [];
-    return fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.png'));
-}
-
-/** basename → absolute committed baseline path (first BASELINE_DIRS entry wins). */
+/** key (`<engine>/<name>`) → absolute committed baseline path. */
 function baselineIndex(root: string): Map<string, string> {
+    const abs = path.join(root, BASELINE_ROOT);
     const index = new Map<string, string>();
-    for (const dir of BASELINE_DIRS) {
-        for (const name of listPngs(path.join(root, dir))) {
-            if (!index.has(name)) index.set(name, path.join(root, dir, name));
-        }
-    }
+    for (const key of listEngineKeys(abs)) index.set(key, path.join(abs, key));
     return index;
 }
 
@@ -66,37 +59,41 @@ type Plan = { updated: string[]; added: string[]; unchanged: string[]; removedCa
 
 function buildPlan(root: string, renderDir: string, manifest?: Manifest): { plan: Plan; apply: () => void } {
     const baselines = baselineIndex(root);
-    const rendered = new Set(listPngs(renderDir));
+    const rendered = new Set(listEngineKeys(renderDir));
     // Never promote excluded screenshots (e.g. the flaky retinascale fullPage shot).
-    for (const name of [...rendered]) if (isIgnored(name)) rendered.delete(name);
-    for (const name of [...baselines.keys()]) if (isIgnored(name)) baselines.delete(name);
+    for (const key of [...rendered]) if (isIgnored(key)) rendered.delete(key);
+    for (const key of [...baselines.keys()]) if (isIgnored(key)) baselines.delete(key);
     const plan: Plan = { updated: [], added: [], unchanged: [], removedCandidates: [] };
     const actions: Array<() => void> = [];
 
-    for (const name of rendered) {
-        const src = path.join(renderDir, name);
-        const existing = baselines.get(name);
+    for (const key of rendered) {
+        const src = path.join(renderDir, key);
+        const existing = baselines.get(key);
         if (!existing) {
-            const dest = path.join(root, BASELINE_DIRS[0], name);
-            plan.added.push(name);
-            actions.push(() => fs.copyFileSync(src, dest)); // verbatim bytes
+            const dest = path.join(root, BASELINE_ROOT, key);
+            plan.added.push(key);
+            actions.push(() => {
+                fs.mkdirSync(path.dirname(dest), { recursive: true });
+                fs.copyFileSync(src, dest); // verbatim bytes
+            });
             continue;
         }
         const d = diffImages(loadPng(existing), loadPng(src));
-        const floor = floorFor(name, manifest);
+        const floor = floorFor(key);
         if (!d.dimsMatch || d.changedRatio > floor.changedRatio) {
-            plan.updated.push(name);
+            plan.updated.push(key);
             actions.push(() => fs.copyFileSync(src, existing)); // verbatim bytes, no re-encode → no churn
         } else {
-            plan.unchanged.push(name); // leave the committed file untouched
+            plan.unchanged.push(key); // leave the committed file untouched
         }
     }
 
     // Removal candidates: a committed baseline the manifest expects but this render didn't produce.
-    for (const [name, abs] of baselines) {
-        if (rendered.has(name)) continue;
-        if (manifest && !manifest.screenshots.some((e) => e.name === name)) continue;
-        plan.removedCandidates.push(name);
+    for (const [key, abs] of baselines) {
+        if (rendered.has(key)) continue;
+        const { engine, name } = splitKey(key);
+        if (manifest && !manifest.screenshots.some((e) => e.name === name && e.engine === engine)) continue;
+        plan.removedCandidates.push(key);
         actions.push(() => {}); // pruning is opt-in (see main)
         void abs;
     }
@@ -146,7 +143,10 @@ function main(): void {
         const baselines = baselineIndex(root);
         for (const n of plan.removedCandidates) fs.rmSync(baselines.get(n)!, { force: true });
     }
-    console.log('[promote] done — review `git status` and commit the changed baselines');
+    // Keep the manifest in lockstep with the baseline tree — a stale manifest silently
+    // disables removed-screenshot detection for anything added after the last regen.
+    writeManifest(root);
+    console.log('[promote] done (manifest regenerated) — review `git status` and commit');
 }
 
 if (require.main === module) main();

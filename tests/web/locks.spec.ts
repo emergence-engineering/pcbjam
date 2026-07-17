@@ -16,6 +16,7 @@ type Mod = {
   kicadCollabGetSelection(): string;
   kicadCollabTestGetLocked(): string;
   kicadCollabTestSelectComponent(): string;
+  kicadCollabTestSelectByUuid(uuid: string): boolean;
   kicadCollabTestClearSelection(): boolean;
 };
 type W = { Module: Mod };
@@ -77,11 +78,14 @@ test('a peer selection locks the item; overlapping holds tiebreak deterministica
   // ── overlapping hold → tiebreak ────────────────────────────────────────────
   // bob grabs the SAME footprint programmatically (the race-window simulation:
   // AddItemToSel bypasses the acquisition veto, like two grabs inside the
-  // awareness propagation window).
-  const bobPick = await bob.evaluate(() =>
-    (window as unknown as W).Module.kicadCollabTestSelectComponent(),
+  // awareness propagation window). By uuid — bob's ysync-materialized board
+  // need not iterate footprints in alice's parse order, so "the first
+  // footprint" is not a cross-tab invariant.
+  const bobPick = await bob.evaluate(
+    (uuid) => (window as unknown as W).Module.kicadCollabTestSelectByUuid(uuid),
+    fpId,
   );
-  expect(bobPick).toBe(fpId);
+  expect(bobPick, "bob must resolve alice's footprint by uuid").toBe(true);
 
   // alice ("alice" < "bob") keeps it; bob's client releases it.
   await expect
@@ -98,9 +102,11 @@ test('a peer selection locks the item; overlapping holds tiebreak deterministica
   );
   await expect.poll(() => locked(bob), { timeout: 20000 }).toEqual([]);
 
-  // Now bob's grab sticks, and it locks the item for alice.
-  await bob.evaluate(() =>
-    (window as unknown as W).Module.kicadCollabTestSelectComponent(),
+  // Now bob's grab sticks, and it locks the item for alice (same uuid — the
+  // assertions below compare against fpId).
+  await bob.evaluate(
+    (uuid) => (window as unknown as W).Module.kicadCollabTestSelectByUuid(uuid),
+    fpId,
   );
   await expect
     .poll(() => selection(bob), { timeout: 20000 })

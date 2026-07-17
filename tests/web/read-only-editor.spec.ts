@@ -1,5 +1,11 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { openOverlayMenu } from './overlay-menu';
+import { shotPath } from '../e2e/utils/element-tracker';
+
+// Viewer + writer pages boot once in beforeAll and the tests are ordered
+// (the read-only viewer must join the fresh room FIRST). Serial group:
+// fullyParallel would re-boot both pages for every test.
+test.describe.configure({ mode: 'serial' });
 
 /**
  * Read-only viewer e2e (read-only-viewer): `?readonly=1` boots the pcbnew
@@ -195,7 +201,10 @@ test('viewer boots locked: chrome-less, nothing selectable, hotkey edits inert, 
   const forced = await viewer.evaluate(() =>
     (window as unknown as W).Module.kicadCollabTestSelectFirst(),
   );
-  expect(forced).toBe(itemId); // same file, same board order
+  // SelectFirst's iteration order is NOT stable across separately-booted tabs
+  // (CI: writer and viewer picked different first items from the same file) —
+  // the gate only needs SOME force-selected item to survive the Delete below.
+  expect(forced, 'viewer force-select landed an item').toBeTruthy();
   const posBefore = await posOf(viewer, forced);
   expect(posBefore).toBeTruthy();
   await viewer.keyboard.press('Delete');
@@ -212,7 +221,7 @@ test('viewer boots locked: chrome-less, nothing selectable, hotkey edits inert, 
   await viewer.mouse.wheel(0, -240);
   await expect.poll(() => viewportScale(viewer), { timeout: 15000 }).not.toBe(scaleBefore);
 
-  await viewer.screenshot({ path: 'test-results/web-read-only-viewer.png', scale: 'css' });
+  await viewer.screenshot({ path: shotPath(viewer, 'web-read-only-viewer.png'), scale: 'css' });
 });
 
 test("a writer's edits stream into the viewer live (and never the reverse)", async () => {

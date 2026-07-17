@@ -1648,6 +1648,34 @@ std::string schCollabTestSelectComponent()
     return toUtf8( target->m_Uuid.AsString() );
 }
 
+// Test helper (0007): select a SPECIFIC item by uuid — see pcbnew_embind.cpp
+// for why the tiebreak specs must not rely on cross-tab iteration order.
+bool schCollabTestSelectByUuid( std::string aUuid )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return false;
+
+    SCH_SCREEN* screen = currentScreen( fr );
+
+    if( !screen )
+        return false;
+
+    const wxString want = wxString::FromUTF8( aUuid.c_str() );
+
+    for( SCH_ITEM* item : screen->Items() )
+    {
+        if( item->m_Uuid.AsString() == want )
+        {
+            presenceCore().selectItem( item );
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // JS → C++ (0007): tiebreak release — see pcbnew_embind.cpp for the design
 // (cancel-interactive-if-a-tool-holds-them → selective unselect → infobar →
 // forced re-emit).
@@ -1769,6 +1797,7 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     function("kicadCollabTestGetLocked", &schCollabTestGetLocked);
     function("kicadCollabTestSelectFirst", &schCollabTestSelectFirst);
     function("kicadCollabTestSelectComponent", &schCollabTestSelectComponent);
+    function("kicadCollabTestSelectByUuid", &schCollabTestSelectByUuid);
     function("kicadCollabTestClearSelection", &schCollabTestClearSelection);
     // Library reload after a remote (synced) lib edit — r2-idb-sync realtime.
     function("kicadLibsReload", &pcbjam_libs::reloadLibrary);

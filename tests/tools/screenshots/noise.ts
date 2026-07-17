@@ -1,9 +1,10 @@
 /**
  * Calibration: measure the intra-CI noise floor.
  *
- * Render the suite twice on the same host (into two dirs), then:
+ * Render the suite twice on the same host (into two dirs, each with per-engine
+ * subdirs like test-results/), then:
  *   tsx tools/screenshots/noise.ts <run1-dir> <run2-dir>
- * prints, per engine (via the manifest) and globally, the max / p95 / mean
+ * prints, per engine (from the subdir) and globally, the max / p95 / mean
  * changed-pixel ratio between the two identical-input renders. Set
  * config.ts FLOORS.<engine>.changedRatio ≈ (max × 3) from this.
  *
@@ -13,16 +14,8 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { MANIFEST_PATH, type Manifest } from './config';
+import { listEngineKeys, splitKey } from './config';
 import { diffImages, loadPng } from './image-ops';
-
-function listPngs(dir: string): string[] {
-    return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.png')) : [];
-}
-
-function engineOf(name: string, manifest?: Manifest): string {
-    return manifest?.screenshots.find((e) => e.name === name)?.engine ?? 'default';
-}
 
 function stats(values: number[]): { n: number; max: number; p95: number; mean: number } {
     if (!values.length) return { n: 0, max: 0, p95: 0, mean: 0 };
@@ -43,20 +36,14 @@ function main(): void {
         process.exitCode = 2;
         return;
     }
-    const root = process.cwd();
-    const manifestPath = path.join(root, MANIFEST_PATH);
-    const manifest = fs.existsSync(manifestPath)
-        ? (JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Manifest)
-        : undefined;
-
-    const common = listPngs(dir1).filter((n) => fs.existsSync(path.join(dir2, n)));
+    const common = listEngineKeys(dir1).filter((k) => fs.existsSync(path.join(dir2, k)));
     const byEngine = new Map<string, number[]>();
     const all: number[] = [];
-    for (const name of common) {
-        const d = diffImages(loadPng(path.join(dir1, name)), loadPng(path.join(dir2, name)));
+    for (const key of common) {
+        const d = diffImages(loadPng(path.join(dir1, key)), loadPng(path.join(dir2, key)));
         const ratio = d.dimsMatch ? d.changedRatio : 1;
         all.push(ratio);
-        const eng = engineOf(name, manifest);
+        const eng = splitKey(key).engine;
         (byEngine.get(eng) ?? byEngine.set(eng, []).get(eng)!).push(ratio);
     }
 

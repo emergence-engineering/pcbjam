@@ -1,4 +1,5 @@
 import { test, expect, tryLoadApp } from './utils/fixtures';
+import { shotPath } from './utils/element-tracker';
 
 test.describe('Thread Pool Deadlock Tests', () => {
 
@@ -17,7 +18,7 @@ test.describe('Thread Pool Deadlock Tests', () => {
     // If there's a deadlock, tryLoadApp will timeout waiting for canvas
     const loaded = await tryLoadApp(page, 30000);
 
-    await page.screenshot({ path: 'test-results/threadpool-01-loaded.png', fullPage: true });
+    await page.screenshot({ path: shotPath(page, 'threadpool-01-loaded.png'), fullPage: true });
 
     // Check for success marker - all threads created and joined
     const success = testLogger.consoleLogs.some(log =>

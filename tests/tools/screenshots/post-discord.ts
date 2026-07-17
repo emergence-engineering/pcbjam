@@ -20,7 +20,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { DIFF_OUT_DIR } from './config';
+import { DIFF_OUT_DIR, splitKey } from './config';
 import { loadPng, encodeWithinCap } from './image-ops';
 import { buildPerfReport, fetchPreviousPerf } from './perf-report';
 import type { Report } from './compare';
@@ -120,13 +120,30 @@ function buildHeader(report: Report | null, perfBlock: string, meta: { sha?: str
     lines.push(e2eBadge(meta.e2e));
     if (perfBlock) lines.push('', perfBlock);
 
+    // Per-engine breakdown suffix, e.g. " (2 chromium / 1 firefox)"; single-engine
+    // sets show just the engine name so the origin is always visible.
+    const byEngine = (entries: Array<{ name: string }>): string => {
+        if (!entries.length) return '';
+        const counts = new Map<string, number>();
+        for (const e of entries) {
+            const eng = splitKey(e.name).engine;
+            counts.set(eng, (counts.get(eng) ?? 0) + 1);
+        }
+        if (counts.size < 2) return ` (${[...counts.keys()][0]})`;
+        return ` (${[...counts.entries()].map(([e, n]) => `${n} ${e}`).join(' / ')})`;
+    };
+
     lines.push('');
     if (!report || (!report.changed.length && !report.added.length && !report.removed.length)) {
         lines.push('✅ no screenshot drift');
     } else if (report.driftLikely) {
         lines.push(`⚠️ **${report.changed.length} screenshots changed broadly** — looks like host env drift → re-promote (\`npm run screenshots:promote\`)`);
     } else {
-        lines.push(`⚠️ **screenshot drift**: ${report.changed.length} changed, ${report.added.length} added, ${report.removed.length} removed`);
+        lines.push(
+            `⚠️ **screenshot drift**: ${report.changed.length} changed${byEngine(report.changed)}, ` +
+                `${report.added.length} added${byEngine(report.added)}, ` +
+                `${report.removed.length} removed${byEngine(report.removed)}`
+        );
     }
     if (report?.removed.length) {
         const shown = report.removed.slice(0, REMOVED_CAP).map((r) => `\`${r.name}\``).join(', ');

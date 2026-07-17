@@ -354,7 +354,7 @@ for (const [cfg, label] of [
       // CI, hit at 2× on ARM). V8 handles it: runs on chromium-ci in CI and
       // --project=chromium locally.
       test.skip(
-        test.info().project.name === "firefox",
+        test.info().project.name.includes("firefox"),
         "two kicad_editor tabs exceed Firefox's per-process wasm budget",
       );
 

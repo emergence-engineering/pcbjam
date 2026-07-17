@@ -192,15 +192,33 @@ const fpPos = (page: Page) =>
 async function moveViaHotkey(page: Page): Promise<void> {
   const at = await fpScreenPos(page);
   await page.mouse.click(at.x, at.y); // select (allowed — inspection semantics)
-  await page.waitForTimeout(500);
+  // The click routes through the real selection tool — wait for the selection to
+  // actually land before arming the move (the bridge getter is the observable).
+  // Depending on zoom the hit lands the footprint OR its pad — either is fine:
+  // EDIT_TOOL::Move on a board pad substitutes the parent footprint anyway.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            JSON.parse((window as unknown as LocksWindow).Module.kicadCollabGetSelection())
+              .length,
+        ),
+      { timeout: 10000, message: "click never landed a selection" },
+    )
+    .toBeGreaterThan(0);
   await page.mouse.move(at.x, at.y);
   await page.keyboard.press("m");
-  await page.waitForTimeout(500);
+  // Move-tool arming has no JS-observable (and in the locked case the request is
+  // vetoed before any state changes — silence IS the expected outcome).
+  await page.waitForTimeout(500); // eslint-disable-line -- documented interaction dwell: tool arming
   await page.mouse.move(at.x + 120, at.y + 80, { steps: 10 });
   await page.mouse.click(at.x + 120, at.y + 80); // drop (no-op if move never started)
-  await page.waitForTimeout(800);
+  // Bounded chance for a wrongful move to surface before the caller's negative
+  // position assert; the unlocked control leg proves the gesture via its own poll.
+  await page.waitForTimeout(800); // eslint-disable-line -- documented interaction dwell: negative-assert window
   await page.keyboard.press("Escape"); // leave no half-open tool between phases
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(300); // eslint-disable-line -- documented interaction dwell: tool teardown
 }
 
 test("seeded locks are probeable and a locked footprint resists a real move", async ({

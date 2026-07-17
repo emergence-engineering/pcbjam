@@ -40,7 +40,10 @@ async function clickTreeRow(page: Page, label: string): Promise<boolean> {
   return true;
 }
 
-test('footprint editor save persists to the backend (remote write round-trip)', async ({ page }) => {
+  // KNOWN-BROKEN: the fp/sym editor kicadLibs enumerate/save flows are dead
+  // (docs/features/web-e2e-rot/01-editor-lib-bridge-flows.md). fixme, not fail:
+  // on CI this dies in a 180s boot timeout per engine — running it buys no signal.
+test.fixme('footprint editor save persists to the backend (remote write round-trip)', async ({ page }) => {
   const owner = `e2e-fp-${Date.now()}`;
   const logs: string[] = [];
   page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { test, expect } from './fixtures';
-import { findByTooltip, waitForCanvasStable, waitForEditorReady } from '../e2e/utils/element-tracker';
+import { findByTooltip, waitForCanvasStable, waitForEditorReady, shotPath } from '../e2e/utils/element-tracker';
 
 /**
  * Eeschema crosshair-mode toolbar button (pcbjam #24)
@@ -204,7 +204,7 @@ test.describe('Eeschema crosshair modes', () => {
 
         await page.mouse.move(probe.x, probe.y);
         await waitForCanvasStable(page, box.sel);
-        const shotSmall = await page.screenshot({ path: 'test-results/eeschema-crosshair-00-small.png', scale: 'css' });
+        const shotSmall = await page.screenshot({ path: shotPath(page, 'eeschema-crosshair-00-small.png'), scale: 'css' });
 
         // click 1 -> full-window
         await clickAndSettle();
@@ -212,7 +212,7 @@ test.describe('Eeschema crosshair modes', () => {
             message: 'one click should advance to Full-Window Crosshairs', timeout: 6000,
         }).toContain('Full-Window Crosshairs');
         await waitForCanvasStable(page, box.sel);
-        const shotFull = await page.screenshot({ path: 'test-results/eeschema-crosshair-01-full.png', scale: 'css' });
+        const shotFull = await page.screenshot({ path: shotPath(page, 'eeschema-crosshair-01-full.png'), scale: 'css' });
         expect((await compareScreenshots(page, shotSmall, shotFull, diffRegion)).diffPixels,
             'full-window crosshair should visibly differ from the small crosshair').toBeGreaterThan(200);
 
@@ -222,7 +222,7 @@ test.describe('Eeschema crosshair modes', () => {
             message: 'second click should advance to 45 Degree Crosshairs', timeout: 6000,
         }).toContain('45 Degree Crosshairs');
         await waitForCanvasStable(page, box.sel);
-        const shot45 = await page.screenshot({ path: 'test-results/eeschema-crosshair-02-45.png', scale: 'css' });
+        const shot45 = await page.screenshot({ path: shotPath(page, 'eeschema-crosshair-02-45.png'), scale: 'css' });
         expect((await compareScreenshots(page, shotFull, shot45, diffRegion)).diffPixels,
             '45-degree crosshair should visibly differ from the full-window crosshair').toBeGreaterThan(200);
 
@@ -232,7 +232,7 @@ test.describe('Eeschema crosshair modes', () => {
             message: 'third click should cycle back to Small crosshairs', timeout: 6000,
         }).toContain('Small crosshairs');
         await waitForCanvasStable(page, box.sel);
-        await page.screenshot({ path: 'test-results/eeschema-crosshair-03-small-again.png', scale: 'css' });
+        await page.screenshot({ path: shotPath(page, 'eeschema-crosshair-03-small-again.png'), scale: 'css' });
 
         const realErrors = testLogger.errors.filter((error: string) => !error.includes('favicon'));
         expect(realErrors).toEqual([]);

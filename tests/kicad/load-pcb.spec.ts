@@ -4,7 +4,8 @@ import {
     clickMenuBarItem,
     clickMenuItem,
     waitForEditorReady,
-    waitUntil, stableShot } from '../e2e/utils/element-tracker';
+    waitForRenderedByLabel,
+    waitUntil, stableShot, shotPath } from '../e2e/utils/element-tracker';
 import { injectFromSubmodule } from './utils/fs-inject';
 import { waitForBoardLoaded } from './utils/board-ready';
 
@@ -99,6 +100,9 @@ function runLoadPcbTest(demo: DemoCfg): void {
             'File menu items rendered',
         );
 
+        // Items register progressively while the popup paints — wait for the one
+        // we click (clickMenuItem is single-shot; the >3-items gate isn't enough).
+        await waitForRenderedByLabel(page, 'Open...', { elementType: 'menuitem' });
         const openClicked = await clickMenuItem(page, 'Open...');
         expect(openClicked, 'Open… menu item should be findable').toBe(true);
 
@@ -159,7 +163,7 @@ function runLoadPcbTest(demo: DemoCfg): void {
         // lose the page before page.screenshot runs. The canvas is already
         // fully painted by the time waitForBoardLoaded returns.
         await page.screenshot({
-            path: `test-results/load-pcb-${demo.name}.png`,
+            path: shotPath(page, `load-pcb-${demo.name}.png`),
             scale: 'css',
         });
 

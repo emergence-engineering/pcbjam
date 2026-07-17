@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { shotPath } from '../e2e/utils/element-tracker';
 
 /**
  * Web-app tool open-path e2e.
@@ -81,7 +82,7 @@ test.describe('web app — tool open paths', () => {
       page,
     }) => {
       await bootAndAssert(page, tc);
-      await page.screenshot({ path: `test-results/web-${tool}.png`, scale: 'css' });
+      await page.screenshot({ path: shotPath(page, `web-${tool}.png`), scale: 'css' });
     });
   }
 });

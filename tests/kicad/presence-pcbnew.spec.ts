@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { settledShot } from "../e2e/utils/element-tracker";
 import { test, expect } from "./fixtures";
 
 /**
@@ -24,8 +25,12 @@ const FP1 = "66666666-0000-0000-0000-000000000001";
 // The footprint's schematic link (0006): its (path …) ends in the symbol uuid.
 const SYM1 = "aaaaaaaa-0000-0000-0000-000000000001";
 const FP1_PATH = `/${SYM1}`;
+// version must be the CURRENT board format (pcb_io_kicad_sexpr.h): an older
+// one makes pcbnew show the "created by an older version" wxInfoBar, whose
+// appearance relayouts the GL panel at a load-dependent moment — permanently
+// breaking the overlay tests' before/after pixel equality.
 const SAMPLE_PCB = `(kicad_pcb
-\t(version 20241229)
+\t(version 20260206)
 \t(generator "pcbnew")
 \t(generator_version "9.0")
 \t(general
@@ -357,7 +362,7 @@ test("remote render paints the overlay without touching local selection", async 
   await bootAndOpen(page);
 
   const canvas = page.locator("#canvas");
-  const before = await canvas.screenshot();
+  const before = await settledShot(canvas);
 
   await page.evaluate(
     ({ fp }) => {
@@ -424,7 +429,7 @@ test("cross-app ghost render: an eeschema peer's symbol uuid maps to the footpri
   await bootAndOpen(page);
 
   const canvas = page.locator("#canvas");
-  const before = await canvas.screenshot();
+  const before = await settledShot(canvas);
 
   // An eeschema peer snapshot entry: no same-doc selection, xsel = symbol uuid.
   await page.evaluate(

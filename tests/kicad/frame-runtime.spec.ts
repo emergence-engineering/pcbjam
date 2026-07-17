@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { shotPath } from '../e2e/utils/element-tracker';
 
 /**
  * Editor-unification runtime-frame validation.
@@ -75,7 +76,7 @@ test.describe('editor-unification runtime frame (--frame)', () => {
       const aborted = consoleLines.some((l) => /Aborted\(|Cannot register public name/.test(l));
       expect(aborted, 'no WASM abort / duplicate embind registration during load').toBe(false);
 
-      await page.screenshot({ path: `test-results/frame-runtime-${tc.harness}.png`, scale: 'device' });
+      await page.screenshot({ path: shotPath(page, `frame-runtime-${tc.harness}.png`), scale: 'device' });
     });
   }
 });

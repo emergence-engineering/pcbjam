@@ -68,7 +68,11 @@ test.describe('web app — File → Quit leaves the editor', () => {
 
     await quitViaFileMenu(page);
 
-    await page.waitForURL(PROJECT_URL_RE, { timeout: 30000 });
+    // URL poll, not waitForURL: the quit flow can supersede its own navigation
+    // (NS_BINDING_ABORTED on Firefox) — see quit-after-tool-switch.spec.ts.
+    await expect
+      .poll(() => page.url(), { timeout: 30000 })
+      .toMatch(PROJECT_URL_RE);
   });
 
   test('quit on a deep-linked editor goes to the project page', async ({ page }) => {
@@ -81,6 +85,9 @@ test.describe('web app — File → Quit leaves the editor', () => {
 
     await quitViaFileMenu(page);
 
-    await page.waitForURL(PROJECT_URL_RE, { timeout: 30000 });
+    // Same NS_BINDING_ABORTED tolerance as above.
+    await expect
+      .poll(() => page.url(), { timeout: 30000 })
+      .toMatch(PROJECT_URL_RE);
   });
 });

@@ -8,6 +8,7 @@
     "WASM_SRC_DIR",
     "VITE_API_BASE_URL",
     "VITE_LOCAL_PROJECTS",
+    "VITE_ALLOW_USER_OVERRIDE",
     "VITE_WASM_ASSET_BASE_URL"
   ],
   "tasks": {

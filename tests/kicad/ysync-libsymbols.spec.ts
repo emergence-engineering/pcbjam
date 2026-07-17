@@ -158,7 +158,7 @@ test.describe("v2 items wire — lib_symbols travel (miss 08A)", () => {
     testLogger,
   }) => {
     test.skip(
-      test.info().project.name === "firefox",
+      test.info().project.name.includes("firefox"),
       "two kicad_editor tabs exceed Firefox's per-process wasm budget",
     );
 

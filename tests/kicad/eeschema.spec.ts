@@ -5,7 +5,7 @@ import {
     findByTooltip,
     waitForCanvasStable,
     waitForEditorReady,
-    waitUntil, stableShot } from '../e2e/utils/element-tracker';
+    waitUntil, stableShot, shotPath } from '../e2e/utils/element-tracker';
 
 /**
  * Eeschema (schematic editor) WASM E2E Tests
@@ -245,7 +245,7 @@ test.describe('Eeschema WASM', () => {
         // crosshair IS a visible change, so this settle is deterministic.
         await page.mouse.move(640, 360);
         await waitForCanvasStable(page, glSel);
-        const afterToolClick = await page.screenshot({ path: 'test-results/eeschema-draw-wires-01-after-click.png', scale: 'css' });
+        const afterToolClick = await page.screenshot({ path: shotPath(page, 'eeschema-draw-wires-01-after-click.png'), scale: 'css' });
 
         // Draw a wire: click a start vertex, then an end vertex. These two waits are the
         // ONE place in the converted suite that still uses a fixed delay: a wire vertex
@@ -261,7 +261,7 @@ test.describe('Eeschema WASM', () => {
         await page.mouse.click(endPoint.x, endPoint.y);
         await page.waitForTimeout(750); // eslint-disable-line -- see comment above
 
-        const afterDrawing = await page.screenshot({ path: 'test-results/eeschema-draw-wires-02-after-drawing.png', scale: 'css' });
+        const afterDrawing = await page.screenshot({ path: shotPath(page, 'eeschema-draw-wires-02-after-drawing.png'), scale: 'css' });
 
         const diffRegion: DiffRegion = {
             x: Math.max(0, Math.min(startPoint.x, endPoint.x) - 24),

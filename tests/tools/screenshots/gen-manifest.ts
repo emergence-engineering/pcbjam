@@ -1,50 +1,48 @@
 /**
  * Generate tests/screenshot-manifest.json — the canonical list of expected
- * screenshots + the engine that renders each.
+ * screenshots. Each entry is {name, engine}, read STRAIGHT from the per-engine
+ * baseline tree (baseline-screenshots/<engine>/<name>.png) — the engine is the
+ * directory, no spec-scanning guesswork.
  *
- * The NAME list is authoritative (it's the committed baseline set) and is what
- * lets compare/promote tell an intentional REMOVAL from a flaky/absent render.
- * The ENGINE tag is best-effort (spec-map.ts attributes each name to the spec that
- * writes it, and that spec's project/engine) and only feeds the per-engine floors.
+ * The list is what lets compare/promote tell an intentional REMOVAL from a
+ * flaky/absent render. promote.ts regenerates it automatically after applying;
+ * --check keeps CI honest if baselines are ever edited by hand.
  *
  * CLI (from tests/):  tsx tools/screenshots/gen-manifest.ts [--check]
  *   --check exits 1 if the committed manifest is stale (for CI hygiene).
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { BASELINE_DIRS, MANIFEST_PATH, isIgnored, type Manifest } from './config';
-import { buildSpecResolver } from './spec-map';
+import { BASELINE_ROOT, MANIFEST_PATH, isIgnored, listEngineKeys, splitKey, type Manifest } from './config';
 
-function listBaselines(root: string): string[] {
-    const names = new Set<string>();
-    for (const dir of BASELINE_DIRS) {
-        const abs = path.join(root, dir);
-        if (!fs.existsSync(abs)) continue;
-        for (const f of fs.readdirSync(abs)) if (f.toLowerCase().endsWith('.png') && !isIgnored(f)) names.add(f);
-    }
-    return [...names].sort();
+/** Render the manifest JSON for the current baseline tree. */
+export function manifestJson(root: string): string {
+    const screenshots = listEngineKeys(path.join(root, BASELINE_ROOT))
+        .filter((key) => !isIgnored(key))
+        .map((key) => splitKey(key))
+        .map(({ engine, name }) => ({ name, engine }))
+        .sort((a, b) => a.engine.localeCompare(b.engine) || a.name.localeCompare(b.name));
+
+    const manifest: Manifest & { _note: string } = {
+        _note: 'Generated from baseline-screenshots/<engine>/ — run `npm run screenshots:manifest`. The name list is authoritative for removed-screenshot detection.',
+        screenshots,
+    };
+    return JSON.stringify(manifest, null, 2) + '\n';
+}
+
+/** Regenerate the manifest on disk (used by the CLI and by promote.ts after apply). */
+export function writeManifest(root: string): void {
+    fs.writeFileSync(path.join(root, MANIFEST_PATH), manifestJson(root));
 }
 
 function main(): void {
     const check = process.argv.includes('--check');
     const root = process.cwd();
-    const resolver = buildSpecResolver(root);
-
-    let unmatched = 0;
-    const screenshots = listBaselines(root).map((name) => {
-        if (resolver.specFor(name) === null) unmatched++;
-        return { name, engine: resolver.engineFor(name) };
-    });
-
-    const manifest: Manifest & { _note: string } = {
-        _note: 'engine tags are best-effort (spec-map.ts); the name list is authoritative. Refine engines after calibration.',
-        screenshots,
-    };
-    const json = JSON.stringify(manifest, null, 2) + '\n';
+    const json = manifestJson(root);
     const outPath = path.join(root, MANIFEST_PATH);
+    const count = (JSON.parse(json) as Manifest).screenshots.length;
 
-    const dist = screenshots.reduce<Record<string, number>>((d, s) => ((d[s.engine] = (d[s.engine] ?? 0) + 1), d), {});
-    console.log(`[manifest] ${screenshots.length} screenshots; engines=${JSON.stringify(dist)}; default-assigned=${unmatched}`);
+    console.log(`[manifest] ${count} screenshots across engines`);
 
     if (check) {
         const current = fs.existsSync(outPath) ? fs.readFileSync(outPath, 'utf8') : '';

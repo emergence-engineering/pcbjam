@@ -1,5 +1,12 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
 import { openOverlayMenu } from './overlay-menu';
+import { shotPath } from '../e2e/utils/element-tracker';
+
+// One shared page across ORDERED tests (beforeAll boot; the restore test needs
+// the hide test's end state). Must stay a serial group in one worker —
+// fullyParallel would hand each test a fresh full-chrome boot, turning the
+// restore click into a hide and multiplying wasm boots.
+test.describe.configure({ mode: 'serial' });
 
 /**
  * Figma-like "hide UI" toggle e2e (desktop): Cmd/Ctrl+\ and the floating
@@ -91,7 +98,7 @@ test('Ctrl+\\ hides every non-canvas UI element; the canvas reclaims the viewpor
   await openOverlayMenu(page);
   await expect(page.locator('[data-testid="chrome-toggle"]')).toBeVisible();
 
-  await page.screenshot({ path: 'test-results/web-chrome-hidden.png', scale: 'css' });
+  await page.screenshot({ path: shotPath(page, 'web-chrome-hidden.png'), scale: 'css' });
 });
 
 test('the floating button restores EXACTLY the pre-hide chrome (no over-shown panes)', async () => {
@@ -131,5 +138,5 @@ test('the floating button restores EXACTLY the pre-hide chrome (no over-shown pa
   await page.keyboard.press('Control+\\'); // show
   await expect.poll(() => visibleMenuTitles(page), { timeout: 15000 }).toBeGreaterThan(0);
 
-  await page.screenshot({ path: 'test-results/web-chrome-restored.png', scale: 'css' });
+  await page.screenshot({ path: shotPath(page, 'web-chrome-restored.png'), scale: 'css' });
 });

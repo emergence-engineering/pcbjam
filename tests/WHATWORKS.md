@@ -387,73 +387,56 @@ cd tests/apps && ./build-test-apps.sh
 
 ## Baseline Screenshots
 
-The test suite captures screenshots during test runs for visual regression testing. These screenshots are compared against a baseline to detect unexpected visual changes.
+The test suite captures raw PNGs during test runs for visual regression testing,
+compared offline against committed per-engine baselines (the calibrated gate in
+`tools/screenshots/`).
 
 ### Directory Structure
 
 ```
 tests/
-├── baseline-screenshots/     # Known-good reference screenshots (146+ files)
-├── test-results/            # Screenshots from latest test run
-└── apps/
-    └── e2e/                 # Playwright test specs
+├── baseline-screenshots/
+│   ├── chromium/            # Known-good references, Chromium render
+│   └── firefox/             # Known-good references, Firefox render
+├── test-results/
+│   ├── chromium/            # Latest run's captures per engine
+│   └── firefox/
+└── screenshot-manifest.json  # Authoritative {name, engine} list
 ```
+
+Specs write via `stableShot(page, 'name.png')` / `shotPath(page, 'name.png')`
+(`e2e/utils/element-tracker.ts`) — the engine subdir is derived from the running
+browser, so the same spec on two engines produces two independent captures.
 
 ### Comparing Screenshots
 
-Use the comparison script to check for visual regressions:
-
 ```bash
-./scripts/compare-screenshots.sh
+cd tests
+npm run screenshots:check
 ```
 
-This will:
-- Compare all baseline screenshots with current test results
-- Report identical, different, and missing screenshots
-- Show file size differences (useful for detecting changes)
-
-Example output:
-```
-=== Screenshot Comparison ===
-Baseline:     /path/to/tests/baseline-screenshots
-Test Results: /path/to/tests/test-results
-
-=== Comparing Baseline Screenshots ===
-DIFFERENT: dialogs-msgbox-info-open.png (baseline: 47468B, current: 47478B, diff: 10B / .02%)
-
-=== Summary ===
-Total baseline screenshots: 121
-Identical:                  54
-Different:                  67
-Missing from test results:  0
-```
-
-### Understanding Differences
-
-Small byte differences (<2%) are typically caused by:
-- **Timestamps** in event logs (e.g., `[19:45:35]` vs `[18:49:35]`)
-- **PNG compression** variations between runs
-- **Anti-aliasing** differences
-
-These are **not** visual regressions. Visually inspect screenshots if you see larger differences.
+This diffs `test-results/<engine>/` against `baseline-screenshots/<engine>/` with
+per-engine calibrated noise floors and reports CHANGED / ADDED / REMOVED (removed
+detection is driven by the manifest). On each main push, CI posts the same report
+(triptych images labeled `[chromium]`/`[firefox]`) to Discord.
 
 ### Updating Baseline Screenshots
 
-After verifying changes are intentional, update the baseline:
+CI's Linux render is the source of truth — never copy local (Mac) renders into
+the baselines. Promote from a CI run instead (churn-free: only meaningfully
+changed images restage, and the manifest regenerates automatically):
 
 ```bash
-# Copy current screenshots to baseline
-cp tests/test-results/*.png tests/baseline-screenshots/
-
-# Or selectively update specific screenshots
-cp tests/test-results/dialog-*.png tests/baseline-screenshots/
+cd tests
+npm run screenshots:promote -- --run <ci-run-id>
+git commit
 ```
 
 ### Running Tests with Screenshots
 
 ```bash
 cd tests
-npm test                    # wx e2e specs + asyncify harness (kicad: npm run test:kicad)
+npm test                    # setup + the full merged run (all CI projects)
 npx playwright test --ui    # Interactive mode with screenshot preview
 ```
 

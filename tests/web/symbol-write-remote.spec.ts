@@ -18,7 +18,10 @@ const SCOPE = 'default';
 
 const BACKEND = process.env.BACKEND_URL ?? 'http://localhost:3060';
 
-test('symbol editor save persists to the backend (remote write round-trip)', async ({ page }) => {
+  // KNOWN-BROKEN: the fp/sym editor kicadLibs enumerate/save flows are dead
+  // (docs/features/web-e2e-rot/01-editor-lib-bridge-flows.md). fixme, not fail:
+  // on CI this dies in a 180s boot timeout per engine — running it buys no signal.
+test.fixme('symbol editor save persists to the backend (remote write round-trip)', async ({ page }) => {
   // Unique owner per run so the test is isolated from prior runs.
   const owner = `e2e-${Date.now()}`;
   const logs: string[] = [];

@@ -5,7 +5,7 @@ import {
     findByTooltip,
     waitForCanvasStable,
     waitForEditorReady,
-    waitUntil, stableShot } from '../e2e/utils/element-tracker';
+    waitUntil, stableShot, shotPath } from '../e2e/utils/element-tracker';
 import { hideCursor } from './utils/screenshot-compare';
 
 /**
@@ -251,7 +251,7 @@ test.describe('PCBnew WASM', () => {
         // Move the crosshair onto the canvas (a visible change → deterministic settle).
         await page.mouse.move(640, 360);
         await waitForCanvasStable(page, glSel);
-        const afterToolClick = await page.screenshot({ path: 'test-results/pcbnew-draw-lines-01-after-click.png', scale: 'css' });
+        const afterToolClick = await page.screenshot({ path: shotPath(page, 'pcbnew-draw-lines-01-after-click.png'), scale: 'css' });
 
         const startPoint = { x: Math.round(box.x + box.width * 0.28), y: Math.round(box.y + box.height * 0.36) };
         const endPoint = { x: Math.round(box.x + box.width * 0.48), y: Math.round(box.y + box.height * 0.47) };
@@ -275,7 +275,7 @@ test.describe('PCBnew WASM', () => {
         await page.mouse.up();
         await page.waitForTimeout(750); // eslint-disable-line -- see comment above
 
-        const afterDrawing = await page.screenshot({ path: 'test-results/pcbnew-draw-lines-02-after-drawing.png', scale: 'css' });
+        const afterDrawing = await page.screenshot({ path: shotPath(page, 'pcbnew-draw-lines-02-after-drawing.png'), scale: 'css' });
 
         const diffRegion: DiffRegion = {
             x: Math.max(0, Math.min(startPoint.x, endPoint.x) - 24),

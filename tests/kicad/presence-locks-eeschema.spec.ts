@@ -154,7 +154,11 @@ async function dragFromWire(page: Page): Promise<void> {
   await page.mouse.down();
   await page.mouse.move(at.x + 100, at.y + 60, { steps: 10 });
   await page.mouse.up();
-  await page.waitForTimeout(800);
+  // The drag commit has no JS-observable in the VETOED (locked) case — the whole
+  // point is that NOTHING happens. Bounded chance for a slow wrongful move to
+  // surface before the caller's position assert; the unlocked control leg proves
+  // the gesture itself works via its own position poll.
+  await page.waitForTimeout(800); // eslint-disable-line -- documented interaction dwell: negative-assert window
 }
 
 test("a locked wire resists a real drag; the same drag moves it unlocked", async ({

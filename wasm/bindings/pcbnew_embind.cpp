@@ -1739,6 +1739,28 @@ std::string pcbCollabTestSelectComponent()
     return toUtf8( target->m_Uuid.AsString() );
 }
 
+// Test helper (0007): select a SPECIFIC item by uuid through the selection
+// tool. The tiebreak specs need both tabs holding the SAME item, and
+// cross-tab "first footprint" iteration order is not guaranteed — a
+// ysync-materialized board need not match the seeding tab's parse order.
+bool pcbCollabTestSelectByUuid( std::string aUuid )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return false;
+
+    BOARD_ITEM* item = fr->GetBoard()->ResolveItem(
+            KIID( wxString::FromUTF8( aUuid.c_str() ) ), /*allowNull*/ true );
+
+    if( !item )
+        return false;
+
+    presenceCore().selectItem( item );
+
+    return true;
+}
+
 // JS → C++ (0007): the local client LOST the selection tiebreak — release the
 // contested items (only those) from the live selection. If an interactive
 // tool (move/drag) holds them, cancel it first (ESC semantics — the preview
@@ -2036,6 +2058,7 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     function("kicadCollabTestGetLocked", &pcbCollabTestGetLocked);
     function("kicadCollabTestSelectFirst", &pcbCollabTestSelectFirst);
     function("kicadCollabTestSelectComponent", &pcbCollabTestSelectComponent);
+    function("kicadCollabTestSelectByUuid", &pcbCollabTestSelectByUuid);
     function("kicadCollabTestClearSelection", &pcbCollabTestClearSelection);
     // Library reload after a remote (synced) lib edit — r2-idb-sync realtime.
     function("kicadLibsReload", &pcbjam_libs::reloadLibrary);
