@@ -28,12 +28,6 @@ async function canvasCenter(page: Page): Promise<{ x: number; y: number }> {
 }
 
 test('symbol chooser footprint selector populates and preview renders (eeschema)', async ({ page }) => {
-  // KNOWN-BROKEN on CI only: the flow completes but a wasm "index out of
-  // bounds" pageerror fires under CI's software GL (llvmpipe AND SwiftShader;
-  // clean on real GL). Expected-fail rather than fixme — it finishes fast and
-  // the trap deserves a red flag the day it starts reproducing locally too.
-  // docs/features/web-e2e-rot/01-editor-lib-bridge-flows.md (§CI-only sibling).
-  test.fail(!!process.env.CI, 'CI software-GL wasm trap: index out of bounds');
   test.setTimeout(420000);
   const logs: string[] = [];
   page.on('console', (m) => logs.push(`[${m.type()}] ${m.text()}`));
