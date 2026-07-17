@@ -128,6 +128,9 @@ const BIG_MODULE_SPECS = [
   "**/ysync-two-tab.spec.ts",
   "**/ysync-repros-pcbnew.spec.ts",
   "**/ysync-repros-eeschema.spec.ts",
+  // Boots pcbnew.html (merged module) to stack Board Setup → Import Settings →
+  // file dialog — same V8 routing.
+  "**/import-settings-modal-stack.spec.ts",
 ];
 
 // Runtime-perf specs run ONLY on the Chromium 'perf' project below: they need
