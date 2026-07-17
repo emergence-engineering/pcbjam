@@ -65,7 +65,7 @@ CXXFLAGS += $(EH_FLAGS)
 # - js_writeTextToClipboard, js_readTextFromClipboard, js_clipboardHasText, js_clearClipboard: for clipboard
 # - js_enumerateFonts: for font enumeration via Local Font Access API
 BASE_LDFLAGS = $(EH_FLAGS) -sALLOW_MEMORY_GROWTH -sERROR_ON_UNDEFINED_SYMBOLS=0 \
-               -s "EXPORTED_RUNTIME_METHODS=['HEAPU8','HEAP8','HEAP32','ccall']" \
+               -s "EXPORTED_RUNTIME_METHODS=['HEAPU8','HEAP8','HEAP32','ccall','stringToNewUTF8']" \
                -sASYNCIFY=1 \
                -sASYNCIFY_STACK_SIZE=65536 \
                -sASYNCIFY_IMPORTS=['startModal','js_writeTextToClipboard','js_readTextFromClipboard','js_clipboardHasText','js_clearClipboard','js_enumerateFonts']
@@ -213,7 +213,8 @@ all: minimal_test.html \
      $(S)/stattext-ellipsize/stattext-ellipsize_test.html \
      $(S)/tooltip-lifetime/tooltip-lifetime_test.html \
      $(S)/tooltip-toolbar/tooltip-toolbar_test.html \
-     $(S)/warp-pointer/warp-pointer_test.html
+     $(S)/warp-pointer/warp-pointer_test.html \
+     $(S)/selevent-clientdata/selevent-clientdata_test.html
 
 # Main test app
 minimal_test.o: minimal_test.cpp
@@ -269,6 +270,19 @@ $(S)/warp-pointer/warp-pointer_test.html: $(S)/warp-pointer/warp-pointer_test.o 
 	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
 
 warp-pointer: $(S)/warp-pointer/warp-pointer_test.html
+
+# --- wxWidgets DOM-port vs native parity reproductions (parity-audit) ---------
+
+# Selection command events must carry per-item client data (choice/listbox/
+# combobox) — else KiCad's Track & Via Properties dialog null-derefs.
+$(S)/selevent-clientdata/selevent-clientdata_test.o: $(S)/selevent-clientdata/selevent-clientdata_test.cpp
+	$(CXX) -c $(CXXFLAGS) $< -o $@
+
+$(S)/selevent-clientdata/selevent-clientdata_test.html: $(S)/selevent-clientdata/selevent-clientdata_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_NOGL) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+selevent-clientdata: $(S)/selevent-clientdata/selevent-clientdata_test.html
+.PHONY: selevent-clientdata
 
 # Menu test (no GL)
 $(S)/menu/menu_test.o: $(S)/menu/menu_test.cpp
