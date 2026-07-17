@@ -1,10 +1,12 @@
 # Merged pcbnew+eeschema WASM editor (editor-unification Part 2).
 #
-# ONE executable links BOTH kifaces; the editor frame (PCB / Footprint / Schematic /
-# Symbol) is chosen at runtime by single_top.cpp's --frame flag. Added from the kicad
-# fork's top-level CMakeLists.txt via add_subdirectory( ${KICAD_WASM_LAYER}/editor )
-# when EMSCRIPTEN AND KICAD_WASM_MERGED_EDITOR — after eeschema/ and pcbnew/, so both
-# kifaces' CACHE INTERNAL library lists exist here.
+# ONE executable links THREE kifaces (pcbnew, eeschema, cvpcb); the editor frame
+# (PCB / Footprint / Schematic / Symbol) is chosen at runtime by single_top.cpp's
+# --frame flag, while cvpcb only opens in-session via eeschema's Assign Footprints
+# (KIWAY::Player( FRAME_CVPCB )). Added from the kicad fork's top-level CMakeLists.txt
+# via add_subdirectory( ${KICAD_WASM_LAYER}/editor ) when EMSCRIPTEN AND
+# KICAD_WASM_MERGED_EDITOR — after eeschema/, pcbnew/ and cvpcb/, so the kifaces'
+# CACHE INTERNAL library lists exist here.
 #
 # Collision handling (see KICAD_WASM_PCB_SIDE_RENAMES in the fork's top-level
 # CMakeLists.txt and docs/features/editor-unification/): the PCB-side targets compile
@@ -37,10 +39,10 @@ set_source_files_properties( ${CMAKE_SOURCE_DIR}/common/single_top.cpp PROPERTIE
     COMPILE_DEFINITIONS "TOP_FRAME=FRAME_PCB_EDITOR;KICAD_MERGED_KIFACES"
     )
 
-# Both kifaces' full library sets (exported CACHE INTERNAL by pcbnew/ and eeschema/).
-# The overlap (common, kicommon, gal, ...) is deduped; generator-expression entries
-# (native-only pads_common/pcm) are inert strings that evaluate to nothing here.
-set( KICAD_EDITOR_LIBS ${PCBNEW_KIFACE_LIBRARIES} ${EESCHEMA_KIFACE_LIBRARIES} )
+# All three kifaces' full library sets (exported CACHE INTERNAL by pcbnew/, eeschema/
+# and cvpcb/). The overlap (common, kicommon, gal, ...) is deduped; generator-expression
+# entries (native-only pads_common/pcm) are inert strings that evaluate to nothing here.
+set( KICAD_EDITOR_LIBS ${PCBNEW_KIFACE_LIBRARIES} ${EESCHEMA_KIFACE_LIBRARIES} ${CVPCB_KIFACE_LIBRARIES} )
 list( REMOVE_DUPLICATES KICAD_EDITOR_LIBS )
 
 target_link_libraries( kicad_editor PRIVATE ${KICAD_EDITOR_LIBS} )

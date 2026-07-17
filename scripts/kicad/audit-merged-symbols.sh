@@ -31,11 +31,14 @@ NM="${EMSDK:?EMSDK not set}/upstream/bin/llvm-nm"
 OUT="${TMPDIR:-/tmp}/merged-symbol-audit"
 mkdir -p "${OUT}"
 
+SKIP_STANDALONE=
 if [ ! -d "${P}/pcbnew" ] || [ ! -d "${E}/eeschema" ]; then
-    echo "ERROR: need built kicad-pcbnew and kicad-eeschema trees under ${BUILD_ROOT}" >&2
-    echo "       (./docker/build.sh pcbnew,eeschema --compile-only)" >&2
-    exit 1
+    echo "== pcb/sch standalone audit SKIPPED: need built kicad-pcbnew and kicad-eeschema" >&2
+    echo "   trees under ${BUILD_ROOT} (./docker/build.sh pcbnew,eeschema --compile-only)" >&2
+    SKIP_STANDALONE=1
 fi
+
+if [ -z "${SKIP_STANDALONE}" ]; then
 
 pcb_files() {
     find "${P}/pcbnew/CMakeFiles/pcbnew_kiface_objects.dir" -name '*.o'
@@ -94,5 +97,78 @@ comm -12 "${OUT}/pcb_weak.txt" "${OUT}/sch_weak.txt" \
     | grep -vE "${CLASSES}" \
     | grep -E '_Z(TV|TI|TS|N)[0-9]+[A-Z]' \
     | grep -vE 'magic_enum|wxEventFunctorMethod|wxNavigationEnabled|wxSimplebook|wxDataView|wxMenuBar|wxVector|KIFACE|COLLECTOR|RC_JSON|PARAM_SCALED|EDA_|BOX2|WX_MENUBAR|SEARCH_HANDLER' || true
+
+fi # SKIP_STANDALONE
+
+# -------------------------------------------------------------------------
+# cvpcb third-kiface audit (feature/cvpcb-wasm). Unlike pcbnew/eeschema above
+# (audited from their option-OFF per-app trees), cvpcb_kiface_objects only
+# exists in the merged kicad-kicad_editor tree — where the renames ARE applied,
+# so these intersections audit exactly what links into the image. Expected
+# output: EMPTY strong intersections against both engines.
+M="${BUILD_ROOT}/kicad-kicad_editor"
+
+if [ -d "${M}/cvpcb/CMakeFiles/cvpcb_kiface_objects.dir" ]; then
+    echo "== collecting cvpcb symbols from merged tree (llvm-nm)..." >&2
+
+    cv_files()  { find "${M}/cvpcb/CMakeFiles/cvpcb_kiface_objects.dir" -name '*.o'; }
+    mpcb_files() {
+        find "${M}/pcbnew/CMakeFiles/pcbnew_kiface_objects.dir" -name '*.o'
+        ls "${M}/common/libpcbcommon.a" \
+           "${M}/pcbnew/connectivity/libconnectivity.a" \
+           "${M}/pcbnew/router/libpnsrouter.a" \
+           "${M}/pcbnew/navlib/libpcbnew_navlib.a" \
+           "${M}/utils/idftools/libidf3.a" \
+           "${M}"/pcbnew/pcb_io/*/*.a 2>/dev/null || true
+        find "${M}/3d-viewer" -name '*.o' 2>/dev/null || true
+    }
+    msch_files() {
+        find "${M}/eeschema/CMakeFiles/eeschema_kiface_objects.dir" -name '*.o'
+        ls "${M}/eeschema/navlib/libeeschema_navlib.a" 2>/dev/null || true
+    }
+
+    ${NM} --defined-only --extern-only --format=posix $(cv_files) 2>/dev/null \
+        | awk '$2 ~ /^[TDBR]$/ {print $1}' | sort -u > "${OUT}/cv_strong.txt"
+    ${NM} --defined-only --extern-only --format=posix $(cv_files) 2>/dev/null \
+        | awk '$2 ~ /^[WVwv]$/ {print $1}' | sort -u > "${OUT}/cv_weak.txt"
+    ${NM} --defined-only --extern-only --format=posix $(mpcb_files) 2>/dev/null \
+        | awk '$2 ~ /^[TDBR]$/ {print $1}' | sort -u > "${OUT}/mpcb_strong.txt"
+    ${NM} --defined-only --extern-only --format=posix $(mpcb_files) 2>/dev/null \
+        | awk '$2 ~ /^[WVwv]$/ {print $1}' | sort -u > "${OUT}/mpcb_weak.txt"
+    ${NM} --defined-only --extern-only --format=posix $(msch_files) 2>/dev/null \
+        | awk '$2 ~ /^[TDBR]$/ {print $1}' | sort -u > "${OUT}/msch_strong.txt"
+    ${NM} --defined-only --extern-only --format=posix $(msch_files) 2>/dev/null \
+        | awk '$2 ~ /^[WVwv]$/ {print $1}' | sort -u > "${OUT}/msch_weak.txt"
+
+    # Shared-lib symbols from the MERGED tree (one definition linked once — safe
+    # dedup), independent of the standalone trees' shared.txt above.
+    ${NM} --defined-only --extern-only --format=posix \
+        "${M}/common/libcommon.a" "${M}/common/libkicommon.a" \
+        "${M}/common/gal/libkigal.a" "${M}/libs/core/libcore.a" \
+        "${M}/libs/kimath/libkimath.a" "${M}/libs/kiplatform/libkiplatform.a" \
+        "${M}/scripting/libscripting.a" "${M}/api/libkiapi.a" \
+        "${M}/libs/sexpr/libsexpr.a" 2>/dev/null \
+        | awk '{print $1}' | sort -u > "${OUT}/shared_merged.txt"
+
+    echo "== cvpcb vs pcbnew STRONG duplicates (merged tree — must be empty):"
+    comm -12 "${OUT}/cv_strong.txt" "${OUT}/mpcb_strong.txt" || true
+
+    echo "== cvpcb vs eeschema STRONG duplicates (merged tree — must be empty):"
+    comm -12 "${OUT}/cv_strong.txt" "${OUT}/msch_strong.txt" || true
+
+    echo "== cvpcb WEAK duplicates not from shared libs, mentioning class tokens"
+    echo "   (review anything printed — same criteria as the pcb/sch weak audit."
+    echo "    Reviewed 2026-07-17 as identical-definition dedups, now filtered:"
+    echo "    PCB_BASE_FRAME/PCB_VIEWER_TOOLS/PCB_EDITOR_CONDITIONS/NETLIST inline"
+    echo "    members — cvpcb compiles pcbnew's headers with the same renames; plus"
+    echo "    common-lib ACTIONS/COMMON_CONTROL/GetAppSettings<CVPCB_SETTINGS>.):"
+    cat "${OUT}/mpcb_weak.txt" "${OUT}/msch_weak.txt" | sort -u > "${OUT}/engines_weak.txt"
+    comm -12 "${OUT}/cv_weak.txt" "${OUT}/engines_weak.txt" \
+        | comm -23 - "${OUT}/shared_merged.txt" \
+        | grep -E '_Z(TV|TI|TS|N)[0-9]+[A-Z]' \
+        | grep -vE 'magic_enum|wxEventFunctorMethod|wxNavigationEnabled|wxSimplebook|wxDataView|wxMenuBar|wxVector|KIFACE|COLLECTOR|RC_JSON|PARAM_SCALED|EDA_|BOX2|WX_MENUBAR|SEARCH_HANDLER|FOOTPRINT_|LISTBOX|PCB_BASE_FRAME|PCB_VIEWER_TOOLS|PCB_EDITOR_CONDITIONS|COMMON_CONTROL|CVPCB_SETTINGS|7ACTIONS|7NETLIST' || true
+else
+    echo "== cvpcb audit SKIPPED (no merged kicad-kicad_editor tree with cvpcb_kiface_objects under ${BUILD_ROOT})" >&2
+fi
 
 echo "== audit done (details in ${OUT})"
