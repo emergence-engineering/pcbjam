@@ -530,6 +530,14 @@
       "engine": "chromium"
     },
     {
+      "name": "eeschema-sim-frame.png",
+      "engine": "chromium"
+    },
+    {
+      "name": "eeschema-sim-plot.png",
+      "engine": "chromium"
+    },
+    {
       "name": "eeschema-url-regex.png",
       "engine": "chromium"
     },
@@ -679,6 +687,10 @@
     },
     {
       "name": "htmlwin-08c-about.png",
+      "engine": "chromium"
+    },
+    {
+      "name": "import-settings-modal-stack.png",
       "engine": "chromium"
     },
     {
@@ -1690,6 +1702,14 @@
       "engine": "firefox"
     },
     {
+      "name": "eeschema-sim-frame.png",
+      "engine": "firefox"
+    },
+    {
+      "name": "eeschema-sim-plot.png",
+      "engine": "firefox"
+    },
+    {
       "name": "eeschema-url-regex.png",
       "engine": "firefox"
     },
@@ -1727,6 +1747,10 @@
     },
     {
       "name": "gerbview-print-02-reopened.png",
+      "engine": "firefox"
+    },
+    {
+      "name": "import-settings-modal-stack.png",
       "engine": "firefox"
     },
     {
