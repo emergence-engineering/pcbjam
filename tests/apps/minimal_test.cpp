@@ -292,10 +292,9 @@ TestFrame::TestFrame(const wxString& title)
 
 void TestFrame::LogEvent(const wxString& msg)
 {
-    // Get timestamp
-    wxDateTime now = wxDateTime::Now();
-    wxString timestamp = now.Format("[%H:%M:%S] ");
-    wxString fullMsg = timestamp + msg;
+    // No wall-clock prefix: the log is screenshot-baselined, and a timestamp
+    // makes every Event-Log shot diff on every run.
+    wxString fullMsg = msg;
 
     // Add to listbox
     m_eventLog->Append(fullMsg);
