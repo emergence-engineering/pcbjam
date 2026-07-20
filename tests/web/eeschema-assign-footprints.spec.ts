@@ -131,14 +131,16 @@ test('Tools → Assign Footprints opens CvPcb (merged third kiface)', async ({ p
     }
   }, item);
 
-  // TODO(cvpcb-open-trap): ~1/9 local web-firefox runs die right here — the
-  // EVT.MENU dispatch traps ("wx_dom_event(48,9) failed" + worker
-  // "RuntimeError: index out of bounds"), eeschema survives, CvPcb never
-  // appears, zero libs-bridge calls. Same trap signature as the
-  // eeschema-fp-selector CI trap (docs/features/web-e2e-rot/01) — which
-  // reproduced on macOS real GL, so it is NOT llvmpipe-only. Needs a
-  // debug-symbol repro; post-link binaryen rewriting makes the shipped
-  // module's DWARF useless for symbolizing the trap offset.
+  // The ~1/9 "index out of bounds" trap that used to fire right here (a pool
+  // worker dying in the footprint AsyncLoad items, then eeschema's EVT.MENU
+  // dispatch aborting on the broken future) was root-caused to wxString's
+  // UTF-8 build mutating SHARED strings on read-only access from the
+  // concurrent workers — fixed in the wx fork (per-thread iterator registry +
+  // position cache disabled under Emscripten, include/wx/string.h), with the
+  // red/green repro in tests/apps/standalone/wxstring-mt. The
+  // eeschema-fp-selector "CI-only" trap (docs/features/web-e2e-rot/01) is the
+  // same family (it reproduced on macOS real GL, so it was never
+  // llvmpipe-specific).
   //
   // The frame construction + netlist mail runs off wxPostEvent'd follow-ups,
   // which the wx WASM port only flushes on input events — wiggle the mouse

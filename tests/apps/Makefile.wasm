@@ -611,6 +611,19 @@ raytrace-threads: $(S)/raytrace-threads/raytrace_threads_test.html
 # Include the raytracer-threading repro in the default `all` build (prereqs accumulate).
 all: $(S)/raytrace-threads/raytrace_threads_test.html
 
+# wxString UTF-8 multithreading red/green tests (shared-iterator registry,
+# position cache, iterator fix-up) — see the app header for the modes.
+$(S)/wxstring-mt/wxstring_mt_test.o: $(S)/wxstring-mt/wxstring_mt_test.cpp
+	$(CXX) -c $(CXXFLAGS) -pthread $< -o $@
+
+$(S)/wxstring-mt/wxstring_mt_test.html: $(S)/wxstring-mt/wxstring_mt_test.o $(WX_CORE_LIB) $(JS_FILES)
+	$(CXX) $< $(LDFLAGS_PTHREAD) --pre-js $(JS) --shell-file $(HTML) -o $@
+
+wxstring-mt: $(S)/wxstring-mt/wxstring_mt_test.html
+.PHONY: wxstring-mt
+
+all: $(S)/wxstring-mt/wxstring_mt_test.html
+
 # Un-shimmed copy of KiCad's BS::thread_pool: the single-thread #ifdef __EMSCRIPTEN__ shim in
 # detach_task is disabled (-> #if 0) so the pool tests exercise REAL multithreading WITHOUT
 # modifying the pristine KiCad header and WITHOUT a compile macro. Regenerated at parse time to
