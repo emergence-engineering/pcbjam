@@ -214,6 +214,28 @@ export function presenceUser(): PresenceUser {
   return { id: slug, name, color: colorForUser(slug) };
 }
 
+/** Author identity stamped onto comments. */
+export interface CommentAuthor {
+  /** Slug — the IDENTITY key (colors, "is this mine?"). Never a display name. */
+  id: string;
+  /** Display name; falls back to the slug when no session identity is loaded. */
+  name: string;
+  /** Only present for a real authenticated session. */
+  email?: string;
+}
+
+/**
+ * Who to attribute a new comment to. Same identity as `presenceUser()`, plus the
+ * email, and kept separate because comments DENORMALIZE these at write time
+ * (comments-wire.ts) whereas presence re-broadcasts them live.
+ */
+export function commentAuthor(): CommentAuthor {
+  const slug = userSlug();
+  const session = sessionIdentity();
+  const mine = session && session.slug === slug ? session : null;
+  return { id: slug, name: mine?.name ?? slug, email: mine?.email };
+}
+
 /**
  * DEV-TIME presence style tuner (collab-presence): VITE_PRESENCE_TUNER=1 mounts
  * a floating panel that live-patches the wasm overlay style

@@ -15,10 +15,11 @@ import {
   type KicadDoc,
   type Tool,
 } from "@pcbjam/shared";
-import { ChevronDown, ChevronUp, EyeOff, Loader2, PanelsTopLeft } from "lucide-react";
+import { ChevronDown, ChevronUp, Eye, EyeOff, Loader2, PanelsTopLeft } from "lucide-react";
 import {
   API_BASE_URL,
   APP_URL,
+  commentAuthor,
   currentScope,
   libsSourceConfig,
   modelsSourceConfig,
@@ -86,7 +87,11 @@ import {
 } from "@/wasm/collab/comments";
 import { PresenceRoster } from "@/components/PresenceRoster";
 import { CommentLayer } from "@/components/CommentLayer";
-import { OverlayMenu } from "@/components/OverlayMenu";
+import {
+  OverlayMenu,
+  OverlayMenuSection,
+  overlayRowClass,
+} from "@/components/OverlayMenu";
 import { hasTunerBridge, PresenceTuner, type TunerModule } from "@/components/PresenceTuner";
 import {
   createSheetCollabManager,
@@ -1164,7 +1169,7 @@ export function WasmTool({
       const ctl = createComments({
         doc,
         mod: win.Module,
-        user: presenceUser().id,
+        user: commentAuthor(),
         tool,
         // Author colors follow the live nth-in-room assignment when the
         // author is present; offline authors fall back to the name hash.
@@ -1684,58 +1689,79 @@ export function WasmTool({
           the one control that stays up in canvas-only (chrome-hidden) mode. */}
       {ready && (
         <OverlayMenu badge={peers.length}>
+          {/* PEOPLE — who else is here, and whose view you're locked to. The
+              follow state lives on each person's own row (PresenceRoster), so
+              there is no separate "Following…" banner to keep in sync. */}
           {peers.length > 0 && (
-            <PresenceRoster
-              peers={peers}
-              activeSheetPath={activeSheetPath}
-              following={followingTarget}
-              onFollow={(t) => {
-                if (t) followRef.current?.follow(t);
-                else followRef.current?.unfollow();
-              }}
-            />
+            <OverlayMenuSection label="People">
+              <PresenceRoster
+                peers={peers}
+                activeSheetPath={activeSheetPath}
+                following={followingTarget}
+                onFollow={(t) => {
+                  if (t) followRef.current?.follow(t);
+                  else followRef.current?.unfollow();
+                }}
+              />
+            </OverlayMenuSection>
           )}
-          {sourceDescriptor && <SourceChip descriptor={sourceDescriptor} />}
-          {readOnly && (
-            <span
-              data-testid="view-only-pill"
-              className="flex h-8 items-center rounded-full bg-black/70 px-3 text-xs font-medium text-white shadow-sm ring-1 ring-inset ring-white/20"
-            >
-              View only
-            </span>
+
+          {/* DOCUMENT — where this file came from and whether you may edit it.
+              SourceChip is shared with the light project pages, so instead of
+              restyling it we ask for its `muted` tone: colour drops to a dot,
+              and the chip sits in a normal row like everything else. */}
+          {(sourceDescriptor || readOnly) && (
+            <OverlayMenuSection label="Document">
+              {sourceDescriptor && (
+                <div className={`${overlayRowClass} cursor-default`}>
+                  <SourceChip descriptor={sourceDescriptor} tone="muted" />
+                </div>
+              )}
+              {readOnly && (
+                <div
+                  data-testid="view-only-pill"
+                  className={`${overlayRowClass} cursor-default`}
+                >
+                  <EyeOff size={14} className="shrink-0 text-white/50" />
+                  <span>View only</span>
+                  <span className="ml-auto text-[10px] text-white/40">
+                    read-only
+                  </span>
+                </div>
+              )}
+            </OverlayMenuSection>
           )}
-          {followingTarget && (
-            <div className="flex items-center gap-2 text-xs text-white">
-              <span>
-                Following <span className="font-semibold">{followingTarget.name}</span>
-              </span>
-              <button
-                type="button"
-                className="rounded-full bg-white/15 px-2 py-0.5 font-medium hover:bg-white/25"
-                onClick={() => followRef.current?.unfollow()}
-              >
-                Stop
-              </button>
-            </div>
-          )}
+
           {commentsCtl && (
-            <div
-              data-testid="overlay-menu-comments"
-              ref={setCommentsSlot}
-              className="flex w-full flex-col items-start gap-2"
-            />
+            <OverlayMenuSection label="Comments">
+              <div
+                data-testid="overlay-menu-comments"
+                ref={setCommentsSlot}
+                className="flex w-full flex-col items-start gap-2"
+              />
+            </OverlayMenuSection>
           )}
+
           {setChromeFn !== null && !readOnly && (
-            <button
-              data-testid="chrome-toggle"
-              aria-pressed={chromeHidden}
-              className="flex h-8 items-center gap-2 rounded-full bg-black/70 px-3 text-xs text-white shadow-sm ring-1 ring-inset ring-white/20 hover:bg-black/85"
-              title={`${chromeHidden ? "Show" : "Hide"} UI (${CHROME_HOTKEY_LABEL})`}
-              onClick={() => toggleChromeHidden()}
-            >
-              {chromeHidden ? <PanelsTopLeft size={15} /> : <EyeOff size={15} />}
-              {chromeHidden ? "Show UI" : "Hide UI"}
-            </button>
+            <OverlayMenuSection label="View">
+              <button
+                data-testid="chrome-toggle"
+                aria-pressed={chromeHidden}
+                className={overlayRowClass}
+                title={`${chromeHidden ? "Show" : "Hide"} UI (${CHROME_HOTKEY_LABEL})`}
+                onClick={() => toggleChromeHidden()}
+              >
+                {chromeHidden ? (
+                  <PanelsTopLeft size={14} className="shrink-0 text-white/50" />
+                ) : (
+                  <EyeOff size={14} className="shrink-0 text-white/50" />
+                )}
+                <span>{chromeHidden ? "Show UI" : "Hide UI"}</span>
+                <kbd className="ml-auto rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium text-white/50">
+                  {CHROME_HOTKEY_LABEL}
+                </kbd>
+              </button>
+            </OverlayMenuSection>
           )}
         </OverlayMenu>
       )}

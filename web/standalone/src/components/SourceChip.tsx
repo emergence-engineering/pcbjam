@@ -23,14 +23,41 @@ const TONES: Record<SourceKind, string> = {
   "remote-rw": "bg-sky-600 text-white ring-sky-300/30",
 };
 
+// MUTED variant, for use on a known-dark surface (the editor's overlay menu).
+// The saturated fills above exist because the chip must survive an unknown
+// backdrop; inside the menu the backdrop IS known, and a solid sky/emerald pill
+// just shouts. Here the colour drops to a small leading dot and the chip itself
+// becomes another neutral row.
+const MUTED_TONES: Record<SourceKind, string> = {
+  local: "text-emerald-300/90",
+  "remote-ro": "text-amber-300/90",
+  "remote-rw": "text-sky-300/90",
+};
+
 export function SourceChip({
   descriptor,
   className = "",
+  tone = "solid",
 }: {
   descriptor: SourceDescriptor;
   className?: string;
+  /** `muted` for known-dark surfaces (see MUTED_TONES). */
+  tone?: "solid" | "muted";
 }) {
   const Icon = ICONS[descriptor.kind];
+
+  if (tone === "muted") {
+    return (
+      <span
+        title={descriptor.description}
+        className={`inline-flex items-center gap-2 text-xs font-medium text-white/90 ${className}`}
+      >
+        <Icon size={14} className={`shrink-0 ${MUTED_TONES[descriptor.kind]}`} />
+        {descriptor.label}
+      </span>
+    );
+  }
+
   return (
     <span
       title={descriptor.description}

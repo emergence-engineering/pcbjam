@@ -115,8 +115,12 @@ const PUSH_THROTTLE_MS = 30;
 export function createComments(opts: {
   doc: Y.Doc;
   mod: CommentPinsModule;
-  /** Author slug for new messages (presence identity). */
-  user: string;
+  /**
+   * Author for new messages. `id` is the slug (identity key); `name`/`email`
+   * are denormalized onto each message at write time so a comment still shows
+   * a real author when they are offline, renamed, or gone (comments-wire.ts).
+   */
+  user: { id: string; name?: string; email?: string };
   tool: string;
   /** Presence color resolver (nth-in-room); undefined falls back to the hash. */
   colorFor?: (userId: string) => string | undefined;
@@ -223,10 +227,21 @@ export function createComments(opts: {
       return { pos: { x: world.x, y: world.y } };
     },
     create(anchor, body) {
-      return createThread(doc, { anchor, author: user, body });
+      return createThread(doc, {
+        anchor,
+        author: user.id,
+        authorName: user.name,
+        authorEmail: user.email,
+        body,
+      });
     },
     reply(threadId, body) {
-      addMessage(doc, threadId, { author: user, body });
+      addMessage(doc, threadId, {
+        author: user.id,
+        authorName: user.name,
+        authorEmail: user.email,
+        body,
+      });
     },
     edit(threadId, messageId, body) {
       return editMessage(doc, threadId, messageId, body);

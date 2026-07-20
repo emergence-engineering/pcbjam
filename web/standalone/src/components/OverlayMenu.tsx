@@ -13,7 +13,47 @@ import { Users } from "lucide-react";
  * toasts) by decision: it is trivially dismissed (click-away, Esc, the FAB)
  * and can be dragged out of the way. Stays up in chrome-hidden mode — it is
  * the canvas-only survivor the chrome toggle used to be.
+ *
+ * VISUAL SYSTEM. The panel previously stacked whatever its children happened to
+ * look like — free-floating pills of different heights, radii and surfaces, all
+ * left-aligned with a gap. It read as debris rather than a menu. The primitives
+ * below are the fix and the contract:
+ *
+ *   OverlayMenuSection — a labelled group, separated from its neighbours.
+ *   overlayRowClass    — the shared row shape for anything interactive.
+ *
+ * Children compose these instead of inventing their own chrome. Two deliberate
+ * exceptions stay self-styled because they are shared with light-background
+ * pages (SourceChip) or own a nontrivial internal layout (PresenceRoster) —
+ * those are wrapped in a section rather than restyled.
  */
+
+/** Row shape for any interactive item in the panel. Full-width so the panel
+ *  reads as a list; the hover/active states are the only affordance needed. */
+export const overlayRowClass =
+  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs " +
+  "text-white/90 transition-colors hover:bg-white/10 " +
+  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/40";
+
+/** A labelled group. `label` is omitted for the first/unnamed group. */
+export function OverlayMenuSection({
+  label,
+  children,
+}: {
+  label?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex w-full flex-col gap-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
+      {label && (
+        <div className="px-2 text-[10px] font-semibold uppercase tracking-wide text-white/40">
+          {label}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
 
 const POS_KEY = "pcbjam:overlay-menu-pos";
 const FAB_SIZE = 36;
@@ -156,8 +196,10 @@ export function OverlayMenu({
         onPointerDown={onFabPointerDown}
         onPointerMove={onFabPointerMove}
         onPointerUp={onFabPointerUp}
-        className={`relative flex h-9 w-9 items-center justify-center rounded-full shadow-md ring-1 ring-inset ring-white/25 ${
-          open ? "bg-sky-600 text-white" : "bg-black/75 text-white hover:bg-black/90"
+        className={`relative flex h-9 w-9 items-center justify-center rounded-full text-white shadow-lg ring-1 ring-inset transition-colors ${
+          open
+            ? "bg-sky-600 ring-sky-300/40"
+            : "bg-neutral-950/80 ring-white/15 backdrop-blur-sm hover:bg-neutral-900/90"
         }`}
         style={{ touchAction: "none" }}
       >
@@ -175,10 +217,20 @@ export function OverlayMenu({
       {open && (
         <div
           data-testid="overlay-menu-panel"
-          className={`absolute flex w-72 flex-col items-start gap-2 rounded-lg bg-black/85 p-2 shadow-xl ring-1 ring-inset ring-white/20 ${
+          className={`absolute flex w-72 flex-col gap-2 rounded-xl bg-neutral-950/90 p-2 shadow-2xl ring-1 ring-inset ring-white/15 backdrop-blur-sm ${
             onLeftHalf ? "left-0" : "right-0"
           } ${onTopHalf ? "top-11" : "bottom-11"}`}
         >
+          <div className="flex items-center justify-between px-2 pt-0.5">
+            <span className="text-[11px] font-semibold tracking-wide text-white/70">
+              Session
+            </span>
+            {badge > 0 && (
+              <span className="text-[10px] text-white/40">
+                {badge} {badge === 1 ? "other" : "others"} here
+              </span>
+            )}
+          </div>
           {children}
         </div>
       )}

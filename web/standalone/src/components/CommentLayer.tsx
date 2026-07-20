@@ -1,7 +1,8 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
+import { overlayRowClass } from "@/components/OverlayMenu";
 import type { CommentAnchor } from "@pcbjam/shared";
-import { Eye, EyeOff, List, MessageSquarePlus, MessageSquareText, X } from "lucide-react";
+import { Eye, EyeOff, List, MessageSquarePlus, X } from "lucide-react";
 import {
   screenToWorld,
   worldToScreen,
@@ -27,6 +28,28 @@ interface CssRect {
   y: number;
   width: number;
   height: number;
+}
+
+
+/**
+ * What to show for a comment author, and what to reveal on hover.
+ *
+ * `author`/`createdBy` is the SLUG — the identity key used for colors and
+ * ownership. It is what used to be rendered, which is why comments showed a
+ * scope-looking string instead of a person. Prefer the denormalized display
+ * name; legacy messages (written before authorName existed) have none and fall
+ * back to the slug, so old threads keep working.
+ */
+function authorLabel(a: { author?: string; createdBy?: string; authorName?: string; authorEmail?: string }): {
+  text: string;
+  title: string;
+} {
+  const slug = a.author ?? a.createdBy ?? "";
+  const text = a.authorName || slug;
+  // Tooltip: email when we captured one, otherwise the slug — always something
+  // more identifying than the label itself.
+  const title = a.authorEmail ? `${text} <${a.authorEmail}>` : slug;
+  return { text, title };
 }
 
 function glCanvasRect(): CssRect | null {
@@ -66,7 +89,6 @@ export function CommentLayer({
   menuSlot: HTMLElement | null;
 }) {
   const [threads, setThreads] = React.useState<ResolvedThread[]>(controller.threads());
-  const [barOpen, setBarOpen] = React.useState(false);
   const [mode, setMode] = React.useState(false);
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [panel, setPanel] = React.useState(false);
@@ -211,54 +233,57 @@ export function CommentLayer({
   const menuUi = menuSlot
     ? createPortal(
         <>
-          <div className="flex items-center gap-2">
+          {/* The overlay menu's "Comments" section IS the group, so there is no
+              nested open/close toggle here any more — that was a collapsible
+              inside a collapsible. And every action is a LABELLED row: the old
+              bar was four bare icons whose meanings you had to hover to learn. */}
+          <div className="flex w-full flex-col">
             <button
-              data-testid="comment-bar-toggle"
-              title="Comments"
-              onClick={() => setBarOpen((o) => !o)}
-              className={`flex h-8 min-w-8 items-center justify-center gap-1 rounded-full px-2 text-xs shadow-sm ring-1 ring-inset ring-white/20 ${
-                barOpen ? "bg-sky-600 text-white" : "bg-black/70 text-white hover:bg-black/85"
-              }`}
+              data-testid="comment-mode-toggle"
+              aria-pressed={mode}
+              title={mode ? "Cancel (Esc)" : "Click the canvas to place a pin"}
+              onClick={() => {
+                if (hidden) toggleHidden();
+                setMode((m) => !m);
+                setDraft(null);
+              }}
+              className={`${overlayRowClass} ${mode ? "bg-amber-500/20 text-amber-200" : ""}`}
             >
-              <MessageSquareText size={15} />
-              {threads.length > 0 && <span>{threads.length}</span>}
+              <MessageSquarePlus size={14} className="shrink-0 text-white/50" />
+              <span>{mode ? "Placing comment…" : "Add comment"}</span>
+              <span className="ml-auto text-[10px] text-white/40">
+                {mode ? "Esc" : ""}
+              </span>
             </button>
-            {barOpen && (
-              <div className="flex items-center gap-1 rounded-full bg-black/70 p-1 shadow-sm ring-1 ring-inset ring-white/20">
-                <button
-                  data-testid="comment-mode-toggle"
-                  title={mode ? "Cancel comment (Esc)" : "New comment"}
-                  onClick={() => {
-                    if (hidden) toggleHidden();
-                    setMode((m) => !m);
-                    setDraft(null);
-                  }}
-                  className={`flex h-6 w-6 items-center justify-center rounded-full ${
-                    mode ? "bg-amber-500 text-black" : "text-white hover:bg-white/15"
-                  }`}
-                >
-                  <MessageSquarePlus size={14} />
-                </button>
-                <button
-                  data-testid="comment-panel-toggle"
-                  title="Comment list"
-                  onClick={() => setPanel((p) => !p)}
-                  className={`flex h-6 w-6 items-center justify-center rounded-full ${
-                    panel ? "bg-white/25 text-white" : "text-white hover:bg-white/15"
-                  }`}
-                >
-                  <List size={14} />
-                </button>
-                <button
-                  data-testid="comment-visibility-toggle"
-                  title={hidden ? "Show comments" : "Hide comments"}
-                  onClick={toggleHidden}
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-white hover:bg-white/15"
-                >
-                  {hidden ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
-            )}
+
+            <button
+              data-testid="comment-panel-toggle"
+              aria-pressed={panel}
+              title="Show every comment in this file"
+              onClick={() => setPanel((p) => !p)}
+              className={`${overlayRowClass} ${panel ? "bg-white/10" : ""}`}
+            >
+              <List size={14} className="shrink-0 text-white/50" />
+              <span>{panel ? "Hide list" : "Show list"}</span>
+              <span className="ml-auto text-[10px] text-white/40">
+                {threads.length}
+              </span>
+            </button>
+
+            <button
+              data-testid="comment-visibility-toggle"
+              aria-pressed={!hidden}
+              title={hidden ? "Show the pins on the canvas" : "Hide the pins on the canvas"}
+              onClick={toggleHidden}
+              className={overlayRowClass}
+            >
+              {hidden ? (
+                <EyeOff size={14} className="shrink-0 text-white/50" />
+              ) : (
+                <Eye size={14} className="shrink-0 text-white/50" />
+              )}
+              <span>{hidden ? "Show pins" : "Hide pins"}</span>
+            </button>
           </div>
 
           {/* Threads panel (filter + jump-to). */}
@@ -294,8 +319,9 @@ export function CommentLayer({
                     <span
                       className="font-semibold"
                       style={{ color: controller.colorFor(t.createdBy) }}
+                      title={authorLabel(t).title}
                     >
-                      {t.createdBy}
+                      {authorLabel(t).text}
                     </span>{" "}
                     <span className="text-white/50">
                       {timeAgo(t.createdAt)} ago{t.resolved ? " · resolved" : ""}
@@ -336,7 +362,7 @@ export function CommentLayer({
             key={t.id}
             data-testid="comment-pin"
             data-thread-id={t.id}
-            title={`${t.createdBy}: ${t.messages[0]?.body ?? ""}${t.detached ? " (detached)" : ""} — drag to move`}
+            title={`${authorLabel(t).text}: ${t.messages[0]?.body ?? ""}${t.detached ? " (detached)" : ""} — drag to move`}
             onPointerDown={onPinPointerDown(t)}
             onPointerMove={onPinPointerMove}
             onPointerUp={onPinPointerUp(t)}
@@ -448,10 +474,15 @@ function ThreadPopover({
     }
   };
 
+  // z-[60] beats the overlay menu's z-50 ON PURPOSE: the menu panel is tall
+  // enough to cover a pin popover, and a popover can be opened FROM the menu
+  // (the thread list's jump-to), so the menu would otherwise swallow clicks on
+  // the popover it just spawned. The focused surface wins; the menu stays one
+  // click-away from dismissal.
   return (
     <div
       data-testid="comment-popover"
-      className="absolute z-40 w-72 rounded-lg bg-black/90 text-white shadow-lg ring-1 ring-inset ring-white/20"
+      className="absolute z-[60] w-72 rounded-lg bg-black/90 text-white shadow-lg ring-1 ring-inset ring-white/20"
       style={{
         left: Math.min(css.x + 16, window.innerWidth - 300),
         top: Math.min(css.y - 8, window.innerHeight - 260),
@@ -493,8 +524,12 @@ function ThreadPopover({
         {thread.messages.map((m) => (
           <div key={m.id} data-testid="comment-message" className="group px-3 py-2 text-xs">
             <div className="flex items-baseline gap-2">
-              <span className="font-semibold" style={{ color: controller.colorFor(m.author) }}>
-                {m.author}
+              <span
+                className="font-semibold"
+                style={{ color: controller.colorFor(m.author) }}
+                title={authorLabel(m).title}
+              >
+                {authorLabel(m).text}
               </span>
               <span className="text-[10px] text-white/40">
                 {timeAgo(m.createdAt)} ago{m.editedAt ? " · edited" : ""}

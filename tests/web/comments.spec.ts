@@ -27,12 +27,12 @@ async function bootAs(page: Page, user: string): Promise<void> {
       intervals: [1000],
     })
     .toMatch(TITLE);
-  // The comment controls mount once the collab session + bridge are up; the
-  // action buttons live inside the expandable bar — open it for the test.
-  await openOverlayMenu(page); // the comment bar lives in the overlay menu (0010)
-  await expect(page.getByTestId('comment-bar-toggle')).toBeVisible({ timeout: 30000 });
-  await page.getByTestId('comment-bar-toggle').click();
-  await expect(page.getByTestId('comment-mode-toggle')).toBeVisible();
+  // The comment controls mount once the collab session + bridge are up. They
+  // live in the overlay menu's "Comments" section and are visible as soon as it
+  // opens — the old nested expand toggle (comment-bar-toggle) is gone, since the
+  // section itself is the group.
+  await openOverlayMenu(page); // the comment controls live in the overlay menu (0010)
+  await expect(page.getByTestId('comment-mode-toggle')).toBeVisible({ timeout: 30000 });
 }
 
 /** Delete every leftover thread from previous runs — comments PERSIST in the

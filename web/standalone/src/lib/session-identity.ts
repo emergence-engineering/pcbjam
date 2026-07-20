@@ -7,7 +7,12 @@
  * without the endpoint (example backend, demo/static) simply yield null and
  * the pre-auth slug fallback in config.ts stays in effect.
  */
-export type SessionIdentity = { slug: string; name: string };
+export type SessionIdentity = {
+  slug: string;
+  name: string;
+  /** Undefined for backends that don't return one (example/demo/static). */
+  email?: string;
+};
 
 let identity: SessionIdentity | null = null;
 let pending: Promise<SessionIdentity | null> | null = null;
@@ -35,12 +40,11 @@ export function loadSessionIdentity(
           } | null
         )?.user;
         if (u && typeof u.slug === "string" && u.slug) {
+          const email = typeof u.email === "string" && u.email ? u.email : undefined;
           identity = {
             slug: u.slug,
-            name:
-              (typeof u.name === "string" && u.name) ||
-              (typeof u.email === "string" && u.email) ||
-              u.slug,
+            name: (typeof u.name === "string" && u.name) || email || u.slug,
+            email,
           };
         }
         return identity;

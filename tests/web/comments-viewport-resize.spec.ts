@@ -29,10 +29,11 @@ async function bootAs(page: Page, user: string): Promise<void> {
       intervals: [1000],
     })
     .toMatch(TITLE);
-  await openOverlayMenu(page); // the comment bar lives in the overlay menu (0010)
-  await expect(page.getByTestId('comment-bar-toggle')).toBeVisible({ timeout: 30000 });
-  await page.getByTestId('comment-bar-toggle').click();
-  await expect(page.getByTestId('comment-mode-toggle')).toBeVisible();
+  // The comment controls live in the overlay menu's "Comments" section and are
+  // visible as soon as it opens — the nested expand toggle (comment-bar-toggle)
+  // is gone, since the section itself is the group.
+  await openOverlayMenu(page); // the comment controls live in the overlay menu (0010)
+  await expect(page.getByTestId('comment-mode-toggle')).toBeVisible({ timeout: 30000 });
 }
 
 /** Comments persist in the room's ydoc — start each run from a clean slate. */

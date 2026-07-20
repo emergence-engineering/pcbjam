@@ -1,21 +1,28 @@
+import { Eye } from "lucide-react";
 import type { PresencePeer } from "@/wasm/collab/presence";
 import type { FollowTarget } from "@/wasm/collab/follow-user";
+import { overlayRowClass } from "@/components/OverlayMenu";
 
 /**
- * "Who else is in this file" (collab-presence 0001/0003): a compact facepile of
- * the room's OTHER users, one colored initial-avatar per person, fed by the
- * collab session's awareness. For eeschema (per-sheet rooms + warm-pool
- * skeleton states) peers on a DIFFERENT sheet render dimmed, with the sheet
- * they're on in the tooltip. Rendered in the editor's top-right overlay stack
- * next to SourceChip; the parent hides it when there are no peers. Chip styling
- * mirrors SourceChip (solid fill + inset ring) so it is legible on any backdrop.
+ * "Who else is in this file" (collab-presence 0001/0003), as a readable LIST.
  *
- * Follow-user (0008): when `onFollow` is provided, clicking a same-sheet
- * peer's avatar follows their viewport (click again to stop); the followed
- * peer gets a ring in their color. The parent renders the "Following…"
- * banner — the roster only toggles.
+ * This used to be a facepile — overlapping 20px circles showing one initial
+ * each. That is a fine density trade in a cramped toolbar, but it lives in the
+ * overlay menu now (0010), which is 288px wide: there is room for names, and a
+ * row of colored initials told you neither who was here nor that clicking one
+ * followed them. One row per person instead: color dot, name, where they are,
+ * and an explicit follow affordance.
+ *
+ * For eeschema (per-sheet rooms) peers on a DIFFERENT sheet are dimmed, say
+ * which sheet they're on, and are not followable — following someone you cannot
+ * see would just teleport you.
+ *
+ * Follow-user (0008): clicking a same-sheet peer follows their viewport; the
+ * followed peer's row stays highlighted with a "Stop" action, so the state and
+ * its exit live on the same row (the parent no longer renders a separate
+ * "Following…" banner).
  */
-const MAX_AVATARS = 5;
+const MAX_ROWS = 6;
 
 function sheetLabel(sheetPath?: string): string {
   if (!sheetPath) return "";
@@ -42,13 +49,10 @@ export function PresenceRoster({
   const sameSheet = (p: PresencePeer) =>
     (p.sheetPath ?? undefined) === (activeSheetPath ?? undefined);
   // Same-sheet peers first, then elsewhere (dimmed) — stable within each group.
-  const ordered = [...peers].sort((a, b) => Number(sameSheet(b)) - Number(sameSheet(a)));
-  const names = ordered
-    .map((p) =>
-      sameSheet(p) ? p.user.name : `${p.user.name} (on ${sheetLabel(p.sheetPath) || "another sheet"})`,
-    )
-    .join(", ");
-  const shown = ordered.slice(0, MAX_AVATARS);
+  const ordered = [...peers].sort(
+    (a, b) => Number(sameSheet(b)) - Number(sameSheet(a)),
+  );
+  const shown = ordered.slice(0, MAX_ROWS);
 
   const followable = (p: PresencePeer) => !!onFollow && sameSheet(p);
   const isFollowed = (p: PresencePeer) => following?.clientId === p.clientId;
@@ -56,46 +60,69 @@ export function PresenceRoster({
   const toggleFollow = (p: PresencePeer) => {
     if (!onFollow) return;
     onFollow(
-      isFollowed(p) ? null : { clientId: p.clientId, userId: p.user.id, name: p.user.name },
+      isFollowed(p)
+        ? null
+        : { clientId: p.clientId, userId: p.user.id, name: p.user.name },
     );
   };
 
   return (
-    <span
-      data-testid="presence-roster"
-      title={`Also here: ${names}`}
-      className="inline-flex items-center rounded-full bg-black/70 py-0.5 pl-1 pr-1.5 shadow-sm ring-1 ring-inset ring-white/20"
-    >
-      {shown.map((p) => (
-        <button
-          key={p.user.id}
-          type="button"
-          data-presence-user={p.user.id}
-          data-presence-elsewhere={sameSheet(p) ? undefined : "1"}
-          data-presence-following={isFollowed(p) ? "1" : undefined}
-          disabled={!followable(p)}
-          onClick={() => toggleFollow(p)}
-          title={
-            sameSheet(p)
-              ? `${p.user.name}${onFollow ? (isFollowed(p) ? " — click to stop following" : " — click to follow") : ""}`
-              : `${p.user.name} — on ${sheetLabel(p.sheetPath) || "another sheet"}`
-          }
-          style={{
-            backgroundColor: p.user.color,
-            ...(isFollowed(p) ? { boxShadow: `0 0 0 2px ${p.user.color}` } : {}),
-          }}
-          className={`-ml-1.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-black/50 first:ml-0 ${
-            sameSheet(p) ? "cursor-pointer" : "opacity-40"
-          }`}
-        >
-          {p.user.name.charAt(0).toUpperCase()}
-        </button>
-      ))}
-      {peers.length > MAX_AVATARS && (
-        <span className="ml-1 text-[10px] font-medium text-white/80">
-          +{peers.length - MAX_AVATARS}
+    <div data-testid="presence-roster" className="flex w-full flex-col">
+      {shown.map((p) => {
+        const here = sameSheet(p);
+        const followed = isFollowed(p);
+        const elsewhere = sheetLabel(p.sheetPath) || "another sheet";
+        return (
+          <button
+            key={p.user.id}
+            type="button"
+            data-presence-user={p.user.id}
+            data-presence-elsewhere={here ? undefined : "1"}
+            data-presence-following={followed ? "1" : undefined}
+            disabled={!followable(p)}
+            onClick={() => toggleFollow(p)}
+            title={
+              here
+                ? onFollow
+                  ? followed
+                    ? `${p.user.name} — click to stop following`
+                    : `${p.user.name} — click to follow their view`
+                  : p.user.name
+                : `${p.user.name} — on ${elsewhere}`
+            }
+            className={`${overlayRowClass} ${
+              followed ? "bg-white/10" : ""
+            } ${here ? "" : "cursor-default opacity-50 hover:bg-transparent"}`}
+          >
+            <span
+              aria-hidden
+              className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-inset ring-black/40"
+              style={{ backgroundColor: p.user.color }}
+            />
+            <span className="truncate">{p.user.name}</span>
+            {!here && (
+              <span className="ml-auto shrink-0 truncate text-[10px] text-white/40">
+                on {elsewhere}
+              </span>
+            )}
+            {here && followed && (
+              <span className="ml-auto flex shrink-0 items-center gap-1 text-[10px] font-medium text-white/70">
+                <Eye size={12} /> Stop
+              </span>
+            )}
+            {here && !followed && followable(p) && (
+              <span className="ml-auto shrink-0 text-[10px] text-white/35">
+                Follow
+              </span>
+            )}
+          </button>
+        );
+      })}
+      {peers.length > MAX_ROWS && (
+        <span className="px-2 py-1 text-[10px] text-white/40">
+          +{peers.length - MAX_ROWS} more
         </span>
       )}
-    </span>
+    </div>
   );
 }
