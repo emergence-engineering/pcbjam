@@ -1,7 +1,7 @@
 ---
 title: Terms of Service
 description: The agreement governing your use of PCBJam.
-updated: 2026-06-10
+updated: 2026-07-16
 ---
 
 ## The short version (summary)
@@ -12,6 +12,7 @@ This summary helps you understand the Terms at a glance. It is **not a substitut
 - **Your designs are yours.** You keep all ownership of the PCB projects and files you create or upload. You give us only a limited licence to host, store, process, back up, and display them so we can run the service for you. (How we handle the *personal data* in them is covered by our [Privacy Policy](/privacy).)
 - **Free and paid.** There's a free tier and paid subscription plans. **Payments are sold and processed by Paddle as "Merchant of Record"** — when you buy a plan, your purchase contract for that transaction is with Paddle, who handles billing, VAT/tax, invoices, and refunds. We provide the software and service to you under these Terms.
 - **Cooling-off.** If you're a consumer in the EU/EEA, you generally have a **14-day right to cancel** a paid plan. Asking for immediate access doesn't take that right away for a subscription: if you cancel within the 14 days, you pay only a fair share for the time you had, and the rest is refunded (see §9).
+- **Refunds — anytime.** Ask for a refund at any time and we'll refund the unused remainder of your current billing period, pro-rata to what you paid, and downgrade your plan — nothing is deleted, but content over the free limits goes read-only (see §9.3.2). This sits on top of the cooling-off right, not instead of it.
 - **It's a tool — verify your work.** PCBJam helps you design, but **you are responsible for checking your designs, exports, and manufacturing files before you rely on them.** The service is provided "as is" to the extent the law allows.
 - **Your rights as a consumer stay intact.** Nothing in these Terms takes away the mandatory statutory rights you have under Hungarian/EU consumer law, and we don't try to exclude liability we're not allowed to exclude.
 - **Open source.** PCBJam is built on KiCad and other open-source software, which stay under their own licences (including the GNU GPLv3). These Terms don't restrict your rights under those licences. See §12.
@@ -162,15 +163,24 @@ PCBJam is operated by:
 9.1.3 **One-off digital content.** If we ever supply you **one-off digital content** not on a tangible medium (for example, a standalone downloadable item bought outside a subscription), the rules differ: you **lose the right of withdrawal when supply begins**, but only if **all three** of the following happen — (a) you gave your **prior express consent** to begin before the 14-day period ends; (b) you **acknowledged that you thereby lose the right of withdrawal**; and (c) you received **confirmation of that consent and acknowledgment on a durable medium** (e.g. by email). If any of these is missing, you keep the right to withdraw without paying. Where it is unclear whether something is a digital service or digital content, the service rules in §9.1.2 — which are more favourable to you — apply.
 
 
-9.1.4 Your statutory withdrawal right is **separate from and in addition to** simply cancelling auto-renewal (§7.3) and to any goodwill refunds we or Paddle may offer.
+9.1.4 Your statutory withdrawal right is **separate from and in addition to** simply cancelling auto-renewal (§7.3) and to our refund promise in §9.3.2.
 
 ### 9.2 Cancelling your subscription
 
-You can cancel renewal of a paid plan at any time from your account settings or via Paddle. Cancellation stops future charges; unless a refund is due under §9.1 or by law, you keep access until the end of your current paid period, and we do not pro-rate part-periods except where required by law.
+You can cancel renewal of a paid plan at any time from your account settings or via Paddle. Cancellation stops future charges; unless a refund is due under §9.1 or by law, you keep access until the end of your current paid period. If you would rather stop now and get the unused part of the period back, request a refund instead (§9.3.2).
 
 ### 9.3 Refunds
 
-Because Paddle is the Merchant of Record, **refunds are processed by Paddle** under Paddle's Refund Policy and the statutory rights above. Paddle's policy recognises the EU/EEA/UK 14-day statutory right of withdrawal; on withdrawal the refund is full or — where §9.1.2(a) applies because you asked for immediate access to a subscription — proportionate to the unused part of the period. To request a refund, contact us at hello@pcbjam.com or Paddle's buyer support; your statutory withdrawal right applies regardless of any general "no refunds" wording.
+9.3.1 **Paddle processes refunds.** Because Paddle is the Merchant of Record, **refunds are processed by Paddle** under Paddle's Refund Policy and the statutory rights above. Paddle's policy recognises the EU/EEA/UK 14-day statutory right of withdrawal; on withdrawal the refund is full or — where §9.1.2(a) applies because you asked for immediate access to a subscription — proportionate to the unused part of the period. To request a refund, contact us at hello@pcbjam.com or Paddle's buyer support.
+
+9.3.2 **Our refund promise — anytime, pro-rata.** Separately from, and on top of, your statutory rights: you can ask for a refund of a paid plan **at any time, for any reason**. If you do:
+
+(a) we will refund (via Paddle) the **unused remainder of your current billing period**, calculated pro-rata by time against the price you actually paid for that period — for example, three months into a yearly plan, you get back nine-twelfths of what you paid for that year; and
+(b) your plan is **downgraded when the refund is made**: paid features end at that point, and your account or team falls back as described on our [pricing page](/pricing) — nothing is deleted, and content that exceeds the free limits becomes read-only.
+
+9.3.3 **Fair use of the promise.** We may refuse or limit the promise in §9.3.2 only where it is being abused — for example, repeated cycles of subscribing, using the Service, and refunding, or fraud. Refusing it never affects your statutory rights, which apply in full regardless.
+
+9.3.4 Your statutory withdrawal right applies regardless of any general "no refunds" wording, and nothing in this §9.3 limits it.
 
 ---
 
