@@ -17,9 +17,10 @@
 // reason the standalone vitest config sets `dedupe: ["yjs"]`).
 import * as Y from "yjs";
 import {
-  docDelta,
+  compareSlots,
   docToFile,
   docToY,
+  driftDocDelta,
   fileToDoc,
   isEmptyKicadDelta,
   yToDoc,
@@ -94,16 +95,22 @@ export interface DriftSummary {
   added: string[];
   updated: string[];
   removed: string[];
+  /** Order-only item churn — surfaced for triage, NOT drift (kicad-delta.ts). */
+  reordered: string[];
   layoutChanged: boolean;
+  /** Order-only layout churn — likewise not report-worthy on its own. */
+  layoutReordered: boolean;
   metaChanged: boolean;
 }
 
 /**
  * The drift-detect convergence oracle, replicating computeDrift's core
- * (web/standalone/src/wasm/collab/drift-detect.ts:94-118) from @pcbjam/shared
+ * (web/standalone/src/wasm/collab/drift-detect.ts) from @pcbjam/shared
  * primitives only — drift-detect itself pulls `@/lib/api`, so it can't be
  * bundled here. Serializes the live model via the tool's save fn, diffs it
- * against the room doc; null means editor ≡ doc.
+ * against the room doc with the PRODUCTION comparator (driftDocDelta +
+ * compareSlots — order-only churn goes to reordered/layoutReordered and does
+ * not make a report, matching ysync 0010); null means editor ≡ doc.
  */
 function driftReport(saveFn: string, scratchPath: string): DriftSummary | null {
   const w = window as unknown as {
@@ -126,16 +133,19 @@ function driftReport(saveFn: string, scratchPath: string): DriftSummary | null {
   }
   const wasmDoc = fileToDoc(text);
   const ydocDoc = yToDoc(handle().doc);
-  const diff = docDelta(ydocDoc, wasmDoc);
-  const layoutChanged =
-    JSON.stringify(ydocDoc.layout) !== JSON.stringify(wasmDoc.layout);
+  const diff = driftDocDelta(ydocDoc, wasmDoc);
+  const layoutRelation = compareSlots(ydocDoc.layout, wasmDoc.layout);
+  const layoutChanged = layoutRelation === "different";
   const metaChanged = ydocDoc.root !== wasmDoc.root;
+  // layoutReordered deliberately outside the gate — same as computeDrift.
   if (isEmptyKicadDelta(diff) && !layoutChanged && !metaChanged) return null;
   return {
     added: diff.added.map((i) => i.uuid),
     updated: diff.updated.map((i) => i.uuid),
     removed: diff.removed,
+    reordered: diff.reordered.map((i) => i.uuid),
     layoutChanged,
+    layoutReordered: layoutRelation === "reordered",
     metaChanged,
   };
 }
