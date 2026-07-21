@@ -322,11 +322,19 @@ export async function closeTrio(trio: Trio): Promise<void> {
 
 // ── Per-tab probes ───────────────────────────────────────────────────────────
 
-/** Silent save-to-MEMFS + read back — no onSave side effects. */
+/** Silent save-to-MEMFS + read back — no onSave side effects. Defers while
+ *  collab fiber work is in flight: a bare-embind-stack save during a parked
+ *  apply mis-dispatches (finding #10b) — the wait is JS-side, so it is safe. */
 export function modelText(page: Page, cfg: ToolCfg): Promise<string> {
   return page.evaluate(
-    ({ saveFn, ext }) => {
-      const w = window as unknown as { FS: FSApi; Module: Mod };
+    async ({ saveFn, ext }) => {
+      const w = window as unknown as {
+        FS: FSApi;
+        Module: Mod & { kicadCollabFiberBusy?: () => boolean };
+      };
+      for (let i = 0; i < 200 && w.Module.kicadCollabFiberBusy?.(); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
       const out = `/home/kicad/documents/_dump.${ext}`;
       (w.Module[saveFn] as (p: string) => unknown)(out);
       return w.FS.readFile(out, { encoding: "utf8" });
@@ -360,10 +368,14 @@ export interface DriftSummary {
 /** Item-level drift summary via the production comparator (browser-entry-v2). */
 export function drift(page: Page, cfg: ToolCfg): Promise<DriftSummary | null> {
   return page.evaluate(
-    ({ saveFn, ext }) => {
+    async ({ saveFn, ext }) => {
       const w = window as unknown as {
         KicadCollabV2: { driftReport(f: string, p: string): DriftSummary | null };
+        Module: { kicadCollabFiberBusy?: () => boolean };
       };
+      for (let i = 0; i < 200 && w.Module.kicadCollabFiberBusy?.(); i++) {
+        await new Promise((r) => setTimeout(r, 25));
+      }
       return w.KicadCollabV2.driftReport(saveFn, `/home/kicad/documents/_drift.${ext}`);
     },
     { saveFn: cfg.saveFn, ext: cfg.ext },

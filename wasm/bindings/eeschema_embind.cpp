@@ -1978,6 +1978,11 @@ void kicadSaveSchematic( std::string path )
 }
 
 
+static bool kicadCollabFiberBusyProbe()
+{
+    return pcbjam_collab::fiberBusy() || !pcbjam_collab::fiberQueue().empty();
+}
+
 EMSCRIPTEN_BINDINGS(eeschema) {
     // Programmatic save of the in-memory schematic (round-trip tests, README §A).
     function("kicadSaveSchematic", &kicadSaveSchematic);
@@ -1998,6 +2003,7 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     // registered once by kicad_editor_embind.cpp, dispatching on the active frame.
     // Programmatic file open (preferred over UI automation from the web app).
     function("kicadOpenFile", &kicadOpenFile);
+    function("kicadCollabFiberBusy", &kicadCollabFiberBusyProbe);
     // Read-only viewer lock (read-only-viewer).
     function("kicadSetReadOnly", &kicadSetReadOnly);
     // Yjs collaborative bridge entry points (same contract as pl_editor).

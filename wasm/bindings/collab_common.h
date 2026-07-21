@@ -11,6 +11,7 @@
 
 #ifdef __EMSCRIPTEN__
 
+#include <deque>
 #include <emscripten.h>
 #include <functional>
 #include <string>
@@ -34,17 +35,60 @@ inline std::string toUtf8( const wxString& s ) { return std::string( s.utf8_str(
  * the s-expr formatters must therefore run through this. CallAfter queues
  * onto the app's pending-event list (drained every frame by the wasm main
  * loop, src/wasm/evtloop.cpp); COROUTINE::Call moves the body to the fiber.
+ *
+ * SERIALIZED (drift-trio finding #10, standalone-hardening 0008 §10): bodies
+ * run strictly one-at-a-time through a FIFO. The previous per-body
+ * fire-and-forget coroutine interleaved under load: when a body PARKED
+ * (asyncify suspension inside commit.Push — connectivity/GAL work), the main
+ * loop kept draining pending events and started the NEXT body — a local
+ * commit and a remote apply then ran interleaved on shared commit/listener
+ * state (s_applyingRemote is a single global), silently losing applies on the
+ * actively-editing receiver and, in the worst case, corrupting memory (fuzz
+ * S10: wasm OOB on an observer). The busy flag is park-safe: an asyncify
+ * suspension suspends the whole drain loop with the body and rewinds it
+ * transparently, while any other drain invocation no-ops on the flag; the
+ * suspended drain's own while-loop picks up whatever queued meanwhile.
  */
-inline void runOnFiber( wxEvtHandler* aHandler, std::function<void()> aBody )
+inline std::deque<std::function<void()>>& fiberQueue()
 {
-    aHandler->CallAfter( [aBody]() {
-        COROUTINE<int, int> cor( [&aBody]( int ) -> int
+    static std::deque<std::function<void()>> q;
+    return q;
+}
+
+inline bool& fiberBusy()
+{
+    static bool busy = false;
+    return busy;
+}
+
+inline void drainFibers()
+{
+    if( fiberBusy() )
+        return;             // the running drain's while-loop covers the rest
+
+    auto& q = fiberQueue();
+
+    while( !q.empty() )
+    {
+        fiberBusy() = true;
+
+        std::function<void()> body = std::move( q.front() );
+        q.pop_front();
+
+        COROUTINE<int, int> cor( [&body]( int ) -> int
                                  {
-                                     aBody();
+                                     body();
                                      return 0;
                                  } );
         cor.Call( 0 );
-    } );
+        fiberBusy() = false;
+    }
+}
+
+inline void runOnFiber( wxEvtHandler* aHandler, std::function<void()> aBody )
+{
+    fiberQueue().push_back( std::move( aBody ) );
+    aHandler->CallAfter( []() { drainFibers(); } );
 }
 
 // ── C++ → JS wire emitters (no-ops without a JS listener) ───────────────────

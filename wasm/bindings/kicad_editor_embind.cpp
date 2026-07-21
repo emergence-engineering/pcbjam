@@ -451,7 +451,16 @@ static bool collabTestClearSelection()
 }
 
 
+static bool kicadCollabFiberBusyProbe()
+{
+    return pcbjam_collab::fiberBusy() || !pcbjam_collab::fiberQueue().empty();
+}
+
 EMSCRIPTEN_BINDINGS(kicad_editor) {
+    // Fiber-queue idle probe (drift-trio finding #10b): a bare-embind-stack
+    // save during a parked apply fiber mis-dispatches (table index OOB) — the
+    // JS side must defer scratch saves while collab fiber work is in flight.
+    function("kicadCollabFiberBusy", &kicadCollabFiberBusyProbe);
     // Programmatic file open (preferred over UI automation from the web app).
     function("kicadOpenFile", &kicadOpenFile);
 
