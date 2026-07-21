@@ -65,6 +65,15 @@ export const TRIO_SCH: ToolCfg = {
     "kicadCollabTestRemoveItem",
     "kicadCollabTestSetFieldText",
     "kicadCollabTestUndoDepth",
+    // drift-trio phase B action hooks
+    "kicadCollabTestAddWire",
+    "kicadCollabTestAddJunction",
+    "kicadCollabTestAddNoConnect",
+    "kicadCollabTestAddLabel",
+    "kicadCollabTestAddSymbol",
+    "kicadCollabTestMoveSchItem",
+    "kicadCollabTestMirrorSchItem",
+    "kicadCollabTestDuplicateSchItem",
   ],
   fixture: `(kicad_sch
 \t(version 20250114)
@@ -143,6 +152,16 @@ export const TRIO_PCB: ToolCfg = {
     "kicadCollabTestSetPadSize",
     "kicadCollabTestMoveEndpoint",
     "kicadCollabTestUndoDepth",
+    // drift-trio phase B action hooks
+    "kicadCollabTestAddTrack",
+    "kicadCollabTestAddVia",
+    "kicadCollabTestAddBoardText",
+    "kicadCollabTestAddZone",
+    "kicadCollabTestFlipBoardItem",
+    "kicadCollabTestSetFootprintField",
+    "kicadCollabTestSetBoardItemLocked",
+    "kicadCollabTestMoveBoardItem",
+    "kicadCollabTestDuplicateBoardItem",
   ],
   fixture: `(kicad_pcb
 \t(version 20241229)

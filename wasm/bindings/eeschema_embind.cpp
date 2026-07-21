@@ -1390,6 +1390,208 @@ bool schCollabTestSetFieldText( std::string aId, std::string aText )
 }
 
 
+// ── drift-trio phase B action hooks (standalone-hardening 0008 §5) ───────────
+// Creation/mutation primitives for the trio harness's action catalog. Each
+// drives a REAL SCH_COMMIT on the fiber stack, so the SCHEMATIC_LISTENER →
+// flushDiff emit path runs exactly as for a UI edit. Names are tool-unique
+// (registered outside the KICAD_MERGED_EMBIND guard — same convention as
+// kicadCollabTestSetFieldText), so the merged image needs no dispatcher.
+
+// Commit a freshly-built item onto the current screen; returns its uuid.
+static std::string schCollabTestCommitAdd( SCH_ITEM* aItem, const wxChar* aMsg )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+    {
+        delete aItem;
+        return "";
+    }
+
+    SCH_SCREEN* screen = fr->GetScreen();
+
+    // SCH_COMMIT::Push finds the SCHEMATIC via the ITEM's parent chain and
+    // silently skips every listener notification (OnItemsAdded → our emit)
+    // when it comes up null — a bare `new SCH_ITEM` has no parent yet, so
+    // parent it like the drawing tools do before staging.
+    aItem->SetParent( screen );
+
+    std::string id = toUtf8( aItem->m_Uuid.AsString() );
+    wxString    msg( aMsg );
+
+    pcbjam_collab::runOnFiber( fr, [fr, aItem, screen, msg]() {
+        SCH_COMMIT commit( fr );
+        commit.Add( aItem, screen );
+        commit.Push( msg );
+    } );
+
+    return id;
+}
+
+std::string schCollabTestAddWire( int aX1, int aY1, int aX2, int aY2 )
+{
+    SCH_LINE* line = new SCH_LINE( VECTOR2I( aX1, aY1 ), LAYER_WIRE );
+    line->SetEndPoint( VECTOR2I( aX2, aY2 ) );
+    return schCollabTestCommitAdd( line, wxT( "Collab test add wire" ) );
+}
+
+std::string schCollabTestAddJunction( int aX, int aY )
+{
+    return schCollabTestCommitAdd( new SCH_JUNCTION( VECTOR2I( aX, aY ) ),
+                                   wxT( "Collab test add junction" ) );
+}
+
+std::string schCollabTestAddNoConnect( int aX, int aY )
+{
+    return schCollabTestCommitAdd( new SCH_NO_CONNECT( VECTOR2I( aX, aY ) ),
+                                   wxT( "Collab test add no-connect" ) );
+}
+
+// aKind: "label" | "global" | "hier".
+std::string schCollabTestAddLabel( std::string aKind, std::string aText, int aX, int aY )
+{
+    wxString        txt = wxString::FromUTF8( aText.c_str() );
+    VECTOR2I        pos( aX, aY );
+    SCH_LABEL_BASE* label;
+
+    if( aKind == "global" )
+        label = new SCH_GLOBALLABEL( pos, txt );
+    else if( aKind == "hier" )
+        label = new SCH_HIERLABEL( pos, txt );
+    else
+        label = new SCH_LABEL( pos, txt );
+
+    return schCollabTestCommitAdd( label, wxT( "Collab test add label" ) );
+}
+
+// Place another instance of a symbol ALREADY in the schematic's lib_symbols
+// cache (the harness fixtures embed their defs — no external lib needed).
+std::string schCollabTestAddSymbol( std::string aLibId, int aX, int aY, std::string aRef )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return "";
+
+    SCH_SCREEN* screen = fr->GetScreen();
+    wxString    libIdStr = wxString::FromUTF8( aLibId.c_str() );
+    LIB_SYMBOL* libSym = nullptr;
+
+    for( const auto& [name, sym] : screen->GetLibSymbols() )
+    {
+        if( name == libIdStr )
+        {
+            libSym = sym;
+            break;
+        }
+    }
+
+    if( !libSym )
+        return "";
+
+    LIB_ID libId;
+
+    if( libId.Parse( libIdStr ) >= 0 )
+        return "";
+
+    SCH_SHEET_PATH& sheet = fr->GetCurrentSheet();
+    SCH_SYMBOL* sym = new SCH_SYMBOL( *libSym, libId, &sheet, 1, 1, VECTOR2I( aX, aY ) );
+    sym->SetParent( screen );   // Push's SCHEMATIC lookup — see schCollabTestCommitAdd
+    sym->SetRef( &sheet, wxString::FromUTF8( aRef.c_str() ) );
+
+    std::string id = toUtf8( sym->m_Uuid.AsString() );
+
+    pcbjam_collab::runOnFiber( fr, [fr, sym, screen]() {
+        SCH_COMMIT commit( fr );
+        commit.Add( sym, screen );
+        commit.Push( wxT( "Collab test add symbol" ) );
+    } );
+
+    return id;
+}
+
+// By-uuid variant of MoveFirst (same CallAfter + devirtualized move path).
+bool schCollabTestMoveSchItem( std::string aId, int aDx, int aDy )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return false;
+
+    SCH_SHEET_PATH path;
+    SCH_ITEM* item = fr->Schematic().ResolveItem( KIID( wxString::FromUTF8( aId.c_str() ) ),
+                                                  &path, /*allowNull*/ true );
+
+    if( !item )
+        return false;
+
+    SCH_SCREEN* screen = path.LastScreen();
+    fr->CallAfter( [fr, item, screen, aDx, aDy]() { collabTestMove( fr, item, screen, aDx, aDy ); } );
+    return true;
+}
+
+bool schCollabTestMirrorSchItem( std::string aId, bool aHorizontal )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return false;
+
+    SCH_SHEET_PATH path;
+    SCH_ITEM* item = fr->Schematic().ResolveItem( KIID( wxString::FromUTF8( aId.c_str() ) ),
+                                                  &path, /*allowNull*/ true );
+
+    if( !item )
+        return false;
+
+    SCH_SCREEN* screen = path.LastScreen();
+
+    pcbjam_collab::runOnFiber( fr, [fr, item, screen, aHorizontal]() {
+        SCH_COMMIT commit( fr );
+        commit.Modify( item, screen );
+
+        if( aHorizontal )
+            item->MirrorHorizontally( item->GetPosition().x );
+        else
+            item->MirrorVertically( item->GetPosition().y );
+
+        commit.Push( wxT( "Collab test mirror" ) );
+    } );
+
+    return true;
+}
+
+// Duplicate (fresh uuids — exercises the Clone()/uuid-churn drift class).
+std::string schCollabTestDuplicateSchItem( std::string aId, int aDx, int aDy )
+{
+    SCH_EDIT_FRAME* fr = schFrame();
+
+    if( !fr )
+        return "";
+
+    SCH_SHEET_PATH path;
+    SCH_ITEM* item = fr->Schematic().ResolveItem( KIID( wxString::FromUTF8( aId.c_str() ) ),
+                                                  &path, /*allowNull*/ true );
+
+    if( !item )
+        return "";
+
+    SCH_SCREEN* screen = path.LastScreen();
+    SCH_ITEM*   dup = item->Duplicate( /*addToParentGroup*/ false );
+    dup->Move( VECTOR2I( aDx, aDy ) );
+
+    std::string id = toUtf8( dup->m_Uuid.AsString() );
+
+    pcbjam_collab::runOnFiber( fr, [fr, dup, screen]() {
+        SCH_COMMIT commit( fr );
+        commit.Add( dup, screen );
+        commit.Push( wxT( "Collab test duplicate" ) );
+    } );
+
+    return id;
+}
+
+
 // Programmatically save the in-memory schematic to a .kicad_sch file, without
 // driving the Save As dialog — eeschema's analogue of pl_editor's
 // kicadSaveDrawingSheet. Serializes the root sheet via the same SCH_IO_KICAD_SEXPR
@@ -1768,6 +1970,15 @@ EMSCRIPTEN_BINDINGS(eeschema) {
     function("kicadSaveSchematic", &kicadSaveSchematic);
     // eeschema-only ysync-review repro hook (name not shared with pcbnew).
     function("kicadCollabTestSetFieldText", &schCollabTestSetFieldText);
+    // drift-trio phase B action hooks (tool-unique names, merged-image safe).
+    function("kicadCollabTestAddWire", &schCollabTestAddWire);
+    function("kicadCollabTestAddJunction", &schCollabTestAddJunction);
+    function("kicadCollabTestAddNoConnect", &schCollabTestAddNoConnect);
+    function("kicadCollabTestAddLabel", &schCollabTestAddLabel);
+    function("kicadCollabTestAddSymbol", &schCollabTestAddSymbol);
+    function("kicadCollabTestMoveSchItem", &schCollabTestMoveSchItem);
+    function("kicadCollabTestMirrorSchItem", &schCollabTestMirrorSchItem);
+    function("kicadCollabTestDuplicateSchItem", &schCollabTestDuplicateSchItem);
 
 #ifndef KICAD_MERGED_EMBIND
     // JS names ALSO registered by pcbnew_embind.cpp — in the merged image these are

@@ -331,10 +331,15 @@ public:
 // differ by exactly CTL_OMIT_FOOTPRINT_VERSION (pcb_io_kicad_sexpr.h), so clipboard form emits
 //     (footprint "Lib:C1206" (version 20260206) (generator "pcbnew") (generator_version "10.0") …)
 // — three tokens a board-embedded footprint never has (pcb_io_kicad_sexpr.cpp ~1201). Every
-// footprint of every board drifted on those three lines. For non-footprints the two control
-// sets are identical (the bit only gates footprint output), so the SaveSelection path below
-// is already file-equivalent and keeps its `(kicad_pcb … <layers> <item>)` envelope, which the
-// parser requires — bare `(segment`/`(via`/`(zone` are not accepted at top level.
+// footprint of every board drifted on those three lines.
+//
+// Non-footprints DON'T use SaveSelection either (drift-trio finding, standalone-hardening
+// 0008 §10): its "make safe to transfer" step clears the locked flag on the copy
+// (kicad_clipboard.cpp ~416) — clipboard semantics; pastes are unlocked — so `(locked yes)`,
+// real file content, vanished from every track/via/zone/text blob and a peer's lock never
+// reached the doc. Instead the live item is Formatted directly with the FILE writer and
+// wrapped in the same synthetic `(kicad_pcb … <layers> <item>)` envelope the apply path
+// already parses (the parser rejects bare `(segment`/`(via`/`(zone` at top level).
 //
 // Footprints also DON'T go through SaveSelection: its "make safe to transfer" step copies the
 // footprint, and FOOTPRINT's copy ctor ASSIGNS the mandatory fields into the new footprint's
@@ -343,6 +348,8 @@ public:
 // breaking the wire's identity-by-uuid (every emit would read as field remove+add, and round
 // trips lose the field uuids). The copy ctor now restores those uuids itself (footprint.cpp),
 // but we keep making the safety copy here so the live item is never mutated.
+std::string wrapInBoardEnvelope( BOARD& aBoard, const std::string& aItemSexpr );
+
 std::string blobForItem( BOARD* aBoard, BOARD_ITEM* aItem )
 {
     if( aItem->Type() == PCB_FOOTPRINT_T )
@@ -372,16 +379,16 @@ std::string blobForItem( BOARD* aBoard, BOARD_ITEM* aItem )
         return out;
     }
 
-    PCB_SELECTION sel;
-    sel.Add( aItem );                       // pointer-only insert; no mutation of the live item
+    // Direct file-writer Format of the LIVE item (no mutation, unlike
+    // SaveSelection's transfer copy) + the apply path's own envelope.
+    WIRE_BOARD_IO    io( aBoard );
+    STRING_FORMATTER fmt;
+    io.SetOutputFormatter( &fmt );
+    io.Format( aItem );
 
-    CLIPBOARD_IO io;
-    io.SetBoard( aBoard );
-
-    std::string out;
-    io.SetWriter( [&out]( const wxString& s ) { out = std::string( s.utf8_str() ); } );
-    io.SaveSelection( sel, /*isFootprintEditor*/ false );
-    return out;
+    std::string body = fmt.GetString();
+    KICAD_FORMAT::Prettify( body, KICAD_FORMAT::FORMAT_MODE::COMPACT_TEXT_PROPERTIES );
+    return wrapInBoardEnvelope( *aBoard, body );
 }
 
 // A bare `(footprint …)` blob carries no `(version …)`, but the parser NEEDS one: it starts at
@@ -2006,6 +2013,207 @@ bool pcbCollabTestMoveEndpoint( std::string aId, int aDx, int aDy )
     return true;
 }
 
+// ── drift-trio phase B action hooks (standalone-hardening 0008 §5) ───────────
+// Creation/mutation primitives for the trio harness's action catalog. Each
+// drives a REAL BOARD_COMMIT on the fiber stack, so the BOARD_LISTENER →
+// flushDiff emit path runs exactly as for a UI edit. Names are tool-unique
+// (registered outside the KICAD_MERGED_EMBIND guard — same convention as
+// kicadCollabTestSetPadSize), so the merged image needs no dispatcher.
+
+// Commit a freshly-built board item; returns its uuid.
+static std::string pcbCollabTestCommitAdd( BOARD_ITEM* aItem, const wxChar* aMsg )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+    {
+        delete aItem;
+        return "";
+    }
+
+    std::string id = toUtf8( aItem->m_Uuid.AsString() );
+    wxString    msg( aMsg );
+
+    pcbjam_collab::runOnFiber( fr, [fr, aItem, msg]() {
+        BOARD_COMMIT commit( fr );
+        commit.Add( aItem );
+        commit.Push( msg );
+    } );
+
+    return id;
+}
+
+std::string pcbCollabTestAddTrack( int aX1, int aY1, int aX2, int aY2, int aWidth,
+                                   std::string aLayer )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return "";
+
+    BOARD*     board = fr->GetBoard();
+    PCB_TRACK* track = new PCB_TRACK( board );
+    track->SetStart( VECTOR2I( aX1, aY1 ) );
+    track->SetEnd( VECTOR2I( aX2, aY2 ) );
+    track->SetWidth( aWidth );
+    track->SetLayer( board->GetLayerID( wxString::FromUTF8( aLayer.c_str() ) ) );
+    return pcbCollabTestCommitAdd( track, wxT( "Collab test add track" ) );
+}
+
+std::string pcbCollabTestAddVia( int aX, int aY, int aSize, int aDrill )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return "";
+
+    PCB_VIA* via = new PCB_VIA( fr->GetBoard() );
+    via->SetPosition( VECTOR2I( aX, aY ) );
+    via->SetWidth( aSize );
+    via->SetDrill( aDrill );
+    return pcbCollabTestCommitAdd( via, wxT( "Collab test add via" ) );
+}
+
+std::string pcbCollabTestAddBoardText( std::string aText, int aX, int aY, std::string aLayer )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return "";
+
+    BOARD*    board = fr->GetBoard();
+    PCB_TEXT* text = new PCB_TEXT( board );
+    text->SetText( wxString::FromUTF8( aText.c_str() ) );
+    text->SetTextPos( VECTOR2I( aX, aY ) );
+    text->SetLayer( board->GetLayerID( wxString::FromUTF8( aLayer.c_str() ) ) );
+    return pcbCollabTestCommitAdd( text, wxT( "Collab test add text" ) );
+}
+
+// Rectangular unfilled zone outline on one layer.
+std::string pcbCollabTestAddZone( int aX1, int aY1, int aX2, int aY2, std::string aLayer )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+
+    if( !fr )
+        return "";
+
+    BOARD* board = fr->GetBoard();
+    ZONE*  zone = new ZONE( board );
+    zone->SetLayer( board->GetLayerID( wxString::FromUTF8( aLayer.c_str() ) ) );
+    zone->Outline()->NewOutline();
+    zone->Outline()->Append( aX1, aY1 );
+    zone->Outline()->Append( aX2, aY1 );
+    zone->Outline()->Append( aX2, aY2 );
+    zone->Outline()->Append( aX1, aY2 );
+    return pcbCollabTestCommitAdd( zone, wxT( "Collab test add zone" ) );
+}
+
+bool pcbCollabTestFlipBoardItem( std::string aId )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+    BOARD_ITEM*     item = testResolve( fr, aId );
+
+    if( !item )
+        return false;
+
+    pcbjam_collab::runOnFiber( fr, [fr, item]() {
+        BOARD_COMMIT commit( fr );
+        commit.Modify( item );
+        item->Flip( item->GetPosition(), FLIP_DIRECTION::LEFT_RIGHT );
+        commit.Push( wxT( "Collab test flip" ) );
+    } );
+
+    return true;
+}
+
+// aField: "Reference" | "Value" (the two mandatory text fields).
+bool pcbCollabTestSetFootprintField( std::string aId, std::string aField, std::string aText )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+    BOARD_ITEM*     item = testResolve( fr, aId );
+
+    if( !item || item->Type() != PCB_FOOTPRINT_T )
+        return false;
+
+    FOOTPRINT* fp = static_cast<FOOTPRINT*>( item );
+    wxString   text = wxString::FromUTF8( aText.c_str() );
+    bool       isRef = ( aField == "Reference" );
+
+    if( !isRef && aField != "Value" )
+        return false;
+
+    pcbjam_collab::runOnFiber( fr, [fr, fp, text, isRef]() {
+        BOARD_COMMIT commit( fr );
+        commit.Modify( fp );
+
+        if( isRef )
+            fp->SetReference( text );
+        else
+            fp->SetValue( text );
+
+        commit.Push( wxT( "Collab test footprint field" ) );
+    } );
+
+    return true;
+}
+
+bool pcbCollabTestSetBoardItemLocked( std::string aId, bool aLocked )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+    BOARD_ITEM*     item = testResolve( fr, aId );
+
+    if( !item )
+        return false;
+
+    pcbjam_collab::runOnFiber( fr, [fr, item, aLocked]() {
+        BOARD_COMMIT commit( fr );
+        commit.Modify( item );
+        item->SetLocked( aLocked );
+        commit.Push( wxT( "Collab test lock" ) );
+    } );
+
+    return true;
+}
+
+// By-uuid variant of MoveFirst (same fiber + BOARD_COMMIT body).
+bool pcbCollabTestMoveBoardItem( std::string aId, int aDx, int aDy )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+    BOARD_ITEM*     item = testResolve( fr, aId );
+
+    if( !item )
+        return false;
+
+    pcbjam_collab::runOnFiber( fr, [fr, item, aDx, aDy]() { collabTestMove( fr, item, aDx, aDy ); } );
+    return true;
+}
+
+// Duplicate (fresh uuids — exercises the FOOTPRINT copy-ctor uuid class).
+std::string pcbCollabTestDuplicateBoardItem( std::string aId, int aDx, int aDy )
+{
+    PCB_EDIT_FRAME* fr = pcbFrame();
+    BOARD_ITEM*     item = testResolve( fr, aId );
+
+    if( !item )
+        return "";
+
+    if( item->GetParentFootprint() )
+        return "";                          // duplicate roots only
+
+    BOARD_ITEM* dup = item->Duplicate( /*addToParentGroup*/ false );
+    dup->Move( VECTOR2I( aDx, aDy ) );
+
+    std::string id = toUtf8( dup->m_Uuid.AsString() );
+
+    pcbjam_collab::runOnFiber( fr, [fr, dup]() {
+        BOARD_COMMIT commit( fr );
+        commit.Add( dup );
+        commit.Push( wxT( "Collab test duplicate" ) );
+    } );
+
+    return id;
+}
+
 // Wrapper to return footprints as vector for JS iteration
 std::vector<FOOTPRINT*> Board_GetFootprints(BOARD* board) {
     if (!board) return {};
@@ -2078,6 +2286,16 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
     // pcbnew-only ysync-review repro hooks (names not shared with eeschema).
     function("kicadCollabTestSetPadSize", &pcbCollabTestSetPadSize);
     function("kicadCollabTestMoveEndpoint", &pcbCollabTestMoveEndpoint);
+    // drift-trio phase B action hooks (tool-unique names, merged-image safe).
+    function("kicadCollabTestAddTrack", &pcbCollabTestAddTrack);
+    function("kicadCollabTestAddVia", &pcbCollabTestAddVia);
+    function("kicadCollabTestAddBoardText", &pcbCollabTestAddBoardText);
+    function("kicadCollabTestAddZone", &pcbCollabTestAddZone);
+    function("kicadCollabTestFlipBoardItem", &pcbCollabTestFlipBoardItem);
+    function("kicadCollabTestSetFootprintField", &pcbCollabTestSetFootprintField);
+    function("kicadCollabTestSetBoardItemLocked", &pcbCollabTestSetBoardItemLocked);
+    function("kicadCollabTestMoveBoardItem", &pcbCollabTestMoveBoardItem);
+    function("kicadCollabTestDuplicateBoardItem", &pcbCollabTestDuplicateBoardItem);
 
 #ifndef KICAD_MERGED_EMBIND
     // JS names ALSO registered by eeschema_embind.cpp — in the merged image these are

@@ -7,11 +7,13 @@ import {
   TRIO_SCH,
   type ToolCfg,
   SYM1,
+  WIRE1,
   WIRE2,
   FP1,
   PAD1,
   VIA1,
   SEG1,
+  SEG2,
   callHook,
   closeTrio,
   drift,
@@ -245,3 +247,109 @@ test.describe("drift trio — pcbnew segment edit (envelope-parse change path)",
     await closeTrio(trio);
   });
 });
+
+// ── S1 catalog: every phase-B action primitive, A/B alternating, sweep each ──
+// One trio session per tool; each step runs on its actor, converges, and the
+// full oracle sweep must stay silent. A step that returns a uuid parks it in
+// `ctx` for later steps ("A adds a symbol → B moves THAT symbol").
+
+type CatalogStep = {
+  name: string;
+  actor: "A" | "B";
+  run(page: import("@playwright/test").Page, ctx: Record<string, string>): Promise<void>;
+};
+
+async function hookUuid(
+  page: import("@playwright/test").Page,
+  ctx: Record<string, string>,
+  key: string,
+  fn: string,
+  ...args: (string | number)[]
+): Promise<void> {
+  const uuid = await callHook<string>(page, fn, ...args);
+  expect(uuid, `${fn} must return a uuid`).toMatch(/[0-9a-f-]{36}/);
+  ctx[key] = uuid;
+}
+
+async function hookOk(
+  page: import("@playwright/test").Page,
+  fn: string,
+  ...args: (string | number | boolean)[]
+): Promise<void> {
+  expect(await callHook<boolean>(page, fn, ...(args as (string | number)[])), `${fn} must hit`).toBe(
+    true,
+  );
+}
+
+// eeschema IU = 1e4/mm; pcbnew IU = 1e6/mm.
+const SCH_CATALOG: CatalogStep[] = [
+  { name: "A adds a wire", actor: "A", run: (p, c) => hookUuid(p, c, "wire", "kicadCollabTestAddWire", 600000, 600000, 700000, 600000) },
+  // A junction dropped mid-wire with no branch is REDUNDANT — eeschema's
+  // connectivity cleanup deletes it in the same commit (net-zero, the landed
+  // gate would time out). A branch wire off A's wire is the realistic edit;
+  // the cleanup auto-inserts the junction at the T, which then syncs.
+  { name: "B branches a wire off A's wire", actor: "B", run: (p, c) => hookUuid(p, c, "branch", "kicadCollabTestAddWire", 650000, 600000, 650000, 650000) },
+  { name: "A adds a local label", actor: "A", run: (p, c) => hookUuid(p, c, "label", "kicadCollabTestAddLabel", "label", "NET_A", 620000, 600000) },
+  { name: "B adds a global label", actor: "B", run: (p, c) => hookUuid(p, c, "glabel", "kicadCollabTestAddLabel", "global", "VCC", 700000, 600000) },
+  { name: "A adds a hier label", actor: "A", run: (p, c) => hookUuid(p, c, "hlabel", "kicadCollabTestAddLabel", "hier", "H1", 640000, 600000) },
+  { name: "B adds a no-connect", actor: "B", run: (p, c) => hookUuid(p, c, "nc", "kicadCollabTestAddNoConnect", 710000, 600000) },
+  { name: "A places a symbol from the doc lib", actor: "A", run: (p, c) => hookUuid(p, c, "sym2", "kicadCollabTestAddSymbol", "Device:R", 800000, 800000, "R2") },
+  { name: "B moves that symbol", actor: "B", run: (p, c) => hookOk(p, "kicadCollabTestMoveSchItem", c.sym2!, 40000, 0) },
+  { name: "A mirrors it", actor: "A", run: (p, c) => hookOk(p, "kicadCollabTestMirrorSchItem", c.sym2!, true) },
+  { name: "B duplicates it", actor: "B", run: (p, c) => hookUuid(p, c, "sym3", "kicadCollabTestDuplicateSchItem", c.sym2!, 100000, 0) },
+  { name: "A renames the duplicate's value", actor: "A", run: (p, c) => hookOk(p, "kicadCollabTestSetFieldText", c.sym3!, "dup-R") },
+  { name: "B deletes the fixture wire", actor: "B", run: (p) => hookOk(p, "kicadCollabTestRemoveItem", WIRE1) },
+];
+
+const PCB_CATALOG: CatalogStep[] = [
+  { name: "A adds a track", actor: "A", run: (p, c) => hookUuid(p, c, "track", "kicadCollabTestAddTrack", 50000000, 90000000, 60000000, 90000000, 300000, "F.Cu") },
+  { name: "B adds a via", actor: "B", run: (p, c) => hookUuid(p, c, "via2", "kicadCollabTestAddVia", 55000000, 90000000, 800000, 400000) },
+  { name: "A adds board text", actor: "A", run: (p, c) => hookUuid(p, c, "text", "kicadCollabTestAddBoardText", "T1", 70000000, 90000000, "F.SilkS") },
+  { name: "B adds a zone", actor: "B", run: (p, c) => hookUuid(p, c, "zone", "kicadCollabTestAddZone", 30000000, 30000000, 40000000, 40000000, "F.Cu") },
+  { name: "A flips the footprint", actor: "A", run: (p) => hookOk(p, "kicadCollabTestFlipBoardItem", FP1) },
+  { name: "B edits the footprint value", actor: "B", run: (p) => hookOk(p, "kicadCollabTestSetFootprintField", FP1, "Value", "R-edited") },
+  { name: "A locks a segment", actor: "A", run: (p) => hookOk(p, "kicadCollabTestSetBoardItemLocked", SEG2, true) },
+  { name: "B moves the fixture via", actor: "B", run: (p) => hookOk(p, "kicadCollabTestMoveBoardItem", VIA1, 2000000, 0) },
+  { name: "A duplicates the footprint", actor: "A", run: (p, c) => hookUuid(p, c, "fp2", "kicadCollabTestDuplicateBoardItem", FP1, 10000000, 0) },
+  { name: "B deletes a fixture segment", actor: "B", run: (p) => hookOk(p, "kicadCollabTestRemoveItem", SEG1) },
+];
+
+for (const [cfg, label, catalog] of [
+  [TRIO_SCH, "eeschema", SCH_CATALOG],
+  [TRIO_PCB, "pcbnew", PCB_CATALOG],
+] as const) {
+  test.describe(`drift trio — ${label} S1 action catalog`, () => {
+    test.describe.configure({ timeout: 900000 });
+
+    test(`${label}: full catalog, A/B alternating, sweep after every step`, async ({
+      context,
+      testLogger,
+    }) => {
+      skipFirefox();
+      const room = `drift-trio-cat-${label}-${test.info().workerIndex}`;
+      const trio = await openTrio(context, cfg, room);
+      const ctx: Record<string, string> = {};
+
+      for (const step of catalog) {
+        await test.step(step.name, async () => {
+          const actor = step.actor === "A" ? trio.A : trio.B;
+          // The hooks commit on a fiber: settleConverged alone can pass on the
+          // PRE-action state (all tabs still equal) and the sweep then reads
+          // legitimate mid-propagation state as drift. Gate on the actor's own
+          // save changing first, so convergence is convergence ON the edit.
+          const before = await modelText(actor, cfg);
+          await step.run(actor, ctx);
+          await expect
+            .poll(() => modelText(actor, cfg), { timeout: 15000, intervals: [300] })
+            .not.toBe(before);
+          await settleConverged(trio, cfg);
+          await oracleSweep(trio, cfg);
+        });
+      }
+
+      expect(await undoDepth(trio.C), "observer undo stack").toBe(0);
+      expect(hasAbort(testLogger), "no WASM abort").toBe(false);
+      await closeTrio(trio);
+    });
+  });
+}
